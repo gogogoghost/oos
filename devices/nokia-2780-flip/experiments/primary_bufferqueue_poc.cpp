@@ -54,7 +54,7 @@ class PrimaryConsumer final : public android::ConsumerBase {
     mConsumer->setConsumerName(android::String8("primary-green-poc"));
     mConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_RENDER |
                                     GRALLOC_USAGE_HW_COMPOSER);
-    mConsumer->setDefaultBufferFormat(android::PIXEL_FORMAT_RGBA_8888);
+    mConsumer->setDefaultBufferFormat(android::PIXEL_FORMAT_RGB_565);
     mConsumer->setDefaultBufferSize(240, 320);
     mConsumer->setMaxAcquiredBufferCount(3);
   }
@@ -225,6 +225,11 @@ int main() {
   android::sp<PrimaryConsumer> primary_consumer =
       new PrimaryConsumer(consumer, display);
   android::sp<android::Surface> surface = new android::Surface(producer, true);
+  if (ANativeWindow_setBuffersGeometry(surface.get(), 240, 320,
+                                       android::PIXEL_FORMAT_RGB_565) != 0) {
+    std::fprintf(stderr, "failed to force RGB565 BufferQueue geometry\n");
+    return 1;
+  }
 
   EGLDisplay egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
   if (egl_display == EGL_NO_DISPLAY || !check_egl(eglInitialize(egl_display, nullptr, nullptr), "eglInitialize")) {
@@ -233,7 +238,7 @@ int main() {
   const EGLint config_attributes[] = {
       EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-      EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+      EGL_RED_SIZE, 5, EGL_GREEN_SIZE, 6, EGL_BLUE_SIZE, 5,
       EGL_ALPHA_SIZE, 0,
       EGL_DEPTH_SIZE, 24,
       EGL_NONE,

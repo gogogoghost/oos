@@ -1,0 +1,20 @@
+import os
+
+from cerbero.enums import DistroVersion
+
+# The Nokia 2780 Flip runs Android 10 (API 29), not the API 31 default used by
+# upstream WPE Android builds. Keep every generated ELF compatible with Bionic
+# and libandroid from this device image.
+target_distro_version = DistroVersion.ANDROID_Q
+toolchain_prefix = os.environ.get(
+    "KAIOS_WPE_NDK", "/home/jax/Android/Sdk/ndk/magisk")
+variants.override('norust')
+
+_project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_cerbero_root = os.path.join(_project_root, "third_party", "wpe-android-cerbero")
+prefix = os.path.join(_project_root, "build", "wpe-sysroot", "nokia-2780-flip")
+# ICU and several Cerbero recipes locate host-built tools relative to this
+# directory. Keep target and build-tool sources in the same Cerbero build tree.
+sources = os.path.join(_cerbero_root, "build", "sources", "android_armv7")
+local_sources = os.path.join(_project_root, "build", "wpe-source-cache")
+logs = os.path.join(_project_root, "build", "wpe-logs")

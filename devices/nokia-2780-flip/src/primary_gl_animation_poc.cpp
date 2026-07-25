@@ -258,16 +258,22 @@ int main() {
     glDisableVertexAttribArray(0);
     glFinish();
 
+    if (display->setClientTarget(0, buffer, android::Fence::NO_FENCE,
+                                 android::ui::Dataspace::UNKNOWN) !=
+        HWC2::Error::None) {
+      std::fprintf(stderr, "HWC setClientTarget failed\n");
+      return false;
+    }
     uint32_t changes = 0;
     uint32_t requests = 0;
     const HWC2::Error validate_error = display->validate(&changes, &requests);
+    if (validate_error == HWC2::Error::HasChanges &&
+        display->acceptChanges() != HWC2::Error::None) {
+      std::fprintf(stderr, "HWC acceptChanges failed\n");
+      return false;
+    }
     if ((validate_error != HWC2::Error::None &&
          validate_error != HWC2::Error::HasChanges) ||
-        changes != 0 || requests != 0 ||
-        display->acceptChanges() != HWC2::Error::None ||
-        display->setClientTarget(0, buffer, android::Fence::NO_FENCE,
-                                 android::ui::Dataspace::UNKNOWN) !=
-            HWC2::Error::None ||
         display->present(&present_fence) != HWC2::Error::None) {
       std::fprintf(stderr,
                    "HWC animation frame failed: validate=%d changes=%u requests=%u\n",
