@@ -1,0 +1,22 @@
+diff --git a/widget/gonk/hwchal/android_10/HWC2.cpp b/widget/gonk/hwchal/android_10/HWC2.cpp
+index a87452324d..fa6189f4fa 100644
+--- a/widget/gonk/hwchal/android_10/HWC2.cpp
++++ b/widget/gonk/hwchal/android_10/HWC2.cpp
+@@ -102,6 +102,8 @@ Device::Device(const std::string& serviceName)
+   loadCapabilities();
+ }
+ 
++Device::~Device() = default;
++
+ void Device::registerCallback(ComposerCallback* callback, int32_t sequenceId) {
+diff --git a/widget/gonk/hwchal/android_10/HWC2.h b/widget/gonk/hwchal/android_10/HWC2.h
+index 86f50851fb..34a430dac0 100644
+--- a/widget/gonk/hwchal/android_10/HWC2.h
++++ b/widget/gonk/hwchal/android_10/HWC2.h
+@@ -82,6 +82,7 @@ class Device {
+   explicit Device(std::unique_ptr<android::Hwc2::Composer> composer);
+ 
+   Device(const std::string& serviceName);
++  ~Device();
+ 
+   void registerCallback(ComposerCallback* callback, int32_t sequenceId);

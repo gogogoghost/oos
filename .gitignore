@@ -1,0 +1,22 @@
+# Local configuration
+.env
+
+# Generated code and build outputs
+/build/
+/build-*/
+/generated/
+
+# Device dumps, images, traces, and extracted system artifacts
+/artifacts/
+/system-stock/
+/system-stock.img
+*.img
+*.trace
+
+# External source checkouts retain their own repositories and are not vendored.
+/third_party/*
+!/third_party/README.md
+
+# Local agent state
+/.agents/
+/.codex/
