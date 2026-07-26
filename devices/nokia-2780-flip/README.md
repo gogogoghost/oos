@@ -22,9 +22,9 @@ target, EGL/GLES blit path, panel backlights, retained WPE frame, and fast
 primary/cover switching. The public header uses a PIMPL boundary so HWC2,
 GraphicBuffer, and EGL implementation types do not leak into application code.
 
-The production `oos` entry point is currently empty and does not link these
-libraries yet. They are ready for use when the application lifecycle is
-defined.
+The production `oos` entry point uses these libraries to present the packaged
+boot image, initialize WPE, load the launcher, retain the primary frame, and
+forward evdev keys to the Web System UI.
 
 Physical keys are captured by the device-independent `oos_input` library.
 It discovers nodes by `EV_KEY` capability rather than relying on unstable

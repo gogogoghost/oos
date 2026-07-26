@@ -1,7 +1,7 @@
-namespace oos {
+namespace oos::platform {
 
-int run() { return 0; }
+int run(int argc, char **argv);
 
-} // namespace oos
+} // namespace oos::platform
 
-int main() { return oos::run(); }
+int main(int argc, char **argv) { return oos::platform::run(argc, argv); }

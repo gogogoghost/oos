@@ -105,6 +105,20 @@ target_link_libraries(oos_nokia_2780_wpe_display PUBLIC
   "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEBackend-android.so"
   EGL GLESv2 android)
 
+target_sources(oos PRIVATE src/oos_runtime.cpp)
+oos_nokia_2780_android_target(oos)
+target_include_directories(oos PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  "${CMAKE_SOURCE_DIR}/core/include"
+  ${NOKIA_2780_WPE_INCLUDES})
+target_link_libraries(oos PRIVATE
+  oos_input
+  oos_nokia_2780_wpe_display
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libpng16.so")
+
 add_library(oos_nokia_2780_network STATIC
   "${CMAKE_SOURCE_DIR}/core/src/wifi_manager.cpp"
   "${CMAKE_SOURCE_DIR}/core/src/ip_manager.cpp"

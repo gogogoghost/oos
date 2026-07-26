@@ -6,6 +6,9 @@
 /build-*/
 /generated/
 /dist/
+/launcher/dist/
+/launcher/node_modules/
+/launcher/*.tsbuildinfo
 
 # Device dumps, images, traces, and extracted system artifacts
 /artifacts/

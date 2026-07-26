@@ -65,9 +65,16 @@ DESTINATION="$OUTPUT_DIR/$RES_NAME"
 
 OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
 WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
+LAUNCHER_DIST="$ROOT_DIR/launcher/dist"
+BOOT_SPLASH="$ROOT_DIR/assets/boot/$DEVICE/boot-splash.png"
+LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 package_require_file "$OOS_BINARY"
 package_require_directory "$WPE_SYSROOT/lib"
 package_require_directory "$WPE_SYSROOT/libexec"
+"$ROOT_DIR/scripts/build-launcher.sh"
+package_require_directory "$LAUNCHER_DIST"
+package_require_file "$BOOT_SPLASH"
+package_require_file "$LUCIDE_LICENSE"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -93,7 +100,13 @@ cleanup() {
 trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
-  "$STAGING/share" "$STAGING/etc"
+  "$STAGING/share/oos/launcher" "$STAGING/share/licenses/oos" \
+  "$STAGING/etc"
+
+rsync -a "$LAUNCHER_DIST/" "$STAGING/share/oos/launcher/"
+install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
+install -m 0644 "$LUCIDE_LICENSE" \
+  "$STAGING/share/licenses/oos/Lucide.txt"
 
 declare -A COPIED_ELF=()
 declare -a ELF_QUEUE=()

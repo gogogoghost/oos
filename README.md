@@ -1,13 +1,15 @@
 # Orange OS
 
 Orange OS (`oos`) is a native C++ system shell intended to replace B2G on
-KaiOS devices. The production executable currently has an intentionally empty
-entry point; device enablement and the WPE WebKit display path are being built
-and validated independently before application logic is added.
+KaiOS devices. The production executable presents a native boot frame, starts
+WPE WebKit, loads the Solid.js launcher, and forwards physical keys into its
+Web System UI.
 
 ## Repository Layout
 
 - `app/main.cpp`: production `oos` process entry point.
+- `launcher`: Solid.js and Tailwind CSS Web System UI launcher, built into
+  each versioned runtime package.
 - `core`: device-independent runtime modules. `oos_input` provides reusable
   Linux evdev key capture for the future production event loop. The network
   interfaces define reusable Wi-Fi, IP, and Bluetooth lifecycle APIs. The
@@ -49,6 +51,7 @@ Build the WPE runtime, configure the Android target, and compile Orange OS:
 ./scripts/build-wpe-sysroot.sh
 ./scripts/configure-android.sh nokia-2780-flip
 cmake --build build/android-nokia-2780-flip -j8
+./scripts/build-launcher.sh
 ```
 
 The outputs are:

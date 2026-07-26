@@ -20,6 +20,7 @@ public:
   WpeDisplayManager &operator=(const WpeDisplayManager &) = delete;
 
   bool initialize();
+  bool showBootFrame(const uint16_t *rgb565_pixels);
   void present(WPEAndroidViewBackend *backend, WPEAndroidBuffer *buffer,
                int acquire_fence_fd);
   void refresh();

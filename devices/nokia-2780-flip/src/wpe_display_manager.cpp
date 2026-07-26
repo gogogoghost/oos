@@ -133,6 +133,27 @@ public:
     return clearAndSubmitClientTarget();
   }
 
+  bool showBootFrame(const uint16_t *pixels) {
+    std::lock_guard<std::mutex> lock(present_mutex_);
+    if (!pixels || !owns_display_state_ || !primary_active_ ||
+        !blitRgb565ToClientTarget(pixels)) {
+      return false;
+    }
+    last_target_ = client_target_;
+    last_slot_ = 0;
+    if (!submitClientTarget(0, client_target_, android::Fence::NO_FENCE))
+      return false;
+    usleep(kPanelTransferSettleUs);
+    if (!submitClientTarget(0, client_target_, android::Fence::NO_FENCE))
+      return false;
+    usleep(kPanelTransferSettleUs);
+    if (!setBacklight(255))
+      return false;
+    std::fprintf(stderr, "primary boot frame presented\n");
+    std::fflush(stderr);
+    return true;
+  }
+
   void present(WPEAndroidViewBackend *backend, WPEAndroidBuffer *buffer,
                int acquire_fence_fd) {
     std::lock_guard<std::mutex> lock(present_mutex_);
@@ -519,6 +540,42 @@ private:
     return error == GL_NO_ERROR;
   }
 
+  bool blitRgb565ToClientTarget(const uint16_t *pixels) {
+    glBindTexture(GL_TEXTURE_2D, source_texture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, WpeDisplayManager::kPrimaryWidth,
+                 WpeDisplayManager::kPrimaryHeight, 0, GL_RGB,
+                 GL_UNSIGNED_SHORT_5_6_5, pixels);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    glViewport(0, 0, WpeDisplayManager::kPrimaryWidth,
+               WpeDisplayManager::kPrimaryHeight);
+    glUseProgram(program_);
+    constexpr GLfloat positions[] = {-1.f, -1.f, 1.f, -1.f,
+                                     -1.f, 1.f,  1.f, 1.f};
+    // Match the orientation already established by the WPE source buffer path.
+    constexpr GLfloat texcoords[] = {0.f, 0.f, 1.f, 0.f, 0.f, 1.f, 1.f, 1.f};
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, source_texture_);
+    glUniform1i(source_uniform_, 0);
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, positions);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
+    glFinish();
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR)
+      std::fprintf(stderr, "boot frame GPU upload GL error: 0x%x\n", error);
+    return error == GL_NO_ERROR;
+  }
+
   bool setBacklight(int value) {
     FILE *file = std::fopen("/sys/class/leds/lcd-backlight/brightness", "w");
     if (!file)
@@ -593,6 +650,10 @@ WpeDisplayManager::WpeDisplayManager(bool reveal_first_frame)
 WpeDisplayManager::~WpeDisplayManager() = default;
 
 bool WpeDisplayManager::initialize() { return impl_->initialize(); }
+
+bool WpeDisplayManager::showBootFrame(const uint16_t *rgb565_pixels) {
+  return impl_->showBootFrame(rgb565_pixels);
+}
 
 void WpeDisplayManager::present(WPEAndroidViewBackend *backend,
                                 WPEAndroidBuffer *buffer,
