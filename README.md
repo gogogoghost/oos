@@ -9,7 +9,8 @@ and validated independently before application logic is added.
 
 - `app/main.cpp`: production `oos` process entry point.
 - `core`: device-independent runtime modules. `oos_input` provides reusable
-  Linux evdev key capture for the future production event loop.
+  Linux evdev key capture for the future production event loop. The network
+  interfaces define reusable Wi-Fi, IP, and Bluetooth lifecycle APIs.
 - `devices/nokia-2780-flip/include/oos/nokia2780`: reusable public display
   interfaces for the validated Nokia 2780 implementation.
 - `devices/nokia-2780-flip/src`: device display and WPE/HWC implementation.
@@ -96,6 +97,19 @@ API ownership rules, and individual test targets.
 
 See [docs/input.md](docs/input.md) for the shared key input API, the detected
 Nokia 2780 input topology, exclusive-grab policy, and visual test workflow.
+
+## Network Tests
+
+Build, deploy, and run the recovery-safe Nokia 2780 Wi-Fi and Bluetooth smoke
+test with:
+
+```sh
+./scripts/test-network.sh smoke
+```
+
+See [docs/network.md](docs/network.md) for the implemented headless APIs,
+validated device results, commands requiring a known hotspot or Bluetooth
+peer, and the remaining daily-use connectivity surface.
 
 ## Runtime Packaging
 
