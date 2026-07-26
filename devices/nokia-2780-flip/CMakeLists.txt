@@ -3,6 +3,8 @@ set(NOKIA_2780_HWC_DIR
     "${THIRD_PARTY_DIR}/gecko-b2g/widget/gonk/hwchal/android_10")
 set(NOKIA_2780_WPE_SYSROOT
     "${CMAKE_SOURCE_DIR}/build/wpe-sysroot/nokia-2780-flip")
+set(NOKIA_2780_RADIO_IMPL_DIR
+    "${CMAKE_SOURCE_DIR}/build/generated/hidl-android10-impl/radio-1.0")
 
 set(NOKIA_2780_ANDROID_INCLUDES
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -115,6 +117,25 @@ target_link_libraries(oos_nokia_2780_network PUBLIC
   "${NOKIA_2780_SYSTEM_LIB_DIR}/libnetutils.so"
   "${NOKIA_2780_SYSTEM_LIB_DIR}/liblog.so")
 
+add_library(oos_nokia_2780_modem STATIC
+  "${CMAKE_SOURCE_DIR}/core/src/modem_manager.cpp"
+  "${NOKIA_2780_RADIO_IMPL_DIR}/RadioResponse.cpp"
+  "${NOKIA_2780_RADIO_IMPL_DIR}/RadioIndication.cpp")
+oos_nokia_2780_android_target(oos_nokia_2780_modem)
+target_include_directories(oos_nokia_2780_modem PUBLIC
+  "${CMAKE_SOURCE_DIR}/core/include")
+target_include_directories(oos_nokia_2780_modem PRIVATE
+  "${NOKIA_2780_RADIO_IMPL_DIR}")
+target_link_libraries(oos_nokia_2780_modem PUBLIC
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libc++.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/android.hardware.radio@1.0.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libhidlbase.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libhidltransport.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libhwbinder.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libutils.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libcutils.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/liblog.so")
+
 if(OOS_BUILD_DEVICE_TESTS)
   add_executable(oos_test_nokia_2780_primary_gl
     tests/primary_gl_animation_test.cpp)
@@ -174,6 +195,12 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_link_libraries(oos_test_nokia_2780_network_headless PRIVATE
     oos_nokia_2780_network)
 
+  add_executable(oos_test_nokia_2780_modem_headless
+    tests/modem_headless_test.cpp)
+  oos_nokia_2780_android_target(oos_test_nokia_2780_modem_headless)
+  target_link_libraries(oos_test_nokia_2780_modem_headless PRIVATE
+    oos_nokia_2780_modem)
+
   set_target_properties(
     oos_test_nokia_2780_primary_gl
     oos_test_nokia_2780_primary_bufferqueue
@@ -182,6 +209,7 @@ if(OOS_BUILD_DEVICE_TESTS)
     oos_test_nokia_2780_wpe_display
     oos_test_nokia_2780_key_input
     oos_test_nokia_2780_network_headless
+    oos_test_nokia_2780_modem_headless
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${CMAKE_BINARY_DIR}/bin/tests/nokia-2780-flip")
 endif()

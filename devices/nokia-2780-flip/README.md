@@ -32,6 +32,12 @@ It discovers nodes by `EV_KEY` capability rather than relying on unstable
 headset buttons, and flip hall sensor are all visible through this API. See
 `docs/input.md` for the observed topology and ownership contract.
 
+`oos_nokia_2780_modem` provides the Nokia 2780 Radio HIDL backend for the
+device-independent `oos::modem::ModemManager` API. It talks to the stock
+`IRadio/slot1` service owned by qcrild and keeps Android HIDL types behind the
+core PIMPL boundary. See `docs/modem.md` for the validated no-SIM surface and
+the SIM-dependent telephony roadmap.
+
 ## Validated Display Paths
 
 The primary display is 240x320 RGB565. WPE WebKit supplies Android hardware
@@ -76,12 +82,14 @@ All executable test entry points and fixtures live under `tests`:
 - `oos_test_nokia_2780_primary_bufferqueue`: exploratory BufferQueue path.
 - `oos_test_nokia_2780_key_input`: WPE visualizer for raw Linux key codes,
   actions, and source devices.
+- `oos_test_nokia_2780_modem_headless`: read-only Radio HAL and baseband probe.
 
 Run the validated fast switch test with:
 
 ```sh
 ./scripts/test-single-process-switch.sh
 ./scripts/test-key-input.sh
+./scripts/test-modem.sh smoke
 ```
 
 The device launcher creates a temporary chroot and overlays only its view of

@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 HOST_BUILD_DIR="$ROOT_DIR/build/host-hidl-gen"
 OUTPUT_DIR="$ROOT_DIR/build/generated/hidl-android10"
+RADIO_IMPL_DIR="$ROOT_DIR/build/generated/hidl-android10-impl/radio-1.0"
 
 "$ROOT_DIR/scripts/apply-third-party-patches.sh"
 cmake -S "$ROOT_DIR/tools/kaios-hidl-gen" -B "$HOST_BUILD_DIR"
@@ -26,8 +27,17 @@ for PACKAGE in \
   android.hardware.graphics.composer@2.2 \
   android.hardware.graphics.composer@2.3 \
   android.hardware.media@1.0 \
-  android.hardware.power@1.0; do
+  android.hardware.power@1.0 \
+  android.hardware.radio@1.0; do
   "$HIDL_GEN" -o "$OUTPUT_DIR" -L c++-headers \
     -r "android.hardware:$HARDWARE_ROOT" \
     -r "android.hidl:$HIDL_ROOT" "$PACKAGE"
+done
+
+mkdir -p "$RADIO_IMPL_DIR"
+for INTERFACE in IRadioResponse IRadioIndication; do
+  "$HIDL_GEN" -o "$RADIO_IMPL_DIR" -L c++-impl \
+    -r "android.hardware:$HARDWARE_ROOT" \
+    -r "android.hidl:$HIDL_ROOT" \
+    "android.hardware.radio@1.0::$INTERFACE"
 done
