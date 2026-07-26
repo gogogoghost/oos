@@ -26,8 +26,14 @@ for PACKAGE in \
   android.hardware.graphics.composer@2.1 \
   android.hardware.graphics.composer@2.2 \
   android.hardware.graphics.composer@2.3 \
+  android.hardware.camera.common@1.0 \
+  android.hardware.camera.metadata@3.2 \
+  android.hardware.camera.device@1.0 \
+  android.hardware.camera.device@3.2 \
+  android.hardware.camera.provider@2.4 \
   android.hardware.media@1.0 \
   android.hardware.power@1.0 \
+  android.hardware.vibrator@1.0 \
   android.hardware.radio@1.0; do
   "$HIDL_GEN" -o "$OUTPUT_DIR" -L c++-headers \
     -r "android.hardware:$HARDWARE_ROOT" \

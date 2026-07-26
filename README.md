@@ -11,7 +11,9 @@ and validated independently before application logic is added.
 - `core`: device-independent runtime modules. `oos_input` provides reusable
   Linux evdev key capture for the future production event loop. The network
   interfaces define reusable Wi-Fi, IP, and Bluetooth lifecycle APIs. The
-  modem interface exposes Radio HAL state without leaking HIDL types.
+  modem interface exposes Radio HAL state without leaking HIDL types. Hardware
+  interfaces cover audio, vibration, power/flip lifecycle, camera/flash, and
+  hardware video codecs.
 - `devices/nokia-2780-flip/include/oos/nokia2780`: reusable public display
   interfaces for the validated Nokia 2780 implementation.
 - `devices/nokia-2780-flip/src`: device display and WPE/HWC implementation.
@@ -123,6 +125,19 @@ Build, deploy, and run the read-only Nokia 2780 Radio HAL smoke test with:
 See [docs/modem.md](docs/modem.md) for the reusable modem API, validated no-SIM
 results, privacy and radio-power constraints, and the SIM-dependent call, SMS,
 and packet-data work that remains.
+
+## Hardware Tests
+
+Build, deploy, and run the Nokia 2780 audio, vibration, power, camera, flash,
+and Qualcomm H.264 codec smoke tests with:
+
+```sh
+./scripts/test-hardware.sh smoke
+```
+
+See [docs/hardware.md](docs/hardware.md) for the reusable native APIs, verified
+device results, Camera2 firmware limitation, USB suspend boundary, and future
+Web System UI integration contract.
 
 ## Runtime Packaging
 

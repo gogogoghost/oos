@@ -28,6 +28,7 @@ set(NOKIA_2780_ANDROID_INCLUDES
   "${THIRD_PARTY_DIR}/aosp-system-core/libsync/include"
   "${THIRD_PARTY_DIR}/aosp-system-core/libsystem/include"
   "${THIRD_PARTY_DIR}/aosp-system-core/libutils/include"
+  "${THIRD_PARTY_DIR}/aosp-system-core/libsuspend/include"
   "${THIRD_PARTY_DIR}/aosp-system-libhidl/base/include"
   "${THIRD_PARTY_DIR}/aosp-system-libhidl/transport/include"
   "${THIRD_PARTY_DIR}/aosp-system-libhidl/transport/token/1.0/utils/include"
@@ -117,6 +118,36 @@ target_link_libraries(oos_nokia_2780_network PUBLIC
   "${NOKIA_2780_SYSTEM_LIB_DIR}/libnetutils.so"
   "${NOKIA_2780_SYSTEM_LIB_DIR}/liblog.so")
 
+add_library(oos_nokia_2780_hardware STATIC
+  "${CMAKE_SOURCE_DIR}/core/src/audio_manager.cpp"
+  "${CMAKE_SOURCE_DIR}/core/src/codec_manager.cpp"
+  src/camera_manager.cpp
+  src/power_manager.cpp
+  src/vibrator_manager.cpp)
+oos_nokia_2780_android_target(oos_nokia_2780_hardware)
+target_include_directories(oos_nokia_2780_hardware PUBLIC
+  "${CMAKE_SOURCE_DIR}/core/include")
+target_link_libraries(oos_nokia_2780_hardware PUBLIC
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libc++.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libaaudio.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libmediandk.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/android.hardware.camera.common@1.0.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/android.hardware.camera.device@1.0.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/android.hardware.camera.provider@2.4.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libsuspend.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/android.hardware.power@1.0.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/android.hardware.vibrator@1.0.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libhidlbase.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libhidltransport.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libhwbinder.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libutils.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libgui.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libui.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libnativewindow.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libbinder.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libcutils.so"
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/liblog.so")
+
 add_library(oos_nokia_2780_modem STATIC
   "${CMAKE_SOURCE_DIR}/core/src/modem_manager.cpp"
   "${NOKIA_2780_RADIO_IMPL_DIR}/RadioResponse.cpp"
@@ -201,6 +232,12 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_link_libraries(oos_test_nokia_2780_modem_headless PRIVATE
     oos_nokia_2780_modem)
 
+  add_executable(oos_test_nokia_2780_hardware_headless
+    tests/hardware_headless_test.cpp)
+  oos_nokia_2780_android_target(oos_test_nokia_2780_hardware_headless)
+  target_link_libraries(oos_test_nokia_2780_hardware_headless PRIVATE
+    oos_nokia_2780_hardware)
+
   set_target_properties(
     oos_test_nokia_2780_primary_gl
     oos_test_nokia_2780_primary_bufferqueue
@@ -210,6 +247,7 @@ if(OOS_BUILD_DEVICE_TESTS)
     oos_test_nokia_2780_key_input
     oos_test_nokia_2780_network_headless
     oos_test_nokia_2780_modem_headless
+    oos_test_nokia_2780_hardware_headless
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${CMAKE_BINARY_DIR}/bin/tests/nokia-2780-flip")
 endif()

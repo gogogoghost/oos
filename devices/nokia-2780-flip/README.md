@@ -38,6 +38,12 @@ device-independent `oos::modem::ModemManager` API. It talks to the stock
 core PIMPL boundary. See `docs/modem.md` for the validated no-SIM surface and
 the SIM-dependent telephony roadmap.
 
+`oos_nokia_2780_hardware` provides speaker/microphone PCM, timed vibration,
+battery and flip state, wake-lock and suspend lifecycle, Camera HAL1 still
+capture and torch control, and Qualcomm H.264 encode/decode validation. Public
+types live under `core/include/oos/hardware`; Nokia-specific HIDL and
+BufferQueue details stay in the device implementation. See `docs/hardware.md`.
+
 ## Validated Display Paths
 
 The primary display is 240x320 RGB565. WPE WebKit supplies Android hardware
@@ -83,6 +89,8 @@ All executable test entry points and fixtures live under `tests`:
 - `oos_test_nokia_2780_key_input`: WPE visualizer for raw Linux key codes,
   actions, and source devices.
 - `oos_test_nokia_2780_modem_headless`: read-only Radio HAL and baseband probe.
+- `oos_test_nokia_2780_hardware_headless`: audio, vibration, power, camera,
+  flash, and hardware codec probe.
 
 Run the validated fast switch test with:
 
@@ -90,6 +98,7 @@ Run the validated fast switch test with:
 ./scripts/test-single-process-switch.sh
 ./scripts/test-key-input.sh
 ./scripts/test-modem.sh smoke
+./scripts/test-hardware.sh smoke
 ```
 
 The device launcher creates a temporary chroot and overlays only its view of
