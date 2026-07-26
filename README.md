@@ -15,6 +15,7 @@ and validated independently before application logic is added.
   investigation test programs. Test-only fixtures live under `tests/support`.
 - `devices/nokia-8110-4g`: reserved device slot; no implementation yet.
 - `scripts`: build, deployment, and test runners.
+- `packaging/scaffold`: stable device-side bootstrap script templates.
 - `third_party`: local AOSP, Gecko, KaiOS, and WPE checkouts, excluded from the
   main Git repository.
 - `patches`: tracked compatibility changes for clean third-party checkouts.
@@ -80,3 +81,19 @@ Other repeatable tests are:
 
 See `devices/nokia-2780-flip/README.md` for the hardware constraints, public
 API ownership rules, and individual test targets.
+
+## Runtime Packaging
+
+OOS deployment separates the stable chroot bootstrap from versioned `res`
+runtime packages. Here `res` contains the native `oos` executable, WPE WebKit,
+its shared libraries, and helper processes. Generate both directory and tgz
+outputs with:
+
+```sh
+./scripts/package-oos-scaffold.sh --res-version 1.0.0 --tgz
+./scripts/package-oos-res.sh 1.0.0 --activate --tgz
+```
+
+See [docs/deployment.md](docs/deployment.md) for the production
+`/system/oos`, trial `/data/local/tmp/oos`, persistent `/data/oos`, upgrade,
+mount, and lifecycle contract.
