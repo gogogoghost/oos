@@ -1,67 +1,79 @@
 # Nokia 2780 Flip
 
-This directory contains device-specific experiments and the current WPE
-runtime POC for the Nokia 2780 Flip running KaiOS 3 / Android API 29.
+This directory contains the validated Nokia 2780 Flip platform implementation
+for Orange OS and its on-device tests. The target runs KaiOS 3 on Android API
+29 and uses the stock system and vendor graphics services.
 
-## Validated Main Display Path
+## Production Libraries
 
-`nokia_2780_wpe_hello` is the current replacement-process smoke test. It
-renders the static HTML fixture with WPE WebKit, receives RGB565
-`AHardwareBuffer` frames from the WPE Android backend, and submits them as the
-primary HWC client target. The primary panel is 240x320 RGB565.
+`oos_nokia_2780_display` provides panel ownership and switching primitives:
 
-The device launcher is `scripts/run-wpe-chroot.sh`. It resets display state,
-restarts the vendor composer, adjusts the primary backlight, and launches the
-program inside an Android chroot. The chroot overlays only its own view of
-`libc++_shared.so`; it does not modify `/system`.
+- `nokia2780_prepare_primary()` prepares the HWC primary path and disables
+  fb1.
+- `nokia2780_show_cover_rgb565()` performs a standalone primary-to-cover
+  transition and retains fb1 for the caller's lifetime.
+- `nokia2780_show_cover_rgb565_after_primary_off()` and
+  `nokia2780_hide_cover()` support a long-lived process that owns its HWC
+  primary client.
 
-Use the following commands after building the WPE sysroot and Android target:
+`oos_nokia_2780_wpe_display` provides
+`oos::nokia2780::WpeDisplayManager`. It owns the HWC2 client, RGB565 gralloc
+target, EGL/GLES blit path, panel backlights, retained WPE frame, and fast
+primary/cover switching. The public header uses a PIMPL boundary so HWC2,
+GraphicBuffer, and EGL implementation types do not leak into application code.
+
+The production `oos` entry point is currently empty and does not link these
+libraries yet. They are ready for use when the application lifecycle is
+defined.
+
+## Validated Display Paths
+
+The primary display is 240x320 RGB565. WPE WebKit supplies Android hardware
+buffers, GLES copies them into a GPU/HWC-compatible RGB565 client target, and
+HWC2 presents the result. A black preroll and a settled first submission keep
+uninitialized panel memory hidden.
+
+The cover display is fb1 with 128x160 visible RGB565 pixels and a 128x320
+virtual framebuffer. The driver requires fb1 to remain open while the image is
+visible. Panel initialization and transfer are serialized before the cover
+backlight is enabled.
+
+The validated single-process switch times are approximately:
+
+- primary to cover: 622-637ms;
+- cover to primary: 439ms.
+
+These measurements exclude WebKit startup, HWC service startup, chroot mounts,
+and ADB transfers.
+
+## Hardware Constraint
+
+The stock configuration exposes the cover as
+`ro.kaios.display.ext_fb_dev=fb1`. Gecko's `NativeFramebufferDevice` copies a
+producer buffer into fb1; it is not an HWC external display or a GPU zero-copy
+scanout path.
+
+Keeping fb0 and fb1 active together causes the primary panel ESD check to read
+an invalid status and reset the primary panel. The public display manager
+therefore enforces mutual exclusion. True simultaneous output requires kernel
+or vendor HWC changes that expose the cover as a supported external display.
+
+## Tests
+
+All executable test entry points and fixtures live under `tests`:
+
+- `oos_test_nokia_2780_wpe_display`: WPE primary smoke test and the
+  single-process 3+3+3 second switch test.
+- `oos_test_nokia_2780_primary_gl`: EGL/HWC animation test.
+- `oos_test_nokia_2780_cover_secondary`: labeled cover fixture.
+- `oos_test_nokia_2780_cover_green`: solid RGB565 cover fixture.
+- `oos_test_nokia_2780_primary_bufferqueue`: exploratory BufferQueue path.
+
+Run the validated fast switch test with:
 
 ```sh
-./scripts/run-wpe-chroot.sh start
-./scripts/run-wpe-chroot.sh status
-./scripts/run-wpe-chroot.sh stop
+./scripts/test-single-process-switch.sh
 ```
 
-The default is primary-only. A reset waits for the vendor composer to return
-to `running` before the POC starts.
-
-## Cover Display
-
-The cover panel is `fb1`, 128x160 visible pixels, RGB565, with a 128x320
-virtual framebuffer. `cover_green_poc.c` and the optional cover path in
-`wpe_hello_poc.cpp` establish its direct framebuffer/backlight controls.
-
-The stock display configuration sets `ro.kaios.display.ext_fb_dev=fb1`.
-KaiOS Gecko handles that property with `NativeFramebufferDevice`: it locks a
-producer buffer for CPU reading, copies it into `/dev/graphics/fb1`, and uses
-`FBIOPUT_VSCREENINFO` to present it. RGB8888 producer buffers require a CPU
-conversion to RGB565. Thus the stock `fb1` path is not a GPU zero-copy HWC
-output.
-
-## Dual-Panel Limit
-
-The vendor HWC library contains a generic `HWCDisplayExternal` implementation,
-but the Nokia 2780 `fb1` path does not use it. It follows the direct Gecko
-framebuffer path above. When `fb0` and `fb1` are both active, the primary SPI
-panel's ESD check reads an invalid status value and resets the primary panel.
-This reproduces even when `fb1` is written only once and then left idle.
-
-For that reason `OOS_ENABLE_COVER` defaults to `0`. Setting it to `1` is an
-unsupported diagnostic experiment, not a dual-display mode. A production
-dual-panel implementation requires kernel/HWC work that exposes `fb1` as a
-real HWC external display; it cannot be supplied solely by a B2G replacement
-process.
-
-## Source Layout
-
-- `src/wpe_hello_poc.cpp`: primary WPE WebKit smoke test and diagnostic fb1
-  helper.
-- `src/primary_gl_animation_poc.cpp`: independent EGL/HWC primary animation
-  test.
-- `src/cover_green_poc.c`: minimal direct fb1 RGB565 test.
-- `experiments/`: investigation programs, including the stock Gonk window
-  path and BufferQueue probes.
-- `scripts/wpe_chroot_device.sh`: device-side chroot lifecycle and display
-  reset operations.
-- `assets/hello.html`: static WPE fixture.
+The device launcher creates a temporary chroot and overlays only its view of
+`libc++_shared.so`; it never modifies the device's system partition.

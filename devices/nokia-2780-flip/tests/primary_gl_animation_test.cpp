@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "HWC2.h"
+#include "oos/nokia2780/display_control.h"
 
 namespace {
 
@@ -27,25 +28,26 @@ constexpr uint32_t kWidth = 240;
 constexpr uint32_t kHeight = 320;
 
 class PrimaryDisplayCallback final : public HWC2::ComposerCallback {
- public:
-  explicit PrimaryDisplayCallback(HWC2::Device* device) : device_(device) {}
+public:
+  explicit PrimaryDisplayCallback(HWC2::Device *device) : device_(device) {}
 
   void onHotplugReceived(int32_t, hwc2_display_t display,
                          HWC2::Connection connection) override {
-    std::fprintf(stderr, "hotplug display=%" PRIu64 " connection=%d\n",
-                 display, static_cast<int>(connection));
+    std::fprintf(stderr, "hotplug display=%" PRIu64 " connection=%d\n", display,
+                 static_cast<int>(connection));
     device_->onHotplug(display, connection);
   }
 
   void onRefreshReceived(int32_t, hwc2_display_t) override {}
   void onVsyncReceived(int32_t, hwc2_display_t, int64_t) override {}
 
- private:
-  HWC2::Device* const device_;
+private:
+  HWC2::Device *const device_;
 };
 
-bool check_egl(EGLBoolean result, const char* operation) {
-  if (result == EGL_TRUE) return true;
+bool check_egl(EGLBoolean result, const char *operation) {
+  if (result == EGL_TRUE)
+    return true;
   std::fprintf(stderr, "%s failed: 0x%x\n", operation, eglGetError());
   return false;
 }
@@ -58,7 +60,8 @@ bool set_primary_backlight(int value) {
   if (fd < 0 || length <= 0 || length >= static_cast<int>(sizeof(text)) ||
       write(fd, text, static_cast<size_t>(length)) != length) {
     std::fprintf(stderr, "backlight write %d failed\n", value);
-    if (fd >= 0) close(fd);
+    if (fd >= 0)
+      close(fd);
     return false;
   }
   close(fd);
@@ -68,18 +71,20 @@ bool set_primary_backlight(int value) {
 
 bool check_gl_framebuffer() {
   const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-  if (status == GL_FRAMEBUFFER_COMPLETE) return true;
+  if (status == GL_FRAMEBUFFER_COMPLETE)
+    return true;
   std::fprintf(stderr, "GPU framebuffer incomplete: 0x%x\n", status);
   return false;
 }
 
-GLuint compile_shader(GLenum type, const char* source) {
+GLuint compile_shader(GLenum type, const char *source) {
   const GLuint shader = glCreateShader(type);
   glShaderSource(shader, 1, &source, nullptr);
   glCompileShader(shader);
   GLint compiled = GL_FALSE;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-  if (compiled == GL_TRUE) return shader;
+  if (compiled == GL_TRUE)
+    return shader;
   char log[256] = {};
   glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
   std::fprintf(stderr, "shader compile failed: %s\n", log);
@@ -103,7 +108,8 @@ GLuint create_animation_program() {
       "void main() { gl_FragColor = vec4(0.15, 1.0, 0.20, 1.0); }\n";
   const GLuint vertex = compile_shader(GL_VERTEX_SHADER, kVertexShader);
   const GLuint fragment = compile_shader(GL_FRAGMENT_SHADER, kFragmentShader);
-  if (vertex == 0 || fragment == 0) return 0;
+  if (vertex == 0 || fragment == 0)
+    return 0;
   const GLuint program = glCreateProgram();
   glAttachShader(program, vertex);
   glAttachShader(program, fragment);
@@ -113,7 +119,8 @@ GLuint create_animation_program() {
   glDeleteShader(fragment);
   GLint linked = GL_FALSE;
   glGetProgramiv(program, GL_LINK_STATUS, &linked);
-  if (linked == GL_TRUE) return program;
+  if (linked == GL_TRUE)
+    return program;
   char log[256] = {};
   glGetProgramInfoLog(program, sizeof(log), nullptr, log);
   std::fprintf(stderr, "shader link failed: %s\n", log);
@@ -121,7 +128,7 @@ GLuint create_animation_program() {
   return 0;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   android::ProcessState::self()->startThreadPool();
@@ -131,27 +138,32 @@ int main() {
     std::fprintf(stderr, "failed to enable interactive power\n");
     return 1;
   }
+  if (nokia2780_prepare_primary() != 0) {
+    std::fprintf(stderr, "failed to switch from cover to primary display\n");
+    return 1;
+  }
 
   HWC2::Device device("default");
   PrimaryDisplayCallback callback(&device);
   device.registerCallback(&callback, 0);
-  HWC2::Display* display = device.getDisplayById(device.getDefaultDisplayId());
+  HWC2::Display *display = device.getDisplayById(device.getDefaultDisplayId());
   if (display == nullptr || !display->isConnected() ||
       display->setPowerMode(HWC2::PowerMode::On) != HWC2::Error::None) {
     std::fprintf(stderr, "failed to enable primary HWC display\n");
     return 1;
   }
-  HWC2::Layer* client_layer = nullptr;
+  HWC2::Layer *client_layer = nullptr;
   const android::Rect frame(0, 0, kWidth, kHeight);
   if (display->createLayer(&client_layer) != HWC2::Error::None ||
       client_layer == nullptr ||
       client_layer->setCompositionType(HWC2::Composition::Client) !=
           HWC2::Error::None ||
       client_layer->setBlendMode(HWC2::BlendMode::None) != HWC2::Error::None ||
-      client_layer->setSourceCrop(
-          android::FloatRect(0.0f, 0.0f, kWidth, kHeight)) != HWC2::Error::None ||
+      client_layer->setSourceCrop(android::FloatRect(
+          0.0f, 0.0f, kWidth, kHeight)) != HWC2::Error::None ||
       client_layer->setDisplayFrame(frame) != HWC2::Error::None ||
-      client_layer->setVisibleRegion(android::Region(frame)) != HWC2::Error::None ||
+      client_layer->setVisibleRegion(android::Region(frame)) !=
+          HWC2::Error::None ||
       client_layer->setPlaneAlpha(1.0f) != HWC2::Error::None ||
       client_layer->setZOrder(0) != HWC2::Error::None) {
     std::fprintf(stderr, "failed to configure HWC client layer\n");
@@ -160,25 +172,36 @@ int main() {
 
   android::sp<android::GraphicBuffer> buffer = new android::GraphicBuffer(
       kWidth, kHeight, android::PIXEL_FORMAT_RGB_565, 1,
-      static_cast<uint64_t>(GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_COMPOSER),
+      static_cast<uint64_t>(GRALLOC_USAGE_HW_RENDER |
+                            GRALLOC_USAGE_HW_COMPOSER),
       "primary-green-direct-poc");
   if (buffer->initCheck() != android::NO_ERROR || buffer->handle == nullptr) {
     std::fprintf(stderr, "RGB565 GraphicBuffer allocation failed\n");
     return 1;
   }
   std::fprintf(stderr, "explicit buffer format=%d size=%ux%u stride=%u\n",
-               buffer->getPixelFormat(), buffer->getWidth(), buffer->getHeight(),
-               buffer->getStride());
+               buffer->getPixelFormat(), buffer->getWidth(),
+               buffer->getHeight(), buffer->getStride());
 
   const EGLDisplay egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
   if (egl_display == EGL_NO_DISPLAY ||
-      !check_egl(eglInitialize(egl_display, nullptr, nullptr), "eglInitialize")) {
+      !check_egl(eglInitialize(egl_display, nullptr, nullptr),
+                 "eglInitialize")) {
     return 1;
   }
   const EGLint config_attributes[] = {
-      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-      EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+      EGL_SURFACE_TYPE,
+      EGL_PBUFFER_BIT,
+      EGL_RENDERABLE_TYPE,
+      EGL_OPENGL_ES2_BIT,
+      EGL_RED_SIZE,
+      8,
+      EGL_GREEN_SIZE,
+      8,
+      EGL_BLUE_SIZE,
+      8,
+      EGL_ALPHA_SIZE,
+      8,
       EGL_NONE,
   };
   EGLConfig config = nullptr;
@@ -205,8 +228,9 @@ int main() {
       eglGetProcAddress("eglCreateImageKHR"));
   const auto destroy_image = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
       eglGetProcAddress("eglDestroyImageKHR"));
-  const auto image_target = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
-      eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+  const auto image_target =
+      reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+          eglGetProcAddress("glEGLImageTargetTexture2DOES"));
   if (create_image == nullptr || destroy_image == nullptr ||
       image_target == nullptr) {
     std::fprintf(stderr, "EGLImage extension entry points are unavailable\n");
@@ -234,12 +258,14 @@ int main() {
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          texture, 0);
-  if (!check_gl_framebuffer()) return 1;
+  if (!check_gl_framebuffer())
+    return 1;
   const GLuint program = create_animation_program();
-  if (program == 0) return 1;
+  if (program == 0)
+    return 1;
   const GLint angle_uniform = glGetUniformLocation(program, "uAngle");
-  constexpr GLfloat square[] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f,
-                                1.0f,  1.0f,  1.0f};
+  constexpr GLfloat square[] = {-1.0f, -1.0f, 1.0f, -1.0f,
+                                -1.0f, 1.0f,  1.0f, 1.0f};
 
   android::sp<android::Fence> present_fence;
   const auto draw_and_present = [&](float angle) {
@@ -275,24 +301,27 @@ int main() {
     if ((validate_error != HWC2::Error::None &&
          validate_error != HWC2::Error::HasChanges) ||
         display->present(&present_fence) != HWC2::Error::None) {
-      std::fprintf(stderr,
-                   "HWC animation frame failed: validate=%d changes=%u requests=%u\n",
-                   static_cast<int>(validate_error), changes, requests);
+      std::fprintf(
+          stderr,
+          "HWC animation frame failed: validate=%d changes=%u requests=%u\n",
+          static_cast<int>(validate_error), changes, requests);
       return false;
     }
     return true;
   };
 
   const auto start = std::chrono::steady_clock::now();
-  if (!draw_and_present(0.0f) || !set_primary_backlight(255)) return 1;
+  if (!draw_and_present(0.0f) || !set_primary_backlight(255))
+    return 1;
   int frames = 1;
   auto next_frame = start;
   const auto deadline = start + std::chrono::seconds(10);
   while (std::chrono::steady_clock::now() < deadline) {
-    const float seconds = std::chrono::duration<float>(
-                            std::chrono::steady_clock::now() - start)
-                            .count();
-    if (!draw_and_present(seconds * 2.4f)) break;
+    const float seconds =
+        std::chrono::duration<float>(std::chrono::steady_clock::now() - start)
+            .count();
+    if (!draw_and_present(seconds * 2.4f))
+      break;
     ++frames;
     next_frame += std::chrono::milliseconds(16);
     std::this_thread::sleep_until(next_frame);

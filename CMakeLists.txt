@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(kaios_display_poc C CXX)
+project(orange_os C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,8 +24,15 @@ if(NOT EXISTS "${HIDL_GENERATED_DIR}/android/hardware/graphics/composer/2.3/ICom
     "Generated HIDL headers are missing. Run scripts/generate-hidl-headers.sh first.")
 endif()
 
-option(BUILD_NOKIA_2780_FLIP "Build Nokia 2780 Flip POCs" ON)
+option(BUILD_NOKIA_2780_FLIP "Build Nokia 2780 Flip platform support" ON)
 option(BUILD_NOKIA_8110_4G "Enable the Nokia 8110 4G device slot" OFF)
+option(OOS_BUILD_DEVICE_TESTS "Build on-device display tests" ON)
+
+add_executable(oos app/main.cpp)
+target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
+target_link_options(oos PRIVATE -nostdlib++)
+set_target_properties(oos PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(BUILD_NOKIA_2780_FLIP)
   add_subdirectory(devices/nokia-2780-flip)

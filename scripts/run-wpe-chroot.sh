@@ -4,16 +4,12 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DEVICE_SCRIPT="$ROOT_DIR/devices/nokia-2780-flip/scripts/wpe_chroot_device.sh"
-WPE_POC="$ROOT_DIR/build/android-nokia-2780-flip/bin/nokia-2780-flip/nokia_2780_wpe_hello"
+WPE_TEST="$ROOT_DIR/build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/oos_test_nokia_2780_wpe_display"
 WPE_INJECTED_BUNDLE="$ROOT_DIR/build/wpe-sysroot/nokia-2780-flip/lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so"
 WPE_BACKEND="$ROOT_DIR/build/wpe-sysroot/nokia-2780-flip/lib/libWPEBackend-android.so"
 WPE_HTML="$ROOT_DIR/devices/nokia-2780-flip/assets/hello.html"
 REMOTE=/data/local/tmp/oos-wpe
 ADB=${ADB:-adb}
-# fb1 is a direct framebuffer path and conflicts with the active primary SPI
-# panel. Keep the diagnostic cover path opt-in until the vendor display stack
-# exposes it as a real HWC display.
-OOS_ENABLE_COVER=${OOS_ENABLE_COVER:-0}
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -26,8 +22,8 @@ CXX_RUNTIME="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-
 if [[ ! -f "$CXX_RUNTIME" ]]; then
   CXX_RUNTIME="$WPE_NDK/sources/cxx-stl/llvm-libc++/libs/armeabi-v7a/libc++_shared.so"
 fi
-if [[ ! -x "$WPE_POC" ]]; then
-  echo "Missing WPE POC binary: $WPE_POC" >&2
+if [[ ! -x "$WPE_TEST" ]]; then
+  echo "Missing WPE display test binary: $WPE_TEST" >&2
   exit 1
 fi
 if [[ ! -f "$WPE_INJECTED_BUNDLE" ]]; then
@@ -48,15 +44,16 @@ if [[ ! -f "$CXX_RUNTIME" ]]; then
 fi
 
 case "${1:-start}" in
-  start)
+  start|switch-demo)
+    ACTION=${1:-start}
     "$ADB" shell "su -c 'mkdir -p $REMOTE/lib/wpe-webkit-2.0/injected-bundle; chmod 0777 $REMOTE $REMOTE/lib $REMOTE/lib/wpe-webkit-2.0 $REMOTE/lib/wpe-webkit-2.0/injected-bundle'"
     "$ADB" push "$CXX_RUNTIME" "$REMOTE/lib/libc++_shared.so" >/dev/null
-    "$ADB" push "$WPE_POC" "$REMOTE/nokia_2780_wpe_hello" >/dev/null
+    "$ADB" push "$WPE_TEST" "$REMOTE/oos_test_nokia_2780_wpe_display" >/dev/null
     "$ADB" push "$WPE_BACKEND" "$REMOTE/lib/libWPEBackend-android.so" >/dev/null
     "$ADB" push "$WPE_INJECTED_BUNDLE" "$REMOTE/lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so" >/dev/null
     "$ADB" push "$WPE_HTML" "$REMOTE/hello.html" >/dev/null
     "$ADB" push "$DEVICE_SCRIPT" "$REMOTE/wpe_chroot_device.sh" >/dev/null
-    "$ADB" shell "su -c 'chmod 0755 $REMOTE/wpe_chroot_device.sh; OOS_ENABLE_COVER=$OOS_ENABLE_COVER $REMOTE/wpe_chroot_device.sh start'"
+    "$ADB" shell "su -c 'chmod 0755 $REMOTE/wpe_chroot_device.sh; $REMOTE/wpe_chroot_device.sh $ACTION'"
     sleep 2
     "$ADB" shell "su -c '$REMOTE/wpe_chroot_device.sh status'"
     ;;
@@ -64,7 +61,7 @@ case "${1:-start}" in
     "$ADB" shell "su -c '$REMOTE/wpe_chroot_device.sh $1'"
     ;;
   *)
-    echo "usage: $0 {start|stop|status}" >&2
+    echo "usage: $0 {start|switch-demo|stop|status}" >&2
     exit 2
     ;;
 esac

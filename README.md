@@ -1,81 +1,82 @@
-# KaiOS Display POC
+# Orange OS
 
-This repository contains independent display-path POCs for KaiOS devices. It
-does not start B2G. The Nokia 2780 Flip implementation currently proves:
+Orange OS (`oos`) is a native C++ system shell intended to replace B2G on
+KaiOS devices. The production executable currently has an intentionally empty
+entry point; device enablement and the WPE WebKit display path are being built
+and validated independently before application logic is added.
 
-- main-panel GPU rendering through explicit RGB565 gralloc buffers, EGLImage,
-  and HWC client target submission;
-- main-panel backlight and power sequencing;
-- cover-panel RGB565 framebuffer and `sublcd-backlight` control when the main
-  panel is inactive.
+## Repository Layout
 
-See [the Nokia 2780 device notes](devices/nokia-2780-flip/README.md) for the
-validated runtime, display ownership rules, and the current dual-panel limit.
+- `app/main.cpp`: production `oos` process entry point.
+- `devices/nokia-2780-flip/include/oos/nokia2780`: reusable public display
+  interfaces for the validated Nokia 2780 implementation.
+- `devices/nokia-2780-flip/src`: device display and WPE/HWC implementation.
+- `devices/nokia-2780-flip/tests`: on-device smoke, lifecycle, animation, and
+  investigation test programs. Test-only fixtures live under `tests/support`.
+- `devices/nokia-8110-4g`: reserved device slot; no implementation yet.
+- `scripts`: build, deployment, and test runners.
+- `third_party`: local AOSP, Gecko, KaiOS, and WPE checkouts, excluded from the
+  main Git repository.
+- `patches`: tracked compatibility changes for clean third-party checkouts.
 
-## Layout
+Production code must not depend on files under a device's `tests` directory.
+Validated functionality moves into a public device library before it is used
+by `app/main.cpp`.
 
-- `devices/nokia-2780-flip`: validated 2780-specific POCs and experiments.
-- `devices/nokia-8110-4g`: reserved device slot; it has no implementation yet.
-- `third_party`: local AOSP, Gecko, and KaiOS source checkouts, excluded from
-  the main Git repository.
-- `tools/kaios-hidl-gen`: host build wrapper for the KaiOS HIDL generator.
-- `patches`: compatibility changes applied to clean third-party checkouts.
+## Build Environment
 
-## Build WPE Runtime
-
-The Nokia 2780 runtime is an Android API 29 ARMv7 build. It uses WPEPlatform
-and Android `AHardwareBuffer`, while deliberately excluding the legacy libwpe,
-Wayland, DRM/GBM, multimedia, WebRTC, Inspector, and WebDriver stacks.
-
-Set `WPE_DISTROBOX=oos-debian12` in `.env` to run WPE/Cerbero compilation in
-the Debian 12 / Python 3.11 Distrobox. When it is unset, the script compiles
-in the current environment instead. Run:
-
-```sh
-./scripts/build-wpe-sysroot.sh
-```
-
-This invokes the checked-out WPE Android Cerbero recipes inside the container
-with the tracked API-29 override, applies
-`patches/wpe-android-cerbero-kaios-minimal.patch`, and writes target
-libraries, headers, `WPEWebProcess`, and
-`WPENetworkProcess` under `build/wpe-sysroot/nokia-2780-flip/`.
-
-The WebKit source revision is set by `WPEWEBKIT_COMMIT` in `.env` when needed;
-the default is the checked-out WPE WebKit 2.52.5 release commit.
-
-## Build Nokia 2780 Flip
-
-Set the extracted Android `/system` location in `.env`. The current local
-configuration is:
+Set the extracted Android system path in `.env`:
 
 ```sh
 SYSTEM_DIR=/home/jax/tmp/system-stock-2780/system
 ```
 
-Then configure and build:
+Set `WPE_DISTROBOX=oos-debian12` to build WPE/Cerbero inside the Debian 12
+Distrobox. Leave it unset to build in the current environment.
+
+Build the WPE runtime, configure the Android target, and compile Orange OS:
 
 ```sh
+./scripts/build-wpe-sysroot.sh
 ./scripts/configure-android.sh nokia-2780-flip
-cmake --build build/android-nokia-2780-flip -j2
+cmake --build build/android-nokia-2780-flip -j8
 ```
 
-Outputs are placed in `build/android-nokia-2780-flip/bin/nokia-2780-flip/`.
-The configuration script generates Android 10 HIDL headers and links directly
-against `$SYSTEM_DIR/lib`; no copied system libraries are used.
+The outputs are:
 
-## Run WPE In A Chroot
+- `build/android-nokia-2780-flip/bin/oos`: production executable.
+- `build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/`: on-device tests.
 
-The WPE runtime needs a newer `libc++_shared.so` than the stock system copy.
-`./scripts/run-wpe-chroot.sh start` creates a temporary Android chroot on the
-device, bind-mounts the live system, vendor, Runtime APEX, binder/device nodes,
-and pseudo-filesystems, then overlays only the chroot view of
-`/system/lib/libc++_shared.so` with the matching runtime from `WPE_NDK`. It
-never writes to the device's system partition. The script expects the current
-WPE runtime to already be present at `/data/local/tmp/oos-wpe/`; use `status`
-for the process and log, or `stop` to terminate it and release every mount.
+For a production-only build, configure with:
 
-The default run mode is the validated primary-screen WPE sample. Do not set
-`OOS_ENABLE_COVER=1` for normal use: the Nokia 2780 vendor driver does not
-support fb0 and fb1 remaining active together. That switch exists only for
-diagnostic work described in the device notes.
+```sh
+./scripts/configure-android.sh nokia-2780-flip \
+  -DOOS_BUILD_DEVICE_TESTS=OFF
+```
+
+## Display Tests
+
+The lower-latency single-process validation keeps WebKit, the retained GPU
+buffer, fb1, and the primary HWC client in one process:
+
+```sh
+./scripts/test-single-process-switch.sh
+```
+
+It preloads the page with both backlights off, then shows the cover for three
+seconds, the WPE primary frame for three seconds, and the cover for three
+seconds. The validated Nokia 2780 transition times are approximately 622-637ms
+from primary to cover and 439ms from cover to primary.
+
+Other repeatable tests are:
+
+```sh
+./scripts/test-primary-lifecycle.sh 3
+./scripts/test-display-lifecycle.sh 3
+./scripts/run-cover-test.sh secondary
+./scripts/run-wpe-chroot.sh start
+./scripts/run-wpe-chroot.sh stop
+```
+
+See `devices/nokia-2780-flip/README.md` for the hardware constraints, public
+API ownership rules, and individual test targets.

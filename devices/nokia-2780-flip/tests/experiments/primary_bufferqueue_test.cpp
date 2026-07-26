@@ -19,37 +19,38 @@
 #include <utils/Mutex.h>
 
 #include <chrono>
-#include <fcntl.h>
 #include <cstdio>
+#include <fcntl.h>
 #include <thread>
 #include <unistd.h>
 
 #include "HWC2.h"
+#include "oos/nokia2780/display_control.h"
 
 namespace {
 
 class PrimaryDisplayCallback final : public HWC2::ComposerCallback {
- public:
-  explicit PrimaryDisplayCallback(HWC2::Device* device) : device_(device) {}
+public:
+  explicit PrimaryDisplayCallback(HWC2::Device *device) : device_(device) {}
 
   void onHotplugReceived(int32_t, hwc2_display_t display,
                          HWC2::Connection connection) override {
-    std::fprintf(stderr, "hotplug display=%" PRIu64 " connection=%d\n",
-                 display, static_cast<int>(connection));
+    std::fprintf(stderr, "hotplug display=%" PRIu64 " connection=%d\n", display,
+                 static_cast<int>(connection));
     device_->onHotplug(display, connection);
   }
 
   void onRefreshReceived(int32_t, hwc2_display_t) override {}
   void onVsyncReceived(int32_t, hwc2_display_t, int64_t) override {}
 
- private:
-  HWC2::Device* const device_;
+private:
+  HWC2::Device *const device_;
 };
 
 class PrimaryConsumer final : public android::ConsumerBase {
- public:
-  PrimaryConsumer(const android::sp<android::IGraphicBufferConsumer>& consumer,
-                  HWC2::Display* display)
+public:
+  PrimaryConsumer(const android::sp<android::IGraphicBufferConsumer> &consumer,
+                  HWC2::Display *display)
       : ConsumerBase(consumer, false), display_(display) {
     mConsumer->setConsumerName(android::String8("primary-green-poc"));
     mConsumer->setConsumerUsageBits(GRALLOC_USAGE_HW_RENDER |
@@ -59,8 +60,8 @@ class PrimaryConsumer final : public android::ConsumerBase {
     mConsumer->setMaxAcquiredBufferCount(3);
   }
 
- private:
-  void onFrameAvailable(const android::BufferItem&) override {
+private:
+  void onFrameAvailable(const android::BufferItem &) override {
     android::sp<android::GraphicBuffer> buffer;
     android::sp<android::Fence> acquire_fence;
     int slot = android::BufferQueue::INVALID_BUFFER_SLOT;
@@ -79,7 +80,8 @@ class PrimaryConsumer final : public android::ConsumerBase {
     }
 
     if (!logged_buffer_) {
-      std::fprintf(stderr, "client buffer format=%d size=%ux%u stride=%u slot=%d\n",
+      std::fprintf(stderr,
+                   "client buffer format=%d size=%ux%u stride=%u slot=%d\n",
                    buffer->getPixelFormat(), buffer->getWidth(),
                    buffer->getHeight(), buffer->getStride(), slot);
       logged_buffer_ = true;
@@ -139,8 +141,8 @@ class PrimaryConsumer final : public android::ConsumerBase {
     }
   }
 
-  void release(int slot, const android::sp<android::GraphicBuffer>& buffer,
-               const android::sp<android::Fence>& fence) {
+  void release(int slot, const android::sp<android::GraphicBuffer> &buffer,
+               const android::sp<android::Fence> &fence) {
     android::Mutex::Autolock lock(mMutex);
     if (fence != nullptr && fence->isValid()) {
       addReleaseFenceLocked(slot, buffer, fence);
@@ -151,7 +153,7 @@ class PrimaryConsumer final : public android::ConsumerBase {
     }
   }
 
-  HWC2::Display* const display_;
+  HWC2::Display *const display_;
   int current_slot_ = android::BufferQueue::INVALID_BUFFER_SLOT;
   android::sp<android::GraphicBuffer> current_buffer_;
   bool submitted_frame_ = false;
@@ -166,7 +168,8 @@ bool set_primary_backlight(int value) {
   if (fd < 0 || length <= 0 || length >= static_cast<int>(sizeof(text)) ||
       write(fd, text, static_cast<size_t>(length)) != length) {
     std::fprintf(stderr, "backlight write %d failed\n", value);
-    if (fd >= 0) close(fd);
+    if (fd >= 0)
+      close(fd);
     return false;
   }
   close(fd);
@@ -174,13 +177,14 @@ bool set_primary_backlight(int value) {
   return true;
 }
 
-bool check_egl(EGLBoolean result, const char* operation) {
-  if (result == EGL_TRUE) return true;
+bool check_egl(EGLBoolean result, const char *operation) {
+  if (result == EGL_TRUE)
+    return true;
   std::fprintf(stderr, "%s failed: 0x%x\n", operation, eglGetError());
   return false;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   android::ProcessState::self()->startThreadPool();
@@ -195,11 +199,15 @@ int main() {
     return 1;
   }
   std::fprintf(stderr, "IPower interactive enabled\n");
+  if (nokia2780_prepare_primary() != 0) {
+    std::fprintf(stderr, "failed to switch from cover to primary display\n");
+    return 1;
+  }
 
   HWC2::Device device("default");
   PrimaryDisplayCallback callback(&device);
   device.registerCallback(&callback, 0);
-  HWC2::Display* display = device.getDisplayById(device.getDefaultDisplayId());
+  HWC2::Display *display = device.getDisplayById(device.getDefaultDisplayId());
   if (display == nullptr || !display->isConnected()) {
     std::fprintf(stderr, "primary HWC display is unavailable\n");
     return 1;
@@ -212,7 +220,8 @@ int main() {
     return 1;
   }
   std::fprintf(stderr, "HWC primary id=%" PRIu64 " size=%dx%d\n",
-               display->getId(), hwc_config->getWidth(), hwc_config->getHeight());
+               display->getId(), hwc_config->getWidth(),
+               hwc_config->getHeight());
 
   if (display->setPowerMode(HWC2::PowerMode::On) != HWC2::Error::None) {
     std::fprintf(stderr, "failed to enable primary display\n");
@@ -232,21 +241,34 @@ int main() {
   }
 
   EGLDisplay egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-  if (egl_display == EGL_NO_DISPLAY || !check_egl(eglInitialize(egl_display, nullptr, nullptr), "eglInitialize")) {
+  if (egl_display == EGL_NO_DISPLAY ||
+      !check_egl(eglInitialize(egl_display, nullptr, nullptr),
+                 "eglInitialize")) {
     return 1;
   }
   const EGLint config_attributes[] = {
-      EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-      EGL_RED_SIZE, 5, EGL_GREEN_SIZE, 6, EGL_BLUE_SIZE, 5,
-      EGL_ALPHA_SIZE, 0,
-      EGL_DEPTH_SIZE, 24,
+      EGL_SURFACE_TYPE,
+      EGL_WINDOW_BIT,
+      EGL_RENDERABLE_TYPE,
+      EGL_OPENGL_ES2_BIT,
+      EGL_RED_SIZE,
+      5,
+      EGL_GREEN_SIZE,
+      6,
+      EGL_BLUE_SIZE,
+      5,
+      EGL_ALPHA_SIZE,
+      0,
+      EGL_DEPTH_SIZE,
+      24,
       EGL_NONE,
   };
   EGLConfig config = nullptr;
   EGLint config_count = 0;
-  if (!check_egl(eglChooseConfig(egl_display, config_attributes, &config, 1, &config_count),
-                 "eglChooseConfig") || config_count == 0) {
+  if (!check_egl(eglChooseConfig(egl_display, config_attributes, &config, 1,
+                                 &config_count),
+                 "eglChooseConfig") ||
+      config_count == 0) {
     return 1;
   }
   EGLint native_visual_id = 0;
@@ -257,35 +279,43 @@ int main() {
   }
   std::fprintf(stderr, "EGL native visual format=%d\n", native_visual_id);
   const EGLint context_attributes[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-  EGLContext context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, context_attributes);
+  EGLContext context =
+      eglCreateContext(egl_display, config, EGL_NO_CONTEXT, context_attributes);
   EGLSurface egl_surface = eglCreateWindowSurface(
-      egl_display, config, static_cast<EGLNativeWindowType>(surface.get()), nullptr);
+      egl_display, config, static_cast<EGLNativeWindowType>(surface.get()),
+      nullptr);
   if (context == EGL_NO_CONTEXT || egl_surface == EGL_NO_SURFACE ||
-      !check_egl(eglMakeCurrent(egl_display, egl_surface, egl_surface, context), "eglMakeCurrent")) {
+      !check_egl(eglMakeCurrent(egl_display, egl_surface, egl_surface, context),
+                 "eglMakeCurrent")) {
     return 1;
   }
 
   glViewport(0, 0, 240, 320);
   glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
-  if (!check_egl(eglSwapBuffers(egl_display, egl_surface), "initial eglSwapBuffers") ||
+  if (!check_egl(eglSwapBuffers(egl_display, egl_surface),
+                 "initial eglSwapBuffers") ||
       !set_primary_backlight(255)) {
     return 1;
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (std::chrono::steady_clock::now() < deadline) {
     glViewport(0, 0, 240, 320);
     glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    if (!check_egl(eglSwapBuffers(egl_display, egl_surface), "eglSwapBuffers")) {
+    if (!check_egl(eglSwapBuffers(egl_display, egl_surface),
+                   "eglSwapBuffers")) {
       break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(33));
   }
 
-  set_primary_backlight(0);
-  display->setPowerMode(HWC2::PowerMode::Off);
+  if (!set_primary_backlight(0))
+    std::fprintf(stderr, "failed to disable primary backlight\n");
+  if (display->setPowerMode(HWC2::PowerMode::Off) != HWC2::Error::None)
+    std::fprintf(stderr, "failed to power down primary display\n");
   power->setInteractive(false);
   primary_consumer->abandon();
   eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);

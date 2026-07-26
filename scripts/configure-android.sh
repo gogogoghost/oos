@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DEVICE=${1:-nokia-2780-flip}
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 ENV_FILE="$ROOT_DIR/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -44,4 +47,5 @@ cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build/android-$DEVICE" \
   -DANDROID_ABI=armeabi-v7a \
   -DANDROID_PLATFORM=android-29 \
   -DSYSTEM_DIR="$SYSTEM_DIR" \
-  -DHIDL_GENERATED_DIR="$ROOT_DIR/build/generated/hidl-android10"
+  -DHIDL_GENERATED_DIR="$ROOT_DIR/build/generated/hidl-android10" \
+  "$@"

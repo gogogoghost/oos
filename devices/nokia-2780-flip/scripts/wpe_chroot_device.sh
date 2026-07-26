@@ -7,14 +7,13 @@ ROOT=/data/local/tmp/oos-wpe-chroot
 BUILD_PREFIX=/home/jax/project/oos/build/wpe-sysroot/nokia-2780-flip
 LOG="$RUNTIME/hello.log"
 PID_FILE="$ROOT/wpe.pid"
-# The concurrent fb1 path is diagnostic-only; see devices/nokia-2780-flip/README.md.
-OOS_ENABLE_COVER=${OOS_ENABLE_COVER:-0}
 
 unmount_if_mounted() {
   umount -l "$1" 2>/dev/null || true
 }
 
 stop() {
+  echo 0 > /sys/class/leds/lcd-backlight/brightness 2>/dev/null || true
   if [ -f "$PID_FILE" ]; then
     kill "$(cat "$PID_FILE")" 2>/dev/null || true
     rm -f "$PID_FILE"
@@ -34,6 +33,10 @@ stop() {
 
 reset_displays() {
   stop
+  if [ -f /data/local/tmp/oos-display/cover.pid ]; then
+    kill "$(cat /data/local/tmp/oos-display/cover.pid)" 2>/dev/null || true
+    rm -f /data/local/tmp/oos-display/cover.pid
+  fi
   # fb0 is owned by HWC. Blank only through its backlight; writing fb0/blank
   # behind the composer leaves its display handle stale on this device.
   echo 0 > /sys/class/leds/lcd-backlight/brightness 2>/dev/null || true
@@ -55,6 +58,7 @@ reset_displays() {
 }
 
 start() {
+  mode="${1:-normal}"
   reset_displays
 
   # Clean placeholders made by an older per-library APEX bind-mount attempt.
@@ -81,14 +85,16 @@ start() {
   mount --bind "$RUNTIME/lib/libc++_shared.so" \
     "$ROOT/system/lib/libc++_shared.so"
 
-  echo 255 > /sys/class/leds/lcd-backlight/brightness
+  program_args=""
+  if [ "$mode" = "switch-demo" ]; then
+    program_args="--switch-demo"
+  fi
   rm -f "$LOG"
   chroot "$ROOT" /system/bin/sh -c "
     export LD_LIBRARY_PATH=$RUNTIME/lib:/apex/com.android.runtime/lib
     export WEBKIT_EXEC_PATH=$RUNTIME/libexec/wpe-webkit-2.0
     export WPE_BACKEND=$RUNTIME/lib/libWPEBackend-android.so
-    export OOS_ENABLE_COVER=$OOS_ENABLE_COVER
-    exec $RUNTIME/nokia_2780_wpe_hello
+    exec $RUNTIME/oos_test_nokia_2780_wpe_display $program_args
   " >"$LOG" 2>&1 &
   echo $! > "$PID_FILE"
   echo "started pid=$(cat "$PID_FILE") log=$LOG"
@@ -96,11 +102,12 @@ start() {
 
 case "${1:-start}" in
   start) start ;;
+  switch-demo) start switch-demo ;;
   stop) stop ;;
   reset) reset_displays ;;
   status)
     [ -f "$PID_FILE" ] && ps -p "$(cat "$PID_FILE")" -o PID,ARGS || true
     cat "$LOG" 2>/dev/null || true
     ;;
-  *) echo "usage: $0 {start|stop|status}" >&2; exit 2 ;;
+  *) echo "usage: $0 {start|switch-demo|stop|status}" >&2; exit 2 ;;
 esac
