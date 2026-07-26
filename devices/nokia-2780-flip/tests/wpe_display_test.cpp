@@ -1,6 +1,7 @@
 #include <binder/ProcessState.h>
 
 #include <glib.h>
+#include <jsc/jsc.h>
 #include <wpe-android/view-backend.h>
 #include <wpe/webkit.h>
 
@@ -43,6 +44,35 @@ void destroyBackend(gpointer backend) {
 gboolean refreshPrimary(gpointer display) {
   static_cast<WpeDisplayManager *>(display)->refresh();
   return G_SOURCE_CONTINUE;
+}
+
+void runtimeCheckFinished(GObject *, GAsyncResult *result, gpointer data) {
+  auto *view = static_cast<WebKitWebView *>(data);
+  GError *error = nullptr;
+  JSCValue *value =
+      webkit_web_view_evaluate_javascript_finish(view, result, &error);
+  if (!value) {
+    std::fprintf(stderr, "runtime check: FAIL (%s)\n",
+                 error ? error->message : "unknown evaluation error");
+    if (error)
+      g_error_free(error);
+    return;
+  }
+
+  gchar *status = jsc_value_to_string(value);
+  std::fprintf(stderr, "runtime check DOM status: %s\n",
+               status ? status : "(null)");
+  std::fflush(stderr);
+  g_free(status);
+  g_object_unref(value);
+}
+
+gboolean reportRuntimeCheck(gpointer data) {
+  auto *view = static_cast<WebKitWebView *>(data);
+  webkit_web_view_evaluate_javascript(
+      view, "document.getElementById('status').textContent", -1, nullptr,
+      nullptr, nullptr, runtimeCheckFinished, view);
+  return G_SOURCE_REMOVE;
 }
 
 struct SwitchDemo {
@@ -143,6 +173,7 @@ int main(int argc, char **argv) {
   }
   webkit_web_view_load_html(view, html, "file:///data/local/tmp/oos-wpe/");
   g_free(html);
+  g_timeout_add(3000, reportRuntimeCheck, view);
 
   // The primary panel periodically recovers from ESD and loses its scanout
   // target. Re-submit the retained GPU buffer without CPU copying.

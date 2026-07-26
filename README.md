@@ -34,6 +34,8 @@ SYSTEM_DIR=/home/jax/tmp/system-stock-2780/system
 
 Set `WPE_DISTROBOX=oos-debian12` to build WPE/Cerbero inside the Debian 12
 Distrobox. Leave it unset to build in the current environment.
+`WPE_BUILD_JOBS` optionally caps parallel compilation; it defaults to all
+available CPU threads.
 
 Build the WPE runtime, configure the Android target, and compile Orange OS:
 
@@ -47,6 +49,13 @@ The outputs are:
 
 - `build/android-nokia-2780-flip/bin/oos`: production executable.
 - `build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/`: on-device tests.
+
+The KaiOS performance profile deliberately retains JavaScriptCore Baseline and
+DFG JIT plus WebAssembly BBQ JIT. FTL/OMG remain disabled because WebKit does
+not support those optimizing tiers on this 32-bit ARM target. The build script
+checks the configured features and ARMv7 JIT objects before reporting success.
+See [docs/wpe-runtime-profile.md](docs/wpe-runtime-profile.md) for the retained
+runtime surface, disabled feature groups, and ARMv7 softfp JIT boundary.
 
 For a production-only build, configure with:
 

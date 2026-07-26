@@ -140,7 +140,8 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_link_libraries(oos_test_nokia_2780_wpe_display PRIVATE
     oos_nokia_2780_wpe_display
     "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
-    "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so")
+    "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
+    "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so")
 
   set_target_properties(
     oos_test_nokia_2780_primary_gl

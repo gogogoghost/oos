@@ -95,18 +95,71 @@ STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
   "$STAGING/share" "$STAGING/etc"
 
-install -m 0755 "$OOS_BINARY" "$STAGING/bin/oos"
-install -m 0755 "$CXX_RUNTIME" "$STAGING/lib/libc++_shared.so"
+declare -A COPIED_ELF=()
+declare -a ELF_QUEUE=()
 
-# Copy target shared objects and their symlinks while excluding headers,
-# archives, pkg-config metadata, and host-side tools from the 1.3 GB sysroot.
-rsync -a --prune-empty-dirs \
-  --include='*/' --include='*.so' --include='*.so.*' --exclude='*' \
-  "$WPE_SYSROOT/lib/" "$STAGING/lib/"
-rsync -a "$WPE_SYSROOT/libexec/" "$STAGING/libexec/"
+copy_runtime_elf() {
+  local source_file=$1
+  local relative_path=$2
+  local destination_file="$STAGING/$relative_path"
+  [[ -f "$source_file" ]] || package_die "Missing runtime ELF: $source_file"
+  if [[ -n ${COPIED_ELF[$relative_path]+x} ]]; then
+    return
+  fi
+  mkdir -p "$(dirname "$destination_file")"
+  cp -L --preserve=mode,timestamps "$source_file" "$destination_file"
+  COPIED_ELF[$relative_path]=1
+  ELF_QUEUE+=("$destination_file")
+}
 
-for runtime_share in fontconfig glib-2.0 gstreamer gstreamer-1.0 \
-  gst-plugins-base icu licenses locale wpe-webkit-2.0 xml; do
+find_sysroot_library() {
+  local library_name=$1
+  find "$WPE_SYSROOT/lib" -maxdepth 1 \( -type f -o -type l \) \
+    -name "$library_name" -print -quit
+}
+
+system_provides_library() {
+  local library_name=$1
+  find "$SYSTEM_DIR/lib" -maxdepth 1 \( -type f -o -type l \) \
+    -name "$library_name" -print -quit | grep -q .
+}
+
+copy_runtime_elf "$OOS_BINARY" bin/oos
+copy_runtime_elf "$CXX_RUNTIME" lib/libc++_shared.so
+for runtime_entry in \
+  lib/libWPEBackend-android.so \
+  lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so \
+  lib/gio/modules/libgioenvironmentproxy.so \
+  lib/gio/modules/libgioopenssl.so \
+  libexec/wpe-webkit-2.0/WPENetworkProcess \
+  libexec/wpe-webkit-2.0/WPEWebProcess; do
+  copy_runtime_elf "$WPE_SYSROOT/$runtime_entry" "$runtime_entry"
+done
+
+queue_index=0
+while (( queue_index < ${#ELF_QUEUE[@]} )); do
+  runtime_file=${ELF_QUEUE[$queue_index]}
+  ((queue_index += 1))
+  while IFS= read -r needed_library; do
+    [[ -n "$needed_library" ]] || continue
+    if [[ -n ${COPIED_ELF[lib/$needed_library]+x} ]]; then
+      continue
+    fi
+    if [[ "$needed_library" == libc++_shared.so ]]; then
+      copy_runtime_elf "$CXX_RUNTIME" "lib/$needed_library"
+      continue
+    fi
+    sysroot_library=$(find_sysroot_library "$needed_library")
+    if [[ -n "$sysroot_library" ]]; then
+      copy_runtime_elf "$sysroot_library" "lib/$needed_library"
+    elif ! system_provides_library "$needed_library"; then
+      package_die "Cannot resolve $needed_library required by $runtime_file"
+    fi
+  done < <(readelf -d "$runtime_file" 2>/dev/null \
+    | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
+done
+
+for runtime_share in fontconfig glib-2.0 icu licenses xml; do
   if [[ -d "$WPE_SYSROOT/share/$runtime_share" ]]; then
     rsync -a "$WPE_SYSROOT/share/$runtime_share" "$STAGING/share/"
   fi
@@ -117,6 +170,20 @@ fi
 
 package_verify_elf_dependencies "$STAGING" "$SYSTEM_DIR"
 
+if [[ -n ${WPE_STRIP:-} ]]; then
+  STRIP_TOOL=$WPE_STRIP
+elif [[ -x "$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" ]]; then
+  STRIP_TOOL="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+elif command -v llvm-strip >/dev/null 2>&1; then
+  STRIP_TOOL=$(command -v llvm-strip)
+else
+  package_die "Cannot find llvm-strip; set WPE_STRIP in .env"
+fi
+for runtime_file in "${ELF_QUEUE[@]}"; do
+  "$STRIP_TOOL" --strip-unneeded "$runtime_file"
+done
+echo "Packaged and stripped ${#ELF_QUEUE[@]} runtime ELF files"
+
 printf '%s\n' \
   "format=1" \
   "type=oos-res" \
@@ -124,6 +191,8 @@ printf '%s\n' \
   "device=$DEVICE" \
   "abi=armeabi-v7a" \
   "android_api=29" \
+  "javascript_jit=baseline,dfg" \
+  "webassembly_jit=bbq" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   > "$STAGING/manifest.env"

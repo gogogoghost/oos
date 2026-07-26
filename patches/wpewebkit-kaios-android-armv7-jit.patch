@@ -1,0 +1,225 @@
+From 56e7fe85785e74211dfac5e2fc86af15b44bfac7 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Sun, 26 Jul 2026 00:00:00 +0800
+Subject: [PATCH] JSC: enable ARMv7 JIT for Android softfp ABI
+
+Android armeabi-v7a uses the base AAPCS calling convention even when VFP is
+available. JSC's ARMv7 JIT uses the VFP variant for calls into its internal
+operations. Mark those operation entry points with aapcs-vfp while leaving the
+rest of WebKit on Android's softfp ABI, then admit Android ARMv7 to the JIT.
+
+---
+ Source/JavaScriptCore/assembler/AbstractMacroAssembler.h |  8 ++++++++
+ Source/JavaScriptCore/assembler/MacroAssembler.h         |  7 +++++++
+ Source/JavaScriptCore/offlineasm/arm.rb                   |  7 +++++--
+ Source/JavaScriptCore/wasm/WasmBBQJIT.h                  |  2 +-
+ Source/JavaScriptCore/wasm/WasmBBQJIT32_64.h             |  2 +-
+ Source/WTF/wtf/CodePtr.h                                  |  7 +++++++
+ Source/WTF/wtf/FunctionPtr.h                              |  6 ++++++
+ Source/WTF/wtf/FunctionTraits.h                           | 24 ++++++++++++++++++++++++
+ Source/WTF/wtf/PlatformCallingConventions.h               |  5 ++++-
+ Source/WTF/wtf/PlatformEnable.h                           |  4 ++--
+ 10 files changed, 65 insertions(+), 7 deletions(-)
+
+diff --git a/Source/JavaScriptCore/assembler/AbstractMacroAssembler.h b/Source/JavaScriptCore/assembler/AbstractMacroAssembler.h
+index 0911bd48c7..d108973a0d 100644
+--- a/Source/JavaScriptCore/assembler/AbstractMacroAssembler.h
++++ b/Source/JavaScriptCore/assembler/AbstractMacroAssembler.h
+@@ -305,6 +305,14 @@ public:
+         {
+         }
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++        template<typename ReturnType, typename... Arguments>
++        explicit TrustedImmPtr(ReturnType(JIT_OPERATION_ATTRIBUTES *value)(Arguments...))
++            : m_value(reinterpret_cast<void*>(value))
++        {
++        }
++#endif
++
+ #if OS(WINDOWS)
+         template<typename ReturnType, typename... Arguments>
+         explicit TrustedImmPtr(ReturnType(SYSV_ABI *value)(Arguments...))
+diff --git a/Source/JavaScriptCore/assembler/MacroAssembler.h b/Source/JavaScriptCore/assembler/MacroAssembler.h
+index 617b249d63..a38f523fbf 100644
+--- a/Source/JavaScriptCore/assembler/MacroAssembler.h
++++ b/Source/JavaScriptCore/assembler/MacroAssembler.h
+@@ -2429,6 +2429,13 @@ public:
+     // MacroAssembler.
+     void probe(Probe::Function, void* arg);
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++    void probe(void (JIT_OPERATION_ATTRIBUTES *function)(Probe::Context&), void* arg)
++    {
++        probe(reinterpret_cast<Probe::Function>(function), arg);
++    }
++#endif
++
+     // This leaks memory. Must not be used for production.
+     JS_EXPORT_PRIVATE void probeDebug(Function<void(Probe::Context&)>);
+ 
+
+diff --git a/Source/WTF/wtf/PlatformCallingConventions.h b/Source/WTF/wtf/PlatformCallingConventions.h
+index 04d3796bdf..52fc2e948f 100644
+--- a/Source/WTF/wtf/PlatformCallingConventions.h
++++ b/Source/WTF/wtf/PlatformCallingConventions.h
+@@ -78,7 +78,10 @@
+ #define WTF_COMPILER_SUPPORTS_FASTCALL_CALLING_CONVENTION 0
+ #endif
+ 
+-#if ENABLE(JIT) && CALLING_CONVENTION_IS_STDCALL
++#if ENABLE(JIT) && CPU(ARM_THUMB2) && OS(ANDROID)
++// Android uses softfp externally; JSC's ARMv7 JIT operations use VFP registers.
++#define JIT_OPERATION_ATTRIBUTES __attribute__((pcs("aapcs-vfp")))
++#elif ENABLE(JIT) && CALLING_CONVENTION_IS_STDCALL
+ #define JIT_OPERATION_ATTRIBUTES CDECL
+ #elif OS(WINDOWS)
+ #define JIT_OPERATION_ATTRIBUTES SYSV_ABI
+diff --git a/Source/WTF/wtf/PlatformEnable.h b/Source/WTF/wtf/PlatformEnable.h
+index b63967629c..29719662d4 100644
+--- a/Source/WTF/wtf/PlatformEnable.h
++++ b/Source/WTF/wtf/PlatformEnable.h
+@@ -725,8 +725,8 @@
+ #endif
+ 
+ #if USE(JSVALUE32_64)
+-#if CPU(ARM_THUMB2) && CPU(ARM_HARDFP) && OS(LINUX)
+-/* On ARMv7 Linux the JIT is enabled unless explicitly disabled. */
++#if CPU(ARM_THUMB2) && OS(LINUX) && (CPU(ARM_HARDFP) || OS(ANDROID))
++/* On ARMv7 Linux and Android the JIT is enabled unless explicitly disabled. */
+ #if !defined(ENABLE_JIT)
+ #define ENABLE_JIT 1
+ #endif
+
+diff --git a/Source/WTF/wtf/CodePtr.h b/Source/WTF/wtf/CodePtr.h
+index efa00c8f4a..f1acf5da67 100644
+--- a/Source/WTF/wtf/CodePtr.h
++++ b/Source/WTF/wtf/CodePtr.h
+@@ -91,6 +91,13 @@ public:
+         : m_value(encodeFunc(ptr))
+     { }
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++    template<typename Out, typename... In>
++    constexpr CodePtr(Out(JIT_OPERATION_ATTRIBUTES *ptr)(In...))
++        : m_value(encodeFunc(ptr))
++    { }
++#endif
++
+ #if OS(WINDOWS)
+     template<typename Out, typename... In>
+     constexpr CodePtr(Out(SYSV_ABI *ptr)(In...))
+diff --git a/Source/WTF/wtf/FunctionPtr.h b/Source/WTF/wtf/FunctionPtr.h
+index c78c59733c..89140c7821 100644
+--- a/Source/WTF/wtf/FunctionPtr.h
++++ b/Source/WTF/wtf/FunctionPtr.h
+@@ -88,6 +88,12 @@ public:
+         : m_ptr(encode(ptr))
+     { }
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++    constexpr FunctionPtr(Out(JIT_OPERATION_ATTRIBUTES *ptr)(In...))
++        : m_ptr(encode(ptr))
++    { }
++#endif
++
+ #if OS(WINDOWS)
+     constexpr FunctionPtr(Out(SYSV_ABI *ptr)(In...))
+         : m_ptr(encode(ptr))
+diff --git a/Source/WTF/wtf/FunctionTraits.h b/Source/WTF/wtf/FunctionTraits.h
+index 90e9142621..b2b5930596 100644
+--- a/Source/WTF/wtf/FunctionTraits.h
++++ b/Source/WTF/wtf/FunctionTraits.h
+@@ -80,6 +80,12 @@ struct FunctionTraits<Result(Args...)> {
+ 
+ };
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++template<typename Result, typename... Args>
++struct FunctionTraits<Result JIT_OPERATION_ATTRIBUTES(Args...)> : public FunctionTraits<Result(Args...)> {
++};
++#endif
++
+ #if OS(WINDOWS)
+ template<typename Result, typename... Args>
+ struct FunctionTraits<Result SYSV_ABI(Args...)> : public FunctionTraits<Result(Args...)> {
+@@ -90,6 +96,12 @@ template<typename Result, typename... Args>
+ struct FunctionTraits<Result(*)(Args...)> : public FunctionTraits<Result(Args...)> {
+ };
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++template<typename Result, typename... Args>
++struct FunctionTraits<Result JIT_OPERATION_ATTRIBUTES (*)(Args...)> : public FunctionTraits<Result(Args...)> {
++};
++#endif
++
+ #if OS(WINDOWS)
+ template<typename Result, typename... Args>
+ struct FunctionTraits<Result SYSV_ABI (*)(Args...)> : public FunctionTraits<Result(Args...)> {
+@@ -100,10 +112,22 @@ template<typename Result, typename... Args>
+ struct FunctionTraits<Result(Args...) noexcept> : public FunctionTraits<Result(Args...)> {
+ };
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++template<typename Result, typename... Args>
++struct FunctionTraits<Result JIT_OPERATION_ATTRIBUTES(Args...) noexcept> : public FunctionTraits<Result(Args...)> {
++};
++#endif
++
+ template<typename Result, typename... Args>
+ struct FunctionTraits<Result(*)(Args...) noexcept> : public FunctionTraits<Result(Args...)> {
+ };
+ 
++#if CPU(ARM_THUMB2) && OS(ANDROID)
++template<typename Result, typename... Args>
++struct FunctionTraits<Result JIT_OPERATION_ATTRIBUTES (*)(Args...) noexcept> : public FunctionTraits<Result(Args...)> {
++};
++#endif
++
+ } // namespace WTF
+ 
+ using WTF::FunctionTraits;
+diff --git a/Source/JavaScriptCore/offlineasm/arm.rb b/Source/JavaScriptCore/offlineasm/arm.rb
+index adc2cba6aa..3e60b0b890 100644
+--- a/Source/JavaScriptCore/offlineasm/arm.rb
++++ b/Source/JavaScriptCore/offlineasm/arm.rb
+@@ -766,8 +766,11 @@ class Instruction
+             armMoveImmediate(operands[0].value >> 32, operands[1])
+             armMoveImmediate(operands[0].value & 0xffffffff, operands[2])
+         when "mvlbl"
+-                $asm.puts "movw #{operands[1].armOperand}, \#:lower16:#{operands[0].value}"
+-                $asm.puts "movt #{operands[1].armOperand}, \#:upper16:#{operands[0].value}"
++                $asm.puts "ldr #{operands[1].armOperand}, 1f"
++                $asm.puts "b 2f"
++                $asm.puts ".balign 4"
++                $asm.puts "1: .long #{operands[0].value}"
++                $asm.puts "2:"
+         when "sxb2i"
+             $asm.puts "sxtb #{armFlippedOperands(operands)}"
+         when "sxh2i"
+diff --git a/Source/JavaScriptCore/wasm/WasmBBQJIT32_64.h b/Source/JavaScriptCore/wasm/WasmBBQJIT32_64.h
+index b81e1d77c7..f3de255a3d 100644
+--- a/Source/JavaScriptCore/wasm/WasmBBQJIT32_64.h
++++ b/Source/JavaScriptCore/wasm/WasmBBQJIT32_64.h
+@@ -182,7 +182,7 @@ void BBQJIT::emitModOrDiv(Value& lhs, Location lhsLocation, Value& rhs, Location
+     else
+         argType = returnType = TypeKind::I64;
+ 
+-    IntType (*modOrDiv)(IntType, IntType);
++    IntType (JIT_OPERATION_ATTRIBUTES *modOrDiv)(IntType, IntType);
+     if constexpr (IsMod) {
+         if constexpr (is32) {
+             if constexpr (isSigned)
+diff --git a/Source/JavaScriptCore/wasm/WasmBBQJIT.h b/Source/JavaScriptCore/wasm/WasmBBQJIT.h
+index 2e23ad7da6..0ee82a37f4 100644
+--- a/Source/JavaScriptCore/wasm/WasmBBQJIT.h
++++ b/Source/JavaScriptCore/wasm/WasmBBQJIT.h
+@@ -1412,7 +1412,7 @@ public:
+     [[nodiscard]] PartialResult addArrayNew(uint32_t typeIndex, ExpressionType size, ExpressionType initValue, ExpressionType& result);
+     [[nodiscard]] PartialResult addArrayNewDefault(uint32_t typeIndex, ExpressionType size, ExpressionType& result);
+ 
+-    using ArraySegmentOperation = EncodedJSValue SYSV_ABI (&)(JSC::JSWebAssemblyInstance*, uint32_t, uint32_t, uint32_t, uint32_t);
++    using ArraySegmentOperation = EncodedJSValue JIT_OPERATION_ATTRIBUTES (&)(JSC::JSWebAssemblyInstance*, uint32_t, uint32_t, uint32_t, uint32_t);
+     void pushArrayNewFromSegment(ArraySegmentOperation operation, uint32_t typeIndex, uint32_t segmentIndex, ExpressionType arraySize, ExpressionType offset, ExceptionType exceptionType, ExpressionType& result);
+ 
+     [[nodiscard]] PartialResult addArrayNewData(uint32_t typeIndex, uint32_t dataIndex, ExpressionType arraySize, ExpressionType offset, ExpressionType& result);

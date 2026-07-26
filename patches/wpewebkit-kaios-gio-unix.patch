@@ -1,0 +1,49 @@
+From 2c9a37e3d8bf4b5f0b3dd9b1c7629565f1299249 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Sat, 25 Jul 2026 00:00:00 +0800
+Subject: [PATCH] WPE: build Android IPC with GioUnix
+
+The WPE port uses Unix file-descriptor IPC but did not link the GioUnix
+component. Add it explicitly, and retain compatibility with GLib 2.74 when
+MHTML is disabled.
+
+---
+ Source/WebKit/PlatformWPE.cmake                     | 4 ++++
+ Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp | 4 ++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/Source/WebKit/PlatformWPE.cmake b/Source/WebKit/PlatformWPE.cmake
+index d409f5bbe7..617ee6697b 100644
+--- a/Source/WebKit/PlatformWPE.cmake
++++ b/Source/WebKit/PlatformWPE.cmake
+@@ -65,6 +65,10 @@ endif ()
+ 
+ set(WebKit_USE_PREFIX_HEADER ON)
+ 
++list(APPEND WebKit_LIBRARIES
++    GLib::GioUnix
++)
++
+ add_custom_target(webkitwpe-forwarding-headers
+     COMMAND ${PERL_EXECUTABLE} ${WEBKIT_DIR}/Scripts/generate-forwarding-headers.pl --include-path ${WEBKIT_DIR} --output ${FORWARDING_HEADERS_DIR} --platform wpe --platform soup
+ )
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+index ec346cd30e..17d6f55493 100644
+--- a/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitWebView.cpp
+@@ -4984,7 +4984,7 @@ void webkit_web_view_save(WebKitWebView* webView, WebKitSaveMode saveMode, GCanc
+         getContentsAsMHTMLDataCallback(data, task);
+     });
+ #else
+-    g_task_return_new_error_literal(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "WebKit was built without MHTML support which this API requires");
++    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "%s", "WebKit was built without MHTML support which this API requires");
+ #endif // ENABLE(MHTML)
+ }
+@@ -5060,6 +5060,6 @@ void webkit_web_view_save_to_file(WebKitWebView* webView, GFile* file, WebKitSav
+         getContentsAsMHTMLDataCallback(data, task);
+     });
+ #else
+-    g_task_return_new_error_literal(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "WebKit was built without MHTML support which this API requires");
++    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "%s", "WebKit was built without MHTML support which this API requires");
+ #endif // ENABLE(MHTML)
+ }
