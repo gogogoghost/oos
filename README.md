@@ -8,6 +8,8 @@ and validated independently before application logic is added.
 ## Repository Layout
 
 - `app/main.cpp`: production `oos` process entry point.
+- `core`: device-independent runtime modules. `oos_input` provides reusable
+  Linux evdev key capture for the future production event loop.
 - `devices/nokia-2780-flip/include/oos/nokia2780`: reusable public display
   interfaces for the validated Nokia 2780 implementation.
 - `devices/nokia-2780-flip/src`: device display and WPE/HWC implementation.
@@ -84,12 +86,16 @@ Other repeatable tests are:
 ./scripts/test-primary-lifecycle.sh 3
 ./scripts/test-display-lifecycle.sh 3
 ./scripts/run-cover-test.sh secondary
+./scripts/test-key-input.sh
 ./scripts/run-wpe-chroot.sh start
 ./scripts/run-wpe-chroot.sh stop
 ```
 
 See `devices/nokia-2780-flip/README.md` for the hardware constraints, public
 API ownership rules, and individual test targets.
+
+See [docs/input.md](docs/input.md) for the shared key input API, the detected
+Nokia 2780 input topology, exclusive-grab policy, and visual test workflow.
 
 ## Runtime Packaging
 

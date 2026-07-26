@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OOS Key Input Test</title>
+<style>
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #102a43;
+  color: #f7fafc;
+  font-family: sans-serif;
+}
+
+body {
+  display: grid;
+  grid-template-rows: 44px 1fr 64px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: #0b1f33;
+  color: #9fb3c8;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+main {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  text-align: center;
+}
+
+#code {
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+#name {
+  min-height: 26px;
+  margin-top: 14px;
+  color: #63d9b6;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+#action {
+  margin-top: 8px;
+  color: #bcccdc;
+  font-size: 16px;
+  text-transform: uppercase;
+}
+
+footer {
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 8px 12px;
+  border-top: 1px solid #334e68;
+  color: #829ab1;
+  font-size: 13px;
+  line-height: 20px;
+}
+</style>
+<header>OOS KEY INPUT</header>
+<main>
+  <div id="code">--</div>
+  <div id="name">Waiting for key</div>
+  <div id="action">ready</div>
+</main>
+<footer>
+  <div id="device">EV_KEY devices initialized</div>
+  <div id="path">/dev/input/event*</div>
+</footer>
+<script>
+const code = document.getElementById('code');
+const name = document.getElementById('name');
+const action = document.getElementById('action');
+const device = document.getElementById('device');
+const path = document.getElementById('path');
+
+window.oosShowKey = (keyCode, keyName, keyAction, deviceName, devicePath) => {
+  code.textContent = String(keyCode);
+  name.textContent = keyName;
+  action.textContent = keyAction;
+  device.textContent = deviceName;
+  path.textContent = devicePath;
+};
+</script>
+</html>

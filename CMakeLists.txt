@@ -28,6 +28,10 @@ option(BUILD_NOKIA_2780_FLIP "Build Nokia 2780 Flip platform support" ON)
 option(BUILD_NOKIA_8110_4G "Enable the Nokia 8110 4G device slot" OFF)
 option(OOS_BUILD_DEVICE_TESTS "Build on-device display tests" ON)
 
+add_library(oos_input STATIC core/src/key_input.cpp)
+target_include_directories(oos_input PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/core/include")
+
 add_executable(oos app/main.cpp)
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
 target_link_options(oos PRIVATE -nostdlib++)

@@ -86,15 +86,18 @@ start() {
     "$ROOT/system/lib/libc++_shared.so"
 
   program_args=""
+  program="oos_test_nokia_2780_wpe_display"
   if [ "$mode" = "switch-demo" ]; then
     program_args="--switch-demo"
+  elif [ "$mode" = "input-test" ]; then
+    program="oos_test_nokia_2780_key_input"
   fi
   rm -f "$LOG"
   chroot "$ROOT" /system/bin/sh -c "
     export LD_LIBRARY_PATH=$RUNTIME/lib:/apex/com.android.runtime/lib
     export WEBKIT_EXEC_PATH=$RUNTIME/libexec/wpe-webkit-2.0
     export WPE_BACKEND=$RUNTIME/lib/libWPEBackend-android.so
-    exec $RUNTIME/oos_test_nokia_2780_wpe_display $program_args
+    exec $RUNTIME/$program $program_args
   " >"$LOG" 2>&1 &
   echo $! > "$PID_FILE"
   echo "started pid=$(cat "$PID_FILE") log=$LOG"
@@ -103,11 +106,12 @@ start() {
 case "${1:-start}" in
   start) start ;;
   switch-demo) start switch-demo ;;
+  input-test) start input-test ;;
   stop) stop ;;
   reset) reset_displays ;;
   status)
     [ -f "$PID_FILE" ] && ps -p "$(cat "$PID_FILE")" -o PID,ARGS || true
     cat "$LOG" 2>/dev/null || true
     ;;
-  *) echo "usage: $0 {start|switch-demo|stop|status}" >&2; exit 2 ;;
+  *) echo "usage: $0 {start|switch-demo|input-test|stop|status}" >&2; exit 2 ;;
 esac

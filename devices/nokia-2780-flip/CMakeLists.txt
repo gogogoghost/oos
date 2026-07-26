@@ -143,12 +143,25 @@ if(OOS_BUILD_DEVICE_TESTS)
     "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
     "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so")
 
+  add_executable(oos_test_nokia_2780_key_input
+    tests/key_input_test.cpp)
+  oos_nokia_2780_android_target(oos_test_nokia_2780_key_input)
+  target_include_directories(oos_test_nokia_2780_key_input PRIVATE
+    ${NOKIA_2780_WPE_INCLUDES})
+  target_link_libraries(oos_test_nokia_2780_key_input PRIVATE
+    oos_input
+    oos_nokia_2780_wpe_display
+    "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
+    "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
+    "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so")
+
   set_target_properties(
     oos_test_nokia_2780_primary_gl
     oos_test_nokia_2780_primary_bufferqueue
     oos_test_nokia_2780_cover_green
     oos_test_nokia_2780_cover_secondary
     oos_test_nokia_2780_wpe_display
+    oos_test_nokia_2780_key_input
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${CMAKE_BINARY_DIR}/bin/tests/nokia-2780-flip")
 endif()

@@ -26,6 +26,12 @@ The production `oos` entry point is currently empty and does not link these
 libraries yet. They are ready for use when the application lifecycle is
 defined.
 
+Physical keys are captured by the device-independent `oos_input` library.
+It discovers nodes by `EV_KEY` capability rather than relying on unstable
+`eventN` numbering. The Nokia 2780 matrix keypad, power/volume controls,
+headset buttons, and flip hall sensor are all visible through this API. See
+`docs/input.md` for the observed topology and ownership contract.
+
 ## Validated Display Paths
 
 The primary display is 240x320 RGB565. WPE WebKit supplies Android hardware
@@ -68,11 +74,14 @@ All executable test entry points and fixtures live under `tests`:
 - `oos_test_nokia_2780_cover_secondary`: labeled cover fixture.
 - `oos_test_nokia_2780_cover_green`: solid RGB565 cover fixture.
 - `oos_test_nokia_2780_primary_bufferqueue`: exploratory BufferQueue path.
+- `oos_test_nokia_2780_key_input`: WPE visualizer for raw Linux key codes,
+  actions, and source devices.
 
 Run the validated fast switch test with:
 
 ```sh
 ./scripts/test-single-process-switch.sh
+./scripts/test-key-input.sh
 ```
 
 The device launcher creates a temporary chroot and overlays only its view of
