@@ -105,18 +105,28 @@ target_link_libraries(oos_nokia_2780_wpe_display PUBLIC
   "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEBackend-android.so"
   EGL GLESv2 android)
 
+add_library(oos_nokia_2780_gles_display STATIC
+  src/primary_gles_display.cpp)
+oos_nokia_2780_android_target(oos_nokia_2780_gles_display)
+target_include_directories(oos_nokia_2780_gles_display PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(oos_nokia_2780_gles_display PRIVATE
+  "${CMAKE_SOURCE_DIR}/core/include"
+  "${CMAKE_SOURCE_DIR}/sdk/include")
+target_link_libraries(oos_nokia_2780_gles_display PUBLIC
+  oos_nokia_2780_display EGL GLESv2 android)
+
 target_sources(oos PRIVATE src/oos_runtime.cpp)
 oos_nokia_2780_android_target(oos)
 target_include_directories(oos PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   "${CMAKE_SOURCE_DIR}/core/include"
-  ${NOKIA_2780_WPE_INCLUDES})
+  "${CMAKE_SOURCE_DIR}/sdk/include"
+  "${NOKIA_2780_WPE_SYSROOT}/include")
 target_link_libraries(oos PRIVATE
   oos_input
-  oos_nokia_2780_wpe_display
-  "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
-  "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
-  "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
+  oos_wasm_runtime
+  oos_nokia_2780_gles_display
   "${NOKIA_2780_WPE_SYSROOT}/lib/libpng16.so")
 
 add_library(oos_nokia_2780_network STATIC
@@ -252,6 +262,16 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_link_libraries(oos_test_nokia_2780_hardware_headless PRIVATE
     oos_nokia_2780_hardware)
 
+  add_executable(oos_test_nokia_2780_wasm_multi_app
+    tests/wasm_multi_app_test.cpp)
+  oos_nokia_2780_android_target(oos_test_nokia_2780_wasm_multi_app)
+  target_include_directories(oos_test_nokia_2780_wasm_multi_app PRIVATE
+    "${CMAKE_SOURCE_DIR}/core/include"
+    "${CMAKE_SOURCE_DIR}/sdk/include")
+  target_link_libraries(oos_test_nokia_2780_wasm_multi_app PRIVATE
+    oos_wasm_runtime
+    oos_nokia_2780_gles_display)
+
   set_target_properties(
     oos_test_nokia_2780_primary_gl
     oos_test_nokia_2780_primary_bufferqueue
@@ -262,6 +282,7 @@ if(OOS_BUILD_DEVICE_TESTS)
     oos_test_nokia_2780_network_headless
     oos_test_nokia_2780_modem_headless
     oos_test_nokia_2780_hardware_headless
+    oos_test_nokia_2780_wasm_multi_app
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     "${CMAKE_BINARY_DIR}/bin/tests/nokia-2780-flip")
 endif()

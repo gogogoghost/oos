@@ -53,7 +53,10 @@ mkdir -p "$OOS_PERSIST_DIR/tmp" "$OOS_PERSIST_DIR/cache" \
   "$OOS_PERSIST_DIR/share"
 
 chroot "$OOS_ROOTFS" /system/bin/sh -c \
-  'exec /opt/oos/bin/oos "$@"' oos "$@" &
+  'if [ "$#" -eq 0 ] && [ -f /opt/oos/apps/launcher.aot ]; then
+     exec /opt/oos/bin/oos /opt/oos/apps/launcher.aot
+   fi
+   exec /opt/oos/bin/oos "$@"' oos "$@" &
 oos_pid=$!
 echo "$oos_pid" > "$OOS_PID_FILE"
 

@@ -2,16 +2,23 @@
 
 Orange OS (`oos`) is a native C++ system shell intended to replace B2G on
 KaiOS devices. The production executable presents a native boot frame, starts
-WPE WebKit, loads the Solid.js launcher, and forwards physical keys into its
-Web System UI.
+the WAMR native-app runtime, loads an egui Launcher compiled to WebAssembly,
+and forwards physical keys through the capability-limited OOS ABI. WPE WebKit
+remains packaged for running compatible KaiOS applications; it is no longer
+the system Launcher runtime.
 
 ## Repository Layout
 
 - `app/main.cpp`: production `oos` process entry point.
-- `launcher`: Solid.js and Tailwind CSS Web System UI launcher, built into
-  each versioned runtime package.
+- `apps/launcher`: production egui Launcher compiled to WebAssembly.
+- `sdk/rust/oos-app`: low-level Rust bindings for the OOS native-app ABI.
+- `sdk/rust/oos-egui`: reusable egui texture and mesh adapter.
+- `launcher`: retained Solid.js/WPE prototype for KaiOS web-app work.
+- `runtime/wamr`: pinned WAMR runtime configuration.
 - `core`: device-independent runtime modules. `oos_input` provides reusable
-  Linux evdev key capture for the future production event loop. The network
+  Linux evdev key capture for the production event loop. The native app
+  manager keeps up to three isolated WASM apps resident while only the active
+  app receives input and frame callbacks. The network
   interfaces define reusable Wi-Fi, IP, and Bluetooth lifecycle APIs. The
   modem interface exposes Radio HAL state without leaking HIDL types. Hardware
   interfaces cover audio, vibration, power/flip lifecycle, camera/flash, and
@@ -24,8 +31,8 @@ Web System UI.
 - `devices/nokia-8110-4g`: reserved device slot; no implementation yet.
 - `scripts`: build, deployment, and test runners.
 - `packaging/scaffold`: stable device-side bootstrap script templates.
-- `third_party`: local AOSP, Gecko, KaiOS, and WPE checkouts, excluded from the
-  main Git repository.
+- `third_party`: local AOSP, Gecko, KaiOS, WAMR, and WPE checkouts, excluded
+  from the main Git repository. Their pinned revisions are tracked separately.
 - `patches`: tracked compatibility changes for clean third-party checkouts.
 
 Production code must not depend on files under a device's `tests` directory.
@@ -45,18 +52,25 @@ Distrobox. Leave it unset to build in the current environment.
 `WPE_BUILD_JOBS` optionally caps parallel compilation; it defaults to all
 available CPU threads.
 
+WAMR builds locally by default. Set `OOS_WAMR_DISTROBOX=oos-debian12` when a
+compatible LLVM is provided by that container. WAMR 2.4.4 is currently built
+with LLVM 14. This setting is intentionally independent of `WPE_DISTROBOX`.
+
 Build the WPE runtime, configure the Android target, and compile Orange OS:
 
 ```sh
 ./scripts/build-wpe-sysroot.sh
+./scripts/fetch-wamr.sh
+./scripts/build-native-app-aot.sh
 ./scripts/configure-android.sh nokia-2780-flip
 cmake --build build/android-nokia-2780-flip -j8
-./scripts/build-launcher.sh
 ```
 
 The outputs are:
 
 - `build/android-nokia-2780-flip/bin/oos`: production executable.
+- `build/native-apps/launcher.wasm`: portable interpreter/debug Launcher.
+- `build/native-apps/launcher.aot`: production ARMv7 AOT Launcher.
 - `build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/`: on-device tests.
 
 The KaiOS performance profile deliberately retains JavaScriptCore Baseline and
@@ -157,3 +171,7 @@ outputs with:
 See [docs/deployment.md](docs/deployment.md) for the production
 `/system/oos`, trial `/data/local/tmp/oos`, persistent `/data/oos`, upgrade,
 mount, and lifecycle contract.
+
+See [docs/wasm-runtime.md](docs/wasm-runtime.md) for the native-app lifecycle,
+graphics ABI, WAMR isolation model, egui adapter, and iced/LVGL integration
+plan.

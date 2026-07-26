@@ -1,0 +1,9 @@
+[package]
+name = "oos-egui"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+egui = { version = "0.35.0", default-features = false }
+oos-app = { path = "../oos-app" }

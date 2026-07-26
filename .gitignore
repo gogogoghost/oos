@@ -9,6 +9,7 @@
 /launcher/dist/
 /launcher/node_modules/
 /launcher/*.tsbuildinfo
+/target/
 
 # Device dumps, images, traces, and extracted system artifacts
 /artifacts/
@@ -20,6 +21,7 @@
 # External source checkouts retain their own repositories and are not vendored.
 /third_party/*
 !/third_party/README.md
+!/third_party/versions.env
 
 # Local agent state
 /.agents/

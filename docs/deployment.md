@@ -4,8 +4,8 @@ The deployable OOS system is split into a stable bootstrap scaffold and a
 versioned `res` runtime. In this context, `res` is the complete OOS runtime,
 not web application content. It contains the `oos` executable, WPE WebKit,
 shared libraries, WebKit helper processes, runtime data, and certificates.
-It also contains the compiled launcher and device boot splash under
-`share/oos`; both are upgraded atomically with the native runtime.
+It also contains WAMR native applications and the device boot splash; all are
+upgraded atomically with the native runtime.
 
 ## Installed Layout
 
@@ -24,6 +24,10 @@ oos/
 ├── rootfs/
 ├── res -> res-1.0.0
 ├── res-1.0.0/
+│   ├── apps/launcher.aot
+│   ├── apps/launcher.wasm
+│   ├── bin/oos
+│   └── ...
 └── res-1.0.1/
 ```
 
@@ -96,15 +100,11 @@ adb shell "su -c '/data/local/tmp/oos/start.sh'"
 
 `start.sh` performs idempotent initialization, so invoking `init.sh` manually
 is not required. The production entry presents the 240x320 boot splash,
-initializes WPE WebKit, loads the packaged launcher, and forwards physical
-navigation keys to it.
-
-The launcher is built as one self-contained HTML file because the device WPE
-port does not reliably load `file://` CSS and JavaScript subresources from a
-page supplied with `webkit_web_view_load_html()`. Startup logs include a
-one-shot DOM health report. Set `OOS_WEBKIT_CONSOLE=1` only while diagnosing
-JavaScript; the Qualcomm graphics stack emits high-volume warnings when the
-WebKit console is continuously mirrored to standard output.
+loads `/opt/oos/apps/launcher.aot` in WAMR, and forwards physical navigation
+keys to it. If no AOT file is present, `oos` can still be invoked explicitly
+with `/opt/oos/apps/launcher.wasm` for interpreter diagnostics. WPE libraries
+remain in the res package for the future single-foreground KaiOS application
+runner.
 
 ## Upgrade
 

@@ -65,16 +65,19 @@ DESTINATION="$OUTPUT_DIR/$RES_NAME"
 
 OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
 WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
-LAUNCHER_DIST="$ROOT_DIR/launcher/dist"
+NATIVE_APPS="$ROOT_DIR/build/native-apps"
 BOOT_SPLASH="$ROOT_DIR/assets/boot/$DEVICE/boot-splash.png"
 LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
+WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
 package_require_file "$OOS_BINARY"
 package_require_directory "$WPE_SYSROOT/lib"
 package_require_directory "$WPE_SYSROOT/libexec"
-"$ROOT_DIR/scripts/build-launcher.sh"
-package_require_directory "$LAUNCHER_DIST"
+"$ROOT_DIR/scripts/build-native-app-aot.sh"
+package_require_file "$NATIVE_APPS/launcher.wasm"
+package_require_file "$NATIVE_APPS/launcher.aot"
 package_require_file "$BOOT_SPLASH"
 package_require_file "$LUCIDE_LICENSE"
+package_require_file "$WAMR_LICENSE"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -100,13 +103,16 @@ cleanup() {
 trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
-  "$STAGING/share/oos/launcher" "$STAGING/share/licenses/oos" \
+  "$STAGING/apps" "$STAGING/share/oos" "$STAGING/share/licenses/oos" \
   "$STAGING/etc"
 
-rsync -a "$LAUNCHER_DIST/" "$STAGING/share/oos/launcher/"
+install -m 0644 "$NATIVE_APPS/launcher.wasm" "$STAGING/apps/launcher.wasm"
+install -m 0644 "$NATIVE_APPS/launcher.aot" "$STAGING/apps/launcher.aot"
 install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
 install -m 0644 "$LUCIDE_LICENSE" \
   "$STAGING/share/licenses/oos/Lucide.txt"
+install -m 0644 "$WAMR_LICENSE" \
+  "$STAGING/share/licenses/oos/WAMR.txt"
 
 declare -A COPIED_ELF=()
 declare -a ELF_QUEUE=()
@@ -206,6 +212,9 @@ printf '%s\n' \
   "android_api=29" \
   "javascript_jit=baseline,dfg" \
   "webassembly_jit=bbq" \
+  "native_app_runtime=wamr-2.4.4" \
+  "native_app_execution=aot" \
+  "launcher_framework=egui-0.35" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   > "$STAGING/manifest.env"
