@@ -35,6 +35,22 @@ The stock kernel currently reports:
 | `qpnp_pon` | `/dev/input/event0` | power, volume down |
 | `soc:gpio_keys` | `/dev/input/event3` | volume up, programmable key |
 | `hall_sensor` | `/dev/input/event2` | flip state as key code 249 |
+
+## Nokia 8110 4G
+
+The discovered topology is likewise matched by capability and device name,
+not by the current `eventN` assignment:
+
+| Kernel name | Observed role |
+| --- | --- |
+| `matrix_keypad` | navigation, numeric, call, and soft keys |
+| `hall_sensor0`, `hall_sensor1` | slider state sources |
+| `qpnp_pon`, `gpio-keys` | power and side keys |
+| `msm8909-skub-snd-card Button Jack` | headset button |
+| `msm8909-skub-snd-card Headset Jack` | headset insertion state |
+
+The same `KeyInput` implementation and OOS WASM key ABI are used on both
+devices.
 | `msm8952-snd-card-mtp Button Jack` | `/dev/input/event5` | headset media and volume buttons |
 
 The observed node column is diagnostic information, not an API guarantee.

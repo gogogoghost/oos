@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$DEVICE" == nokia-2780-flip ]] ||
+[[ "$DEVICE" == nokia-2780-flip || "$DEVICE" == nokia-8110-4g ]] ||
   package_die "Res packaging is not implemented for $DEVICE"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] ||
   package_die "Invalid or missing res version: $VERSION"
@@ -67,6 +67,9 @@ OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
 WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
 NATIVE_APPS="$ROOT_DIR/build/native-apps"
 BOOT_SPLASH="$ROOT_DIR/assets/boot/$DEVICE/boot-splash.png"
+if [[ ! -f "$BOOT_SPLASH" ]]; then
+  BOOT_SPLASH="$ROOT_DIR/assets/boot/nokia-2780-flip/boot-splash.png"
+fi
 LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
 package_require_file "$OOS_BINARY"
@@ -90,8 +93,15 @@ if [[ ! -f "$CXX_RUNTIME" ]]; then
   CXX_RUNTIME="$WPE_NDK/sources/cxx-stl/llvm-libc++/libs/armeabi-v7a/libc++_shared.so"
 fi
 package_require_file "$CXX_RUNTIME"
-SYSTEM_DIR=${SYSTEM_DIR:-}
+case "$DEVICE" in
+  nokia-2780-flip) SYSTEM_DIR=${NOKIA_2780_SYSTEM_DIR:-} ;;
+  nokia-8110-4g) SYSTEM_DIR=${NOKIA_8110_SYSTEM_DIR:-} ;;
+esac
 package_require_directory "$SYSTEM_DIR/lib"
+source "$ROOT_DIR/config/wpe/devices/$DEVICE.env"
+package_require_file "$WPE_SYSROOT/.oos-wpe-profile"
+grep -q "^device=$DEVICE$" "$WPE_SYSROOT/.oos-wpe-profile" ||
+  package_die "WPE sysroot profile does not target $DEVICE"
 
 STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/oos-res.XXXXXX")
 cleanup() {
@@ -209,7 +219,9 @@ printf '%s\n' \
   "version=$VERSION" \
   "device=$DEVICE" \
   "abi=armeabi-v7a" \
-  "android_api=29" \
+  "android_api=$OOS_WPE_ANDROID_API" \
+  "wpe_profile=$OOS_WPE_PROFILE" \
+  "buffer_abi=$OOS_WPE_BUFFER_ABI" \
   "javascript_jit=baseline,dfg" \
   "webassembly_jit=bbq" \
   "native_app_runtime=wamr-2.4.4" \

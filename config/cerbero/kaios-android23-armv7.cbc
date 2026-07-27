@@ -1,0 +1,28 @@
+import os
+
+from cerbero.enums import DistroVersion
+
+# Nokia 8110 4G is based on Android 6.0.1. API 23 is a hard ABI boundary:
+# binaries from the API 29 profile may reference Bionic and libandroid symbols
+# which do not exist on this device.
+target_distro_version = DistroVersion.ANDROID_MARSHMALLOW
+toolchain_prefix = os.environ.get(
+    "KAIOS_WPE_NDK", "/home/jax/Android/Sdk/ndk/magisk")
+variants.override('norust')
+
+_project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_cerbero_root = os.path.join(_project_root, "third_party", "wpe-android-cerbero")
+_profile = "android23-armv7-jit"
+num_of_cpus = int(os.environ.get("WPE_BUILD_JOBS", "8"))
+
+prefix = os.environ.get(
+    "OOS_WPE_PREFIX",
+    os.path.join(_project_root, "build", "wpe-sysroot", "nokia-8110-4g"))
+sources = os.path.join(_cerbero_root, "build", "sources", _profile)
+local_sources = os.path.join(
+    _project_root, "build", "wpe-source-cache", _profile)
+logs = os.path.join(_project_root, "build", "wpe-logs", _profile)
+# Cerbero otherwise derives android_armv7.cache from the architecture, which
+# would make API 23 reuse API 29 recipe completion records despite a different
+# prefix and Bionic ABI.
+cache_file = _profile + ".cache"

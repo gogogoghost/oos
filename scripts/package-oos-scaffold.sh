@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$DEVICE" == nokia-2780-flip ]] ||
+[[ "$DEVICE" == nokia-2780-flip || "$DEVICE" == nokia-8110-4g ]] ||
   package_die "Scaffold packaging is not implemented for $DEVICE"
 [[ "$RES_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] ||
   package_die "Invalid res version: $RES_VERSION"
@@ -85,12 +85,17 @@ mkdir -p "$STAGING/rootfs/system" \
 # Keep the compatibility entirely inside the chroot until WPE is rebuilt with
 # /opt/oos as its install prefix.
 ln -s /opt/oos \
-  "$STAGING/rootfs/home/jax/project/oos/build/wpe-sysroot/nokia-2780-flip"
+  "$STAGING/rootfs/home/jax/project/oos/build/wpe-sysroot/$DEVICE"
+
+case "$DEVICE" in
+  nokia-2780-flip) HWC_SERVICE=vendor.hwcomposer-2-1 ;;
+  nokia-8110-4g) HWC_SERVICE= ;;
+esac
 
 printf '%s\n' \
   "OOS_SCAFFOLD_FORMAT=1" \
   "OOS_DEVICE=$DEVICE" \
-  "OOS_HWC_SERVICE=vendor.hwcomposer-2-1" \
+  "OOS_HWC_SERVICE=$HWC_SERVICE" \
   > "$STAGING/bootstrap.conf"
 
 printf '%s\n' \

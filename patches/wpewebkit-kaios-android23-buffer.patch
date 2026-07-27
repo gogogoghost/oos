@@ -1,0 +1,68 @@
+From c60f77840dcf37c0203380a21a436d945eeac023 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Mon, 27 Jul 2026 00:00:00 +0800
+Subject: [PATCH] WPE: accept OOS Android 6 hardware buffers
+
+Allow the Android component check and EGL import path to use the OOS API 23
+AHardwareBuffer compatibility library.
+
+---
+
+diff --git a/Source/cmake/FindAndroid.cmake b/Source/cmake/FindAndroid.cmake
+index a064f0e84d3a..310b511f86f4 100644
+--- a/Source/cmake/FindAndroid.cmake
++++ b/Source/cmake/FindAndroid.cmake
+@@ -115,11 +115,21 @@ function(_AndroidDefineComponent target libname header symbol)
+     set(Android_COMPONENT_${target}_DEPS "${opt_UNPARSED_ARGUMENTS}" PARENT_SCOPE)
+ endfunction()
+ 
+-_AndroidDefineComponent(Android
+-    android
+-    android/hardware_buffer.h
+-    AHardwareBuffer_allocate
+-)
++if (OOS_ANDROID_LEGACY_BUFFER_LIBRARY)
++    # Android 6 does not export AHardwareBuffer. OOS supplies the same C API
++    # over gralloc0 native handles and keeps libandroid for the remaining API.
++    _AndroidDefineComponent(Android
++        "${OOS_ANDROID_LEGACY_BUFFER_LIBRARY};android"
++        android/hardware_buffer.h
++        AHardwareBuffer_allocate
++    )
++else ()
++    _AndroidDefineComponent(Android
++        android
++        android/hardware_buffer.h
++        AHardwareBuffer_allocate
++    )
++endif ()
+ _AndroidDefineComponent(Log
+     log
+     android/log.h
+diff --git a/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp b/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
+index e03871b92a98..34e6c234f64f 100644
+--- a/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
++++ b/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/AcceleratedSurface.cpp
+@@ -70,6 +70,10 @@
+ #include <wtf/android/RefPtrAndroid.h>
+ #endif
+ 
++#if OS(ANDROID) && defined(OOS_ANDROID_LEGACY_BUFFER)
++extern "C" EGLClientBuffer oos_eglGetNativeClientBufferANDROID(const AHardwareBuffer*);
++#endif
++
+ #if USE(GLIB_EVENT_LOOP)
+ #include <wtf/glib/RunLoopSourcePriority.h>
+ #endif
+@@ -430,7 +434,11 @@ std::unique_ptr<AcceleratedSurface::RenderTarget> AcceleratedSurface::RenderTarg
+     const Vector<EGLAttrib> attributes { EGL_IMAGE_PRESERVED, EGL_TRUE, EGL_NONE };
+ 
+     auto& display = WebCore::PlatformDisplay::sharedDisplay();
++#if defined(OOS_ANDROID_LEGACY_BUFFER)
++    auto clientBuffer = oos_eglGetNativeClientBufferANDROID(hardwareBuffer.get());
++#else
+     auto clientBuffer = eglGetNativeClientBufferANDROID(hardwareBuffer.get());
++#endif
+     if (!clientBuffer) {
+         LOG_ERROR("Failed to create client buffer for AHarwareBuffer of size %dx%d, format %s. EGL error: %#04x",
+             size.width(), size.height(), FourCC(bufferFormat.fourcc).string().data(), eglGetError());

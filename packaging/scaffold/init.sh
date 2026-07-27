@@ -22,16 +22,13 @@ mount_bind() {
   record_mount "$target_path"
 }
 
-mount_file() {
+mount_bind_optional() {
   source_path=$1
   target_path=$2
-  require_file "$source_path" || return 1
-  require_file "$target_path" || return 1
-  if is_mounted "$target_path"; then
+  if [ ! -d "$source_path" ]; then
     return 0
   fi
-  mount --bind "$source_path" "$target_path"
-  record_mount "$target_path"
+  mount_bind "$source_path" "$target_path"
 }
 
 mount_filesystem() {
@@ -71,12 +68,11 @@ mount_bind /system "$OOS_ROOTFS/system"
 mount_bind /dev "$OOS_ROOTFS/dev"
 mount_filesystem proc proc "$OOS_ROOTFS/proc"
 mount_filesystem sysfs sysfs "$OOS_ROOTFS/sys"
-mount_bind /vendor "$OOS_ROOTFS/vendor"
-mount_bind /apex/com.android.runtime "$OOS_ROOTFS/apex/com.android.runtime"
+mount_bind_optional /vendor "$OOS_ROOTFS/vendor"
+mount_bind_optional /apex/com.android.runtime \
+  "$OOS_ROOTFS/apex/com.android.runtime"
 mount_bind "$OOS_PERSIST_DIR" "$OOS_ROOTFS/data"
 mount_bind "$OOS_RES_DIR" "$OOS_ROOTFS/opt/oos"
-mount_file "$OOS_RES_DIR/lib/libc++_shared.so" \
-  "$OOS_ROOTFS/system/lib/libc++_shared.so"
 
 echo "$OOS_RES_DIR" > "$OOS_ACTIVE_RES_FILE"
 ADDED_MOUNTS=

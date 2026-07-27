@@ -3,77 +3,113 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-DEVICE_SCRIPT="$ROOT_DIR/devices/nokia-2780-flip/scripts/wpe_chroot_device.sh"
-WPE_TEST="$ROOT_DIR/build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/oos_test_nokia_2780_wpe_display"
-INPUT_TEST="$ROOT_DIR/build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/oos_test_nokia_2780_key_input"
-WPE_INJECTED_BUNDLE="$ROOT_DIR/build/wpe-sysroot/nokia-2780-flip/lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so"
-WPE_BACKEND="$ROOT_DIR/build/wpe-sysroot/nokia-2780-flip/lib/libWPEBackend-android.so"
-WPE_HTML="$ROOT_DIR/devices/nokia-2780-flip/assets/hello.html"
-INPUT_HTML="$ROOT_DIR/devices/nokia-2780-flip/assets/input-test.html"
-REMOTE=/data/local/tmp/oos-wpe
 ADB=${ADB:-adb}
+DEVICE=nokia-2780-flip
+ACTION=start
+
+if [[ ${1:-} == nokia-* ]]; then
+  DEVICE=$1
+  shift
+fi
+if [[ $# -gt 0 ]]; then
+  ACTION=$1
+  shift
+fi
+[[ $# -eq 0 ]] || { echo "usage: $0 [DEVICE] {start|input-test|stop|status}" >&2; exit 2; }
+
+case "$DEVICE" in
+  nokia-2780-flip|nokia-8110-4g) ;;
+  *) echo "unsupported WPE device: $DEVICE" >&2; exit 2 ;;
+esac
+case "$ACTION" in
+  start|input-test|stop|status) ;;
+  *) echo "usage: $0 [DEVICE] {start|input-test|stop|status}" >&2; exit 2 ;;
+esac
+
+REMOTE=/data/local/tmp/oos-wpe
+DEVICE_SCRIPT="$ROOT_DIR/scripts/device/wpe_chroot_device.sh"
+WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
+WPE_PRODUCER="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_${DEVICE//-/_}_wpe_producer"
+WPE_HOST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_${DEVICE//-/_}_wpe_host"
+INPUT_TEST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_nokia_2780_key_input"
+WPE_HTML="$ROOT_DIR/tests/web/assets/hello.html"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
   source "$ROOT_DIR/.env"
   set +a
 fi
-
 WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
 CXX_RUNTIME="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so"
 if [[ ! -f "$CXX_RUNTIME" ]]; then
   CXX_RUNTIME="$WPE_NDK/sources/cxx-stl/llvm-libc++/libs/armeabi-v7a/libc++_shared.so"
 fi
-if [[ ! -x "$WPE_TEST" ]]; then
-  echo "Missing WPE display test binary: $WPE_TEST" >&2
-  exit 1
+
+adb_root_shell() {
+  local command=$1
+  local uid
+  uid=$($ADB shell id -u 2>/dev/null | tr -d '\r')
+  if [[ $uid == 0 ]]; then
+    "$ADB" shell "$command"
+  else
+    "$ADB" shell "su -c '$command'"
+  fi
+}
+
+if [[ $ACTION == stop || $ACTION == status ]]; then
+  adb_root_shell "if [ -x $REMOTE/wpe_chroot_device.sh ]; then $REMOTE/wpe_chroot_device.sh $ACTION; fi"
+  exit 0
 fi
-if [[ ! -x "$INPUT_TEST" ]]; then
-  echo "Missing key input test binary: $INPUT_TEST" >&2
-  exit 1
-fi
-if [[ ! -f "$WPE_INJECTED_BUNDLE" ]]; then
-  echo "Missing WPE injected bundle: $WPE_INJECTED_BUNDLE" >&2
-  exit 1
-fi
-if [[ ! -f "$WPE_BACKEND" ]]; then
-  echo "Missing WPE Android backend: $WPE_BACKEND" >&2
-  exit 1
-fi
-if [[ ! -f "$WPE_HTML" ]]; then
-  echo "Missing WPE HTML fixture: $WPE_HTML" >&2
-  exit 1
-fi
-if [[ ! -f "$INPUT_HTML" ]]; then
-  echo "Missing key input HTML fixture: $INPUT_HTML" >&2
-  exit 1
-fi
-if [[ ! -f "$CXX_RUNTIME" ]]; then
-  echo "Cannot find ARMv7 libc++_shared.so in WPE_NDK=$WPE_NDK" >&2
+
+for required in "$DEVICE_SCRIPT" "$WPE_PRODUCER" "$WPE_HOST" "$WPE_HTML" \
+  "$CXX_RUNTIME" \
+  "$WPE_SYSROOT/lib/libWPEBackend-android.so" \
+  "$WPE_SYSROOT/lib/libWPEWebKit-2.0.so" \
+  "$WPE_SYSROOT/libexec/wpe-webkit-2.0/WPEWebProcess"; do
+  [[ -f "$required" ]] || { echo "missing WPE runtime file: $required" >&2; exit 1; }
+done
+if [[ $ACTION == input-test && ! -x $INPUT_TEST ]]; then
+  echo "input test is available only after building the Nokia 2780 target" >&2
   exit 1
 fi
 
-case "${1:-start}" in
-  start|switch-demo|input-test)
-    ACTION=${1:-start}
-    "$ADB" shell "su -c 'mkdir -p $REMOTE/lib/wpe-webkit-2.0/injected-bundle; chmod 0777 $REMOTE $REMOTE/lib $REMOTE/lib/wpe-webkit-2.0 $REMOTE/lib/wpe-webkit-2.0/injected-bundle'"
-    "$ADB" push "$CXX_RUNTIME" "$REMOTE/lib/libc++_shared.so" >/dev/null
-    "$ADB" push "$WPE_TEST" "$REMOTE/oos_test_nokia_2780_wpe_display" >/dev/null
-    "$ADB" push "$INPUT_TEST" "$REMOTE/oos_test_nokia_2780_key_input" >/dev/null
-    "$ADB" push "$WPE_BACKEND" "$REMOTE/lib/libWPEBackend-android.so" >/dev/null
-    "$ADB" push "$WPE_INJECTED_BUNDLE" "$REMOTE/lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so" >/dev/null
-    "$ADB" push "$WPE_HTML" "$REMOTE/hello.html" >/dev/null
-    "$ADB" push "$INPUT_HTML" "$REMOTE/input-test.html" >/dev/null
-    "$ADB" push "$DEVICE_SCRIPT" "$REMOTE/wpe_chroot_device.sh" >/dev/null
-    "$ADB" shell "su -c 'chmod 0755 $REMOTE/wpe_chroot_device.sh; $REMOTE/wpe_chroot_device.sh $ACTION'"
-    sleep 2
-    "$ADB" shell "su -c '$REMOTE/wpe_chroot_device.sh status'"
-    ;;
-  stop|status)
-    "$ADB" shell "su -c '$REMOTE/wpe_chroot_device.sh $1'"
-    ;;
-  *)
-    echo "usage: $0 {start|switch-demo|input-test|stop|status}" >&2
-    exit 2
-    ;;
-esac
+STAGING=$(mktemp -d "${TMPDIR:-/tmp}/oos-wpe-$DEVICE.XXXXXX")
+ARCHIVE=$(mktemp "${TMPDIR:-/tmp}/oos-wpe-$DEVICE.XXXXXX.tgz")
+cleanup() {
+  rm -rf "$STAGING"
+  rm -f "$ARCHIVE"
+}
+trap cleanup EXIT
+mkdir -p "$STAGING/lib" "$STAGING/libexec" "$STAGING/share" "$STAGING/etc"
+cp -a "$WPE_SYSROOT/lib/." "$STAGING/lib/"
+cp -a "$WPE_SYSROOT/libexec/." "$STAGING/libexec/"
+if [[ -d "$WPE_SYSROOT/share" ]]; then
+  cp -a "$WPE_SYSROOT/share/." "$STAGING/share/"
+fi
+if [[ -d "$WPE_SYSROOT/etc" ]]; then
+  cp -a "$WPE_SYSROOT/etc/." "$STAGING/etc/"
+fi
+install -m 0755 "$CXX_RUNTIME" "$STAGING/lib/libc++_shared.so"
+install -m 0755 "$WPE_PRODUCER" "$STAGING/$(basename "$WPE_PRODUCER")"
+install -m 0755 "$WPE_HOST" "$STAGING/$(basename "$WPE_HOST")"
+if [[ -x $INPUT_TEST ]]; then
+  install -m 0755 "$INPUT_TEST" "$STAGING/$(basename "$INPUT_TEST")"
+fi
+install -m 0644 "$WPE_HTML" "$STAGING/hello.html"
+install -m 0755 "$DEVICE_SCRIPT" "$STAGING/wpe_chroot_device.sh"
+
+source "$ROOT_DIR/config/wpe/devices/$DEVICE.env"
+printf '%s\n' \
+  "DEVICE='$DEVICE'" \
+  "BUILD_PREFIX='/home/jax/project/oos/build/wpe-sysroot/$OOS_WPE_SYSROOT_KEY'" \
+  "HELLO_PRODUCER='$(basename "$WPE_PRODUCER")'" \
+  "HELLO_HOST='$(basename "$WPE_HOST")'" \
+  "INPUT_PROGRAM='$(basename "$INPUT_TEST")'" \
+  > "$STAGING/device.env"
+tar -C "$STAGING" -czf "$ARCHIVE" .
+
+adb_root_shell "setprop ctl.stop b2g; setprop ctl.stop b2gkillerd; mkdir -p $REMOTE"
+"$ADB" push "$ARCHIVE" "$REMOTE/runtime.tgz" >/dev/null
+adb_root_shell "set -e; if [ -x $REMOTE/wpe_chroot_device.sh ]; then $REMOTE/wpe_chroot_device.sh stop 2>/dev/null || true; fi; if command -v busybox >/dev/null 2>&1; then busybox tar -xzf $REMOTE/runtime.tgz -C $REMOTE; elif command -v gunzip >/dev/null 2>&1; then tar -xzf $REMOTE/runtime.tgz -C $REMOTE; elif command -v gzip >/dev/null 2>&1; then gzip -d -c $REMOTE/runtime.tgz | tar -xf - -C $REMOTE; else echo 'No gzip decompressor is available' >&2; exit 1; fi; test -f $REMOTE/wpe_chroot_device.sh; chmod 0755 $REMOTE/wpe_chroot_device.sh; $REMOTE/wpe_chroot_device.sh $ACTION"
+sleep 2
+adb_root_shell "$REMOTE/wpe_chroot_device.sh status"

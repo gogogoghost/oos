@@ -1,11 +1,10 @@
-#include "oos/network/bluetooth_manager.h"
-#include "oos/network/ip_manager.h"
-#include "oos/network/wifi_manager.h"
+#include "oos/device/services.h"
 
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -55,9 +54,9 @@ void printWifiStatus(const WifiStatus &status) {
               status.network_id, status.ip_address.c_str());
 }
 
-int wifiCommand(int argc, char **argv) {
-  WifiManager wifi;
-  if (!wifi.initialize()) {
+int wifiCommand(const oos::device::Device &device, int argc, char **argv) {
+  WifiManager wifi = oos::device::createWifiManager(device);
+  if (!oos::device::initializeService(device, wifi)) {
     std::fprintf(stderr, "Wi-Fi initialization failed: %s\n",
                  wifi.lastError().c_str());
     return 1;
@@ -148,12 +147,12 @@ failure:
   return 1;
 }
 
-int ipCommand(int argc, char **argv) {
+int ipCommand(const oos::device::Device &device, int argc, char **argv) {
   if (argc < 3) {
     usage(argv[0]);
     return 2;
   }
-  IpManager ip;
+  IpManager ip = oos::device::createIpManager(device);
   IpConfiguration configuration;
   bool ok = false;
   if (!std::strcmp(argv[2], "status")) {
@@ -219,13 +218,13 @@ void printBluetoothDevices(const std::vector<BluetoothDevice> &devices) {
                 device.advertising_data.size());
 }
 
-int bluetoothCommand(int argc, char **argv) {
+int bluetoothCommand(const oos::device::Device &device, int argc, char **argv) {
   if (argc < 3) {
     usage(argv[0]);
     return 2;
   }
   BluetoothManager bluetooth;
-  if (!bluetooth.initialize()) {
+  if (!oos::device::initializeService(device, bluetooth)) {
     std::fprintf(stderr, "Bluetooth initialization failed: %s\n",
                  bluetooth.lastError().c_str());
     return 1;
@@ -308,12 +307,17 @@ int main(int argc, char **argv) {
     usage(argv[0]);
     return 2;
   }
+  std::unique_ptr<oos::device::Device> device = oos::device::createDevice();
+  if (!device) {
+    std::fprintf(stderr, "Device factory failed\n");
+    return 1;
+  }
   if (!std::strcmp(argv[1], "wifi"))
-    return wifiCommand(argc, argv);
+    return wifiCommand(*device, argc, argv);
   if (!std::strcmp(argv[1], "ip"))
-    return ipCommand(argc, argv);
+    return ipCommand(*device, argc, argv);
   if (!std::strcmp(argv[1], "bluetooth"))
-    return bluetoothCommand(argc, argv);
+    return bluetoothCommand(*device, argc, argv);
   usage(argv[0]);
   return 2;
 }

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OOS WPE Hello</title>
+<style>
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: #063b22;
+  color: #f6fff8;
+}
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 30px sans-serif;
+}
+main { text-align: center; }
+small {
+  display: block;
+  margin-top: 16px;
+  color: #9fe7bd;
+  font: 16px sans-serif;
+}
+</style>
+<main>
+  Hello World
+  <small id="status">Loading...</small>
+</main>
+<script>
+const status = document.getElementById('status');
+function hotLoop(seed) {
+  let value = seed | 0;
+  for (let i = 0; i < 250000; ++i)
+    value = (Math.imul(value, 33) ^ i) | 0;
+  return value;
+}
+function hotFloat(seed) {
+  let value = seed;
+  for (let i = 0; i < 100000; ++i)
+    value = Math.sin(value) + 1.001;
+  return value;
+}
+async function verifyRuntime() {
+  try {
+    const first = hotLoop(7);
+    const second = hotLoop(7);
+    if (first !== second)
+      throw new Error('JS warmup mismatch');
+    const firstFloat = hotFloat(0.25);
+    const secondFloat = hotFloat(0.25);
+    if (!Number.isFinite(firstFloat) || firstFloat !== secondFloat)
+      throw new Error('JS float JIT mismatch');
+    const wasm = new Uint8Array([
+      0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+      0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
+      0x03, 0x02, 0x01, 0x00,
+      0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
+      0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b
+    ]);
+    const module = await WebAssembly.instantiate(wasm);
+    if (module.instance.exports.add(19, 23) !== 42)
+      throw new Error('Wasm result mismatch');
+    status.textContent = 'JIT warmup + WebAssembly: PASS';
+    console.log('OOS_RUNTIME_CHECK js=pass wasm=pass');
+  } catch (error) {
+    status.textContent = `Runtime check: FAIL (${error.message})`;
+    console.error('OOS_RUNTIME_CHECK failed', error);
+  }
+}
+verifyRuntime();
+</script>
+</html>

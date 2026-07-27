@@ -1,17 +1,15 @@
 # Modem and Telephony
 
-The Nokia 2780 modem implementation is a native C++ Radio HAL client intended
-for the future long-running OOS process. It uses the standard Android
-`android.hardware.radio@1.0::IRadio/slot1` HIDL interface exposed by the stock
-Qualcomm `qcrild`; it does not depend on Gecko, B2G, `api-daemon`, or direct
-access to Qualcomm diagnostic and SMD device nodes.
+The modem API is a native C++ interface for the long-running OOS process. It
+does not depend on Gecko, B2G, or `api-daemon`. Nokia 2780 uses
+`android.hardware.radio@1.0::IRadio/slot1`; Nokia 8110 implements the same API
+over the stock root-only `/dev/socket/rild` Parcel protocol.
 
 ## Architecture
 
-`oos::modem::ModemManager` owns the Radio HAL proxy, response callback,
-indication callback, request serials, and binder callback thread pool. The
-public header contains only C++ value types, so the production application does
-not need to expose HIDL types outside the Nokia 2780 adapter.
+`oos::modem::ModemManager` owns the target transport, request serials,
+responses, and timeouts. The public header contains only C++ value types, so
+the production application does not expose HIDL or RIL Parcel types.
 
 The current reusable API provides:
 
@@ -87,6 +85,15 @@ carrier account. Raw `/dev/smd*`, DIAG, and QMI endpoints are not an appropriate
 first integration layer: qcrild already owns them and exposes the supported
 vendor behavior through HIDL.
 
-Nokia 8110 support remains a separate device adapter. Its older RIL generation,
-service names, binder transport, IMS stack, and data-network integration must
-be audited from that device's stock image before sharing the Nokia 2780 backend.
+## Nokia 8110 Validation
+
+The 8110 vendor daemon accepts root clients rather than Android's usual radio
+UID. The backend connects to `/dev/socket/rild`, performs the same read-only
+snapshot API, and leaves RF power unchanged. With no SIM installed it returned
+the RIL version, radio-off state, baseband, masked identity, absent card,
+registration/operator/network types, empty call/data-call lists, and radio
+capability without request timeouts. `getHardwareConfig` returned the vendor's
+generic failure and remains an optional per-request result.
+
+Shared callers use `oos::device::initializeService(device, modem)`; the device
+configuration selects `slot1` while each backend resolves its own transport.

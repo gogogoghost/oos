@@ -1,6 +1,6 @@
 #include "oos/network/bluetooth_manager.h"
+#include "oos/platform/android_properties.h"
 
-#include <cutils/properties.h>
 #include <poll.h>
 #include <stddef.h>
 #include <sys/socket.h>
@@ -39,11 +39,17 @@ constexpr uint8_t kRegisterScannerNotification = 0xc1;
 constexpr uint8_t kScanResultNotification = 0xcd;
 constexpr uint8_t kGattRegisterClient = 0x01;
 constexpr uint8_t kGattUnregisterClient = 0x02;
-constexpr uint8_t kGattConnect = 0x03;
-constexpr uint8_t kGattDisconnect = 0x04;
+constexpr uint8_t kLegacyGattScan = 0x03;
+constexpr uint8_t kLegacyGattConnect = 0x04;
+constexpr uint8_t kLegacyGattDisconnect = 0x05;
+constexpr uint8_t kModernGattConnect = 0x03;
+constexpr uint8_t kModernGattDisconnect = 0x04;
 constexpr uint8_t kGattRegisterClientNotification = 0x81;
-constexpr uint8_t kGattConnectNotification = 0x82;
-constexpr uint8_t kGattDisconnectNotification = 0x83;
+constexpr uint8_t kLegacyGattScanResultNotification = 0x82;
+constexpr uint8_t kLegacyGattConnectNotification = 0x83;
+constexpr uint8_t kLegacyGattDisconnectNotification = 0x84;
+constexpr uint8_t kModernGattConnectNotification = 0x82;
+constexpr uint8_t kModernGattDisconnectNotification = 0x83;
 
 struct Pdu {
   uint8_t service = 0;
@@ -219,6 +225,33 @@ struct BluetoothManager::Implementation {
     return true;
   }
 
+  bool waitGattClientRegistration(int32_t &client_id) {
+    client_id = -1;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+      Pdu notification;
+      if (!receivePdu(notification_fd, notification, 1000))
+        continue;
+      if (notification.service != kGattService ||
+          notification.opcode != kGattRegisterClientNotification ||
+          notification.payload.size() < 24)
+        continue;
+      size_t offset = 0;
+      uint32_t status = 1;
+      uint32_t raw_client_id = 0;
+      read(notification.payload, offset, status);
+      read(notification.payload, offset, raw_client_id);
+      if (status == 0)
+        client_id = static_cast<int32_t>(raw_client_id);
+      break;
+    }
+    if (client_id >= 0)
+      return true;
+    error = "GATT client registration failed";
+    return false;
+  }
+
   bool waitAdapterState(bool enabled, int timeout_ms) {
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeout_ms);
@@ -280,6 +313,7 @@ struct BluetoothManager::Implementation {
   bool core_registered = false;
   bool adapter_enabled = false;
   bool enabled_by_us = false;
+  bool legacy_gatt = false;
   std::vector<uint8_t> registered_modules;
 };
 
@@ -296,6 +330,9 @@ bool BluetoothManager::initialize(const std::string &service_name) {
     return false;
   }
   implementation_->service_name = service_name;
+  // KaiOS 2.5/b2g48 exposes bluetoothd's pre-Android-8 GATT protocol. KaiOS
+  // 3 uses the scanner-based protocol on bluetoothd_socket1.
+  implementation_->legacy_gatt = service_name == "bluetoothd";
   implementation_->listen_fd =
       socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
   if (implementation_->listen_fd < 0) {
@@ -446,6 +483,75 @@ bool BluetoothManager::leScan(std::vector<BluetoothDevice> &devices,
   const std::vector<uint8_t> scan_uuid = {0x6f, 0x6f, 0x73, 0x2d, 0x73, 0x63,
                                           0x61, 0x6e, 0x2d, 0x32, 0x37, 0x38,
                                           0x30, 0x00, 0x00, 0x01};
+  if (implementation_->legacy_gatt) {
+    if (!implementation_->command(kGattService, kGattRegisterClient,
+                                  scan_uuid)) {
+      implementation_->releaseModule(kGattService);
+      return false;
+    }
+    int32_t client_id = -1;
+    if (!implementation_->waitGattClientRegistration(client_id)) {
+      implementation_->releaseModule(kGattService);
+      return false;
+    }
+    std::vector<uint8_t> scan_payload;
+    append<int32_t>(scan_payload, client_id);
+    scan_payload.push_back(1);
+    if (!implementation_->command(kGattService, kLegacyGattScan,
+                                  scan_payload)) {
+      std::vector<uint8_t> unregister_payload;
+      append<int32_t>(unregister_payload, client_id);
+      implementation_->command(kGattService, kGattUnregisterClient,
+                               unregister_payload);
+      implementation_->releaseModule(kGattService);
+      return false;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(duration_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+      const int remaining = static_cast<int>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              deadline - std::chrono::steady_clock::now())
+              .count());
+      Pdu notification;
+      if (!implementation_->receivePdu(implementation_->notification_fd,
+                                       notification, remaining))
+        break;
+      if (notification.service != kGattService ||
+          notification.opcode != kLegacyGattScanResultNotification ||
+          notification.payload.size() < 12)
+        continue;
+      BluetoothDevice device;
+      device.address = addressText(notification.payload.data());
+      size_t offset = 6;
+      int32_t rssi = 0;
+      uint16_t length = 0;
+      if (!read(notification.payload, offset, rssi) ||
+          !read(notification.payload, offset, length) ||
+          offset + length > notification.payload.size())
+        continue;
+      device.rssi = rssi;
+      device.advertising_data.assign(notification.payload.begin() + offset,
+                                     notification.payload.begin() + offset +
+                                         length);
+      mergeDevice(devices, std::move(device));
+    }
+
+    scan_payload.back() = 0;
+    bool ok =
+        implementation_->command(kGattService, kLegacyGattScan, scan_payload);
+    std::vector<uint8_t> unregister_payload;
+    append<int32_t>(unregister_payload, client_id);
+    ok = implementation_->command(kGattService, kGattUnregisterClient,
+                                  unregister_payload) &&
+         ok;
+    ok = implementation_->releaseModule(kGattService) && ok;
+    if (ok)
+      implementation_->error.clear();
+    return ok;
+  }
+
   if (!implementation_->command(kGattService, kRegisterScanner, scan_uuid)) {
     implementation_->releaseModule(kGattService);
     return false;
@@ -609,30 +715,8 @@ bool BluetoothManager::leConnectionCycle(const std::string &address,
     return false;
 
   int32_t client_id = -1;
-  const auto registration_deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (std::chrono::steady_clock::now() < registration_deadline) {
-    Pdu notification;
-    if (!implementation_->receivePdu(implementation_->notification_fd,
-                                     notification, 1000))
-      continue;
-    if (notification.service != kGattService ||
-        notification.opcode != kGattRegisterClientNotification ||
-        notification.payload.size() < 24)
-      continue;
-    size_t offset = 0;
-    uint32_t status = 1;
-    uint32_t raw_client_id = 0;
-    read(notification.payload, offset, status);
-    read(notification.payload, offset, raw_client_id);
-    if (status == 0)
-      client_id = static_cast<int32_t>(raw_client_id);
-    break;
-  }
-  if (client_id < 0) {
-    implementation_->error = "GATT client registration failed";
+  if (!implementation_->waitGattClientRegistration(client_id))
     return false;
-  }
 
   std::vector<uint8_t> connect_payload;
   append<int32_t>(connect_payload, client_id);
@@ -640,7 +724,18 @@ bool BluetoothManager::leConnectionCycle(const std::string &address,
   connect_payload.push_back(1);
   append<int32_t>(connect_payload,
                   static_cast<int32_t>(BluetoothTransport::LowEnergy));
-  if (!implementation_->command(kGattService, kGattConnect, connect_payload))
+  const uint8_t connect_opcode =
+      implementation_->legacy_gatt ? kLegacyGattConnect : kModernGattConnect;
+  const uint8_t connect_notification = implementation_->legacy_gatt
+                                           ? kLegacyGattConnectNotification
+                                           : kModernGattConnectNotification;
+  const uint8_t disconnect_opcode = implementation_->legacy_gatt
+                                        ? kLegacyGattDisconnect
+                                        : kModernGattDisconnect;
+  const uint8_t disconnect_notification =
+      implementation_->legacy_gatt ? kLegacyGattDisconnectNotification
+                                   : kModernGattDisconnectNotification;
+  if (!implementation_->command(kGattService, connect_opcode, connect_payload))
     return false;
 
   int32_t connection_id = -1;
@@ -652,7 +747,7 @@ bool BluetoothManager::leConnectionCycle(const std::string &address,
                                      notification, 1000))
       continue;
     if (notification.service != kGattService ||
-        notification.opcode != kGattConnectNotification ||
+        notification.opcode != connect_notification ||
         notification.payload.size() < 18)
       continue;
     size_t offset = 0;
@@ -676,7 +771,7 @@ bool BluetoothManager::leConnectionCycle(const std::string &address,
     disconnect_payload.insert(disconnect_payload.end(), bytes.begin(),
                               bytes.end());
     append<int32_t>(disconnect_payload, connection_id);
-    ok = implementation_->command(kGattService, kGattDisconnect,
+    ok = implementation_->command(kGattService, disconnect_opcode,
                                   disconnect_payload);
     if (ok) {
       const auto disconnect_deadline =
@@ -687,7 +782,7 @@ bool BluetoothManager::leConnectionCycle(const std::string &address,
                                          notification, 500))
           continue;
         if (notification.service == kGattService &&
-            notification.opcode == kGattDisconnectNotification)
+            notification.opcode == disconnect_notification)
           break;
       }
     }

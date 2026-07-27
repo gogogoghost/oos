@@ -1,12 +1,15 @@
 #include "oos/network/ip_manager.h"
+#include "oos/platform/android_properties.h"
 
 #include <arpa/inet.h>
-#include <cutils/properties.h>
+#if __ANDROID_API__ >= 24
 #include <ifaddrs.h>
+#endif
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -184,6 +187,7 @@ IpManager::IpManager(std::string interface_name)
 bool IpManager::status(IpConfiguration &configuration) {
   configuration = {};
   configuration.interface_name = interface_name_;
+#if __ANDROID_API__ >= 24
   ifaddrs *interfaces = nullptr;
   if (getifaddrs(&interfaces) < 0) {
     last_error_ = std::strerror(errno);
@@ -203,6 +207,32 @@ bool IpManager::status(IpConfiguration &configuration) {
     break;
   }
   freeifaddrs(interfaces);
+#else
+  const int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) {
+    last_error_ = std::strerror(errno);
+    return false;
+  }
+  ifreq request{};
+  std::snprintf(request.ifr_name, sizeof(request.ifr_name), "%s",
+                interface_name_.c_str());
+  if (ioctl(fd, SIOCGIFADDR, &request) == 0) {
+    const auto *address =
+        reinterpret_cast<const sockaddr_in *>(&request.ifr_addr);
+    configuration.address = ipv4Text(address->sin_addr.s_addr);
+  } else if (errno != EADDRNOTAVAIL && errno != ENODEV) {
+    last_error_ =
+        "read interface address: " + std::string(std::strerror(errno));
+    close(fd);
+    return false;
+  }
+  if (ioctl(fd, SIOCGIFNETMASK, &request) == 0) {
+    const auto *netmask =
+        reinterpret_cast<const sockaddr_in *>(&request.ifr_netmask);
+    configuration.prefix_length = prefixLength(netmask->sin_addr.s_addr);
+  }
+  close(fd);
+#endif
 
   std::ifstream routes("/proc/net/route");
   std::string line;
@@ -222,6 +252,12 @@ bool IpManager::status(IpConfiguration &configuration) {
       configuration.gateway = ipv4Text(static_cast<in_addr_t>(raw));
     break;
   }
+  if (configuration.gateway.empty()) {
+    configuration.gateway = getProperty("net." + interface_name_ + ".gw");
+    if (configuration.gateway.empty())
+      configuration.gateway =
+          getProperty("dhcp." + interface_name_ + ".gateway");
+  }
   configuration.dns1 = getProperty("net." + interface_name_ + ".dns1");
   configuration.dns2 = getProperty("net." + interface_name_ + ".dns2");
   last_error_.clear();
@@ -229,11 +265,15 @@ bool IpManager::status(IpConfiguration &configuration) {
 }
 
 bool IpManager::setServiceState(const char *action, int timeout_ms) {
-  if (property_set(action, service_name_.c_str()) < 0) {
+  const bool starting = std::strcmp(action, "ctl.start") == 0;
+  // Android 6 init appends arguments supplied after ':' to a service's
+  // configured command line. Its per-interface dhcpcd service relies on this.
+  const std::string control_value =
+      starting ? service_name_ + ":" + interface_name_ : service_name_;
+  if (property_set(action, control_value.c_str()) < 0) {
     last_error_ = std::string("property_set ") + action + " failed";
     return false;
   }
-  const bool starting = std::strcmp(action, "ctl.start") == 0;
   const std::string state_property = "init.svc." + service_name_;
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);

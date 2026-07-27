@@ -15,12 +15,12 @@ fi
 wait_for_primary_frame() {
   local attempt
   for attempt in {1..30}; do
-    if "$ADB" shell "su -c 'grep -q \"primary frame presented\" $WPE_LOG'"; then
+    if "$ADB" shell "su -c 'grep -q \"OOS primary display revealed\" $WPE_LOG'"; then
       return 0
     fi
     sleep 0.2
   done
-  echo "Primary frame was not presented within 6 seconds" >&2
+  echo "Primary compositor frame was not presented within 6 seconds" >&2
   "$ROOT_DIR/scripts/run-wpe-chroot.sh" status >&2 || true
   return 1
 }

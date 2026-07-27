@@ -1,15 +1,15 @@
-#include <binder/ProcessState.h>
-
 #include <glib-unix.h>
 #include <glib.h>
 #include <jsc/jsc.h>
-#include <wpe-android/view-backend.h>
 #include <wpe/webkit.h>
 
 #include <cstdio>
 
+#include "oos/compositor/compositor.h"
+#include "oos/device/device.h"
+#include "oos/device/display.h"
 #include "oos/input/key_input.h"
-#include "oos/nokia2780/wpe_display_manager.h"
+#include "oos/web/wpe_surface_host.h"
 
 extern "C" {
 typedef struct _WebKitWebViewBackend WebKitWebViewBackend;
@@ -23,32 +23,18 @@ namespace {
 
 using oos::input::KeyEvent;
 using oos::input::KeyInput;
-using oos::nokia2780::WpeDisplayManager;
-
-struct CommitContext {
-  WpeDisplayManager *display;
-  WPEAndroidViewBackend *backend;
-};
-
 struct InputTestContext {
   KeyInput *input;
   WebKitWebView *view;
   bool page_ready = false;
 };
 
-void commitBuffer(void *context, WPEAndroidBuffer *buffer, int fence_fd) {
-  auto *commit = static_cast<CommitContext *>(context);
-  commit->display->present(commit->backend, buffer, fence_fd);
-}
-
-void destroyBackend(gpointer backend) {
-  WPEAndroidViewBackend_destroy(static_cast<WPEAndroidViewBackend *>(backend));
-}
-
 gboolean refreshPrimary(gpointer display) {
-  static_cast<WpeDisplayManager *>(display)->refresh();
+  static_cast<oos::device::Display *>(display)->refresh();
   return G_SOURCE_CONTINUE;
 }
+
+void keepBackendOwnedByHost(gpointer) {}
 
 void keyUpdateFinished(GObject *, GAsyncResult *result, gpointer data) {
   auto *view = static_cast<WebKitWebView *>(data);
@@ -120,26 +106,25 @@ int main() {
                  device.path.c_str(), device.name.c_str());
   }
 
-  android::ProcessState::self()->startThreadPool();
-  WpeDisplayManager display(true);
-  if (!display.initialize()) {
-    std::fprintf(stderr, "failed to initialize Nokia 2780 display manager\n");
+  auto device = oos::device::createDevice();
+  oos::device::DeviceInitOptions options;
+  options.key_input = false;
+  options.grab_input = false;
+  if (!device || !device->initialize(options)) {
+    std::fprintf(stderr, "failed to initialize OOS device\n");
     return 1;
   }
-
-  auto *backend = WPEAndroidViewBackend_create(
-      WpeDisplayManager::kPrimaryWidth, WpeDisplayManager::kPrimaryHeight);
-  if (!backend)
+  oos::device::Display &display = device->display();
+  oos::compositor::Compositor compositor(display);
+  oos::web::WpeSurfaceHost surface(compositor, 1, display.width(),
+                                   display.height());
+  if (!surface.initialize())
     return 1;
-  CommitContext commit{&display, backend};
-  WPEAndroidViewBackend_setCommitBufferHandler(backend, &commit, commitBuffer);
-  auto *wrapped = webkit_web_view_backend_new(
-      WPEAndroidViewBackend_getWPEViewBackend(backend), destroyBackend,
-      backend);
+  auto *wrapped = webkit_web_view_backend_new(surface.viewBackend(),
+                                              keepBackendOwnedByHost, nullptr);
   auto *view = webkit_web_view_new(wrapped);
   if (!view) {
     std::fprintf(stderr, "failed to create WebKit view\n");
-    destroyBackend(backend);
     return 1;
   }
 
@@ -152,7 +137,6 @@ int main() {
                  error ? error->message : "unknown error");
     if (error)
       g_error_free(error);
-    destroyBackend(backend);
     return 1;
   }
 

@@ -1,0 +1,141 @@
+From 61212e4e5f8f3f841adfbc74a9c303b11400a023 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Mon, 27 Jul 2026 00:00:00 +0800
+Subject: [PATCH] WPEBackend Android: support API 23 gralloc buffers
+
+Keep RGB565 output and allow the OOS Android 6 compatibility library to
+provide AHardwareBuffer semantics over gralloc0 native handles.
+
+---
+
+diff --git a/src/ipc.cpp b/src/ipc.cpp
+index 0d17b0e..667241f 100644
+--- a/src/ipc.cpp
++++ b/src/ipc.cpp
+@@ -115,6 +115,8 @@ int Host::receiveFileDescriptor()
+     }
+ 
+     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
++    if (!cmsg)
++        return -1;
+     int fd;
+     memmove(&fd, CMSG_DATA(cmsg), sizeof(fd));
+ 
+@@ -232,17 +234,18 @@ int Client::sendFileDescriptor(int fd)
+ 
+     msg.msg_iov = &io;
+     msg.msg_iovlen = 1;
+-    msg.msg_control = buf;
+-    msg.msg_controllen = sizeof(buf);
++    if (fd >= 0) {
++        msg.msg_control = buf;
++        msg.msg_controllen = sizeof(buf);
+ 
+-    struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+-    cmsg->cmsg_level = SOL_SOCKET;
+-    cmsg->cmsg_type = SCM_RIGHTS;
+-    cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
++        struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
++        cmsg->cmsg_level = SOL_SOCKET;
++        cmsg->cmsg_type = SCM_RIGHTS;
++        cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
+ 
+-    memmove(CMSG_DATA(cmsg), &fd, sizeof(fd));
+-
+-    msg.msg_controllen = CMSG_SPACE(sizeof(fd));
++        memmove(CMSG_DATA(cmsg), &fd, sizeof(fd));
++        msg.msg_controllen = CMSG_SPACE(sizeof(fd));
++    }
+ 
+     int result;
+     do {
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7581b95..69f8be6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -38,6 +38,13 @@ set(WPE_ANDROID_LIBRARIES
+     GLESv2
+ )
+ 
++if (OOS_ANDROID_LEGACY_BUFFER_LIBRARY)
++    list(APPEND WPE_ANDROID_LIBRARIES "${OOS_ANDROID_LEGACY_BUFFER_LIBRARY}")
++    add_compile_definitions(
++        OOS_ANDROID_LEGACY_BUFFER=1
++        __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__=1)
++endif ()
++
+ set(WPE_ANDROID_SOURCES
+     src/android.cpp
+     src/ipc.cpp
+diff --git a/src/renderer-backend-egl.cpp b/src/renderer-backend-egl.cpp
+index ca8002d..721ca75 100644
+--- a/src/renderer-backend-egl.cpp
++++ b/src/renderer-backend-egl.cpp
+@@ -29,5 +29,9 @@
+ #include "logging.h"
+ 
++#if defined(OOS_ANDROID_LEGACY_BUFFER)
++extern "C" EGLClientBuffer oos_eglGetNativeClientBufferANDROID(const AHardwareBuffer*);
++#endif
++
+ struct Buffer {
+     uint32_t bufferID { 0 };
+     bool locked { false };
+@@ -291,7 +295,11 @@ void EGLTarget::frameWillRender()
+     if (!renderer.initialized) {
+         renderer.initialized = true;
+ 
++#if defined(OOS_ANDROID_LEGACY_BUFFER)
++        renderer.getNativeClientBufferANDROID = oos_eglGetNativeClientBufferANDROID;
++#else
+         renderer.getNativeClientBufferANDROID = reinterpret_cast<PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC>(
+             eglGetProcAddress("eglGetNativeClientBufferANDROID"));
++#endif
+         renderer.createImageKHR = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
+             eglGetProcAddress("eglCreateImageKHR"));
+@@ -335,7 +343,7 @@ void EGLTarget::frameWillRender()
+         description.width = renderer.width;
+         description.height = renderer.height;
+         description.layers = 1;
+-        description.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
++        description.format = AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM;
+         description.usage = AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_COMPOSER_OVERLAY;
+         description.stride = description.rfu0 = description.rfu1 = 0;
+ 
+@@ -388,20 +396,24 @@ void EGLTarget::frameWillRender()
+ 
+ void EGLTarget::frameRendered()
+ {
+-    EGLSyncKHR sync = renderer.createSyncKHR(eglGetCurrentDisplay(), EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+-
+-    glFlush();
+-
+     int syncFd = -1;
+-    if (sync != EGL_NO_SYNC_KHR) {
+-        // native fence fd will not be populated until flush() is done
+-        syncFd = renderer.dupNativeFenceFDANDROID(eglGetCurrentDisplay(), sync);
+-        if (syncFd == EGL_NO_NATIVE_FENCE_FD_ANDROID) {
+-            ALOGV("EGLTarget: EGL_NO_NATIVE_FENCE_FD_ANDROID");
++    if (renderer.createSyncKHR && renderer.destroySyncKHR && renderer.dupNativeFenceFDANDROID) {
++        EGLSyncKHR sync = renderer.createSyncKHR(eglGetCurrentDisplay(), EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
++        glFlush();
++        if (sync != EGL_NO_SYNC_KHR) {
++            // native fence fd will not be populated until flush() is done
++            syncFd = renderer.dupNativeFenceFDANDROID(eglGetCurrentDisplay(), sync);
++            if (syncFd == EGL_NO_NATIVE_FENCE_FD_ANDROID)
++                ALOGV("EGLTarget: EGL_NO_NATIVE_FENCE_FD_ANDROID");
++            renderer.destroySyncKHR(eglGetCurrentDisplay(), sync);
++        } else {
++            ALOGV("EGLTarget: EGL_NO_SYNC_KHR");
+         }
+-        renderer.destroySyncKHR(eglGetCurrentDisplay(), sync);
+     } else {
+-        ALOGV("EGLTarget: EGL_NO_SYNC_KHR");
++        // Older EGL stacks, including the Nokia 8110 Android 6 driver, do not
++        // expose native fence sync. Complete rendering before committing the
++        // same zero-copy gralloc buffer without an acquire fence.
++        glFinish();
+     }
+ 
+     if (buffers.current->object) {

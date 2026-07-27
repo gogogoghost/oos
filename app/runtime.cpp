@@ -1,26 +1,28 @@
 #include <png.h>
 
-#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "oos/compositor/compositor.h"
+#include "oos/device/device.h"
+#include "oos/device/display.h"
 #include "oos/input/key_input.h"
-#include "oos/nokia2780/primary_gles_display.h"
 #include "oos/runtime/native_app_manager.h"
 
 namespace oos::platform {
 namespace {
 
+using oos::compositor::Compositor;
+using oos::device::Device;
+using oos::device::Display;
 using oos::input::KeyEvent;
 using oos::input::KeyInput;
-using oos::input::KeyInputOptions;
-using oos::nokia2780::PrimaryGlesDisplay;
 using oos::runtime::NativeAppManager;
 
 constexpr const char *kDefaultBootSplash = "/opt/oos/share/oos/boot-splash.png";
@@ -42,7 +44,8 @@ int64_t monotonicMicros() {
 
 void stopRuntime(int) { g_stop_requested = 1; }
 
-bool loadBootSplash(const char *path, std::vector<uint16_t> &rgb565) {
+bool loadBootSplash(const char *path, uint32_t expected_width,
+                    uint32_t expected_height, std::vector<uint16_t> &rgb565) {
   png_image image = {};
   image.version = PNG_IMAGE_VERSION;
   if (!png_image_begin_read_from_file(&image, path)) {
@@ -50,10 +53,9 @@ bool loadBootSplash(const char *path, std::vector<uint16_t> &rgb565) {
                  image.message);
     return false;
   }
-  if (image.width != PrimaryGlesDisplay::kWidth ||
-      image.height != PrimaryGlesDisplay::kHeight) {
-    std::fprintf(stderr, "boot splash has invalid size %ux%u\n", image.width,
-                 image.height);
+  if (image.width != expected_width || image.height != expected_height) {
+    std::fprintf(stderr, "boot splash has invalid size %ux%u, expected %ux%u\n",
+                 image.width, image.height, expected_width, expected_height);
     png_image_free(&image);
     return false;
   }
@@ -66,8 +68,7 @@ bool loadBootSplash(const char *path, std::vector<uint16_t> &rgb565) {
     return false;
   }
   png_image_free(&image);
-  rgb565.resize(static_cast<size_t>(PrimaryGlesDisplay::kWidth) *
-                PrimaryGlesDisplay::kHeight);
+  rgb565.resize(static_cast<size_t>(expected_width) * expected_height);
   for (size_t index = 0; index < rgb565.size(); ++index) {
     const uint8_t red = rgb[index * 3];
     const uint8_t green = rgb[index * 3 + 1];
@@ -103,32 +104,38 @@ int run(int argc, char **argv) {
       argc == 2 ? argv[1]
                 : environmentOr("OOS_LAUNCHER_MODULE", kDefaultLauncherModule);
 
-  PrimaryGlesDisplay display;
-  if (!display.initialize()) {
-    std::fprintf(stderr, "failed to initialize Nokia 2780 GLES display\n");
+  std::unique_ptr<Device> platform_device = device::createDevice();
+  if (!platform_device || !platform_device->initialize()) {
+    std::fprintf(stderr, "failed to initialize OOS device%s%s\n",
+                 platform_device ? ": " : "",
+                 platform_device ? platform_device->lastError().c_str()
+                                 : "factory unavailable");
     return 1;
   }
+  Display &display = platform_device->display();
+  KeyInput &input = platform_device->keyInput();
+  const device::DeviceDescriptor &descriptor = platform_device->descriptor();
+
   std::vector<uint16_t> boot_frame;
   const char *boot_path = environmentOr("OOS_BOOT_SPLASH", kDefaultBootSplash);
-  if (!loadBootSplash(boot_path, boot_frame) ||
+  if (!loadBootSplash(boot_path, descriptor.primary_width,
+                      descriptor.primary_height, boot_frame) ||
       !display.showBootFrame(boot_frame.data())) {
     std::fprintf(stderr, "failed to present OOS boot splash\n");
+    platform_device->shutdown();
     return 1;
   }
 
-  KeyInput input(KeyInputOptions{true});
-  if (!input.initialize()) {
-    std::fprintf(stderr, "failed to initialize OOS key input\n");
-    return 1;
-  }
-
-  NativeAppManager apps(display);
+  Compositor compositor(display);
+  NativeAppManager apps(compositor);
   if (!apps.load("launcher", module_path) || !apps.activate("launcher")) {
     std::fprintf(stderr, "failed to start native app %s: %s\n", module_path,
                  apps.lastError());
+    platform_device->shutdown();
     return 1;
   }
-  std::fprintf(stderr, "OOS native app started: %s\n", module_path);
+  std::fprintf(stderr, "OOS native app started on %s: %s\n", descriptor.id,
+               module_path);
   std::fflush(stderr);
 
   std::signal(SIGINT, stopRuntime);
@@ -153,8 +160,7 @@ int run(int argc, char **argv) {
   }
 
   apps.shutdown();
-  input.shutdown();
-  display.shutdown();
+  platform_device->shutdown();
   return g_stop_requested ? 0 : 1;
 }
 

@@ -8,6 +8,7 @@
 #include <android/hardware/power/1.0/IPower.h>
 #include <binder/ProcessState.h>
 #include <hardware/gralloc.h>
+#include <sync/sync.h>
 #include <ui/Fence.h>
 #include <ui/FloatRect.h>
 #include <ui/GraphicBuffer.h>
@@ -24,6 +25,10 @@
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
+
+struct AHardwareBuffer;
+extern "C" EGLClientBuffer EGLAPIENTRY
+eglGetNativeClientBufferANDROID(const AHardwareBuffer *buffer);
 
 #include "HWC2.h"
 #include "oos/nokia2780/display_control.h"
@@ -474,6 +479,89 @@ public:
     return glGetError() == GL_NO_ERROR && presentAndReveal();
   }
 
+  bool presentSurface(const compositor::SurfaceFrame &frame) {
+    if (!initialized_ || !frame.buffer ||
+        frame.buffer_type !=
+            compositor::NativeBufferType::AndroidHardwareBuffer ||
+        frame.buffer_width != PrimaryGlesDisplay::kWidth ||
+        frame.buffer_height != PrimaryGlesDisplay::kHeight ||
+        !waitPresentFence()) {
+      if (frame.acquire_fence_fd >= 0)
+        close(frame.acquire_fence_fd);
+      return false;
+    }
+    if (frame.acquire_fence_fd >= 0) {
+      const int result = sync_wait(frame.acquire_fence_fd, 3000);
+      close(frame.acquire_fence_fd);
+      if (result != 0) {
+        std::fprintf(stderr, "OOS external buffer acquire fence timeout\n");
+        return false;
+      }
+    }
+    EGLClientBuffer native = eglGetNativeClientBufferANDROID(
+        static_cast<AHardwareBuffer *>(frame.buffer));
+    if (!native) {
+      std::fprintf(stderr, "OOS failed to obtain Android native buffer\n");
+      return false;
+    }
+    const EGLImageKHR image =
+        create_image_(egl_display_, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
+                      native, nullptr);
+    if (image == EGL_NO_IMAGE_KHR) {
+      std::fprintf(stderr, "OOS external eglCreateImageKHR failed: 0x%x\n",
+                   eglGetError());
+      return false;
+    }
+
+    GLuint texture = 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    image_target_(GL_TEXTURE_2D, reinterpret_cast<GLeglImageOES>(image));
+
+    constexpr OosGfxVertex vertices[] = {
+        {{0, 0}, {0, 0}, {255, 255, 255, 255}},
+        {{240, 0}, {1, 0}, {255, 255, 255, 255}},
+        {{0, 320}, {0, 1}, {255, 255, 255, 255}},
+        {{240, 320}, {1, 1}, {255, 255, 255, 255}},
+    };
+    constexpr uint16_t indices[] = {0, 1, 2, 2, 1, 3};
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    glViewport(0, 0, PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glUseProgram(program_);
+    glUniform2f(screen_size_uniform_, PrimaryGlesDisplay::kWidth,
+                PrimaryGlesDisplay::kHeight);
+    glUniform1i(texture_uniform_, 0);
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(OosGfxVertex),
+                          &vertices[0].position);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(OosGfxVertex),
+                          &vertices[0].uv);
+    glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(OosGfxVertex),
+                          &vertices[0].color);
+    glDrawElements(GL_TRIANGLES, std::size(indices), GL_UNSIGNED_SHORT,
+                   indices);
+    glDisableVertexAttribArray(2);
+    glDisableVertexAttribArray(1);
+    glDisableVertexAttribArray(0);
+    glFinish();
+    glDeleteTextures(1, &texture);
+    destroy_image_(egl_display_, image);
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+      std::fprintf(stderr, "OOS external surface GL error: 0x%x\n", error);
+      return false;
+    }
+    return presentAndReveal();
+  }
+
   bool presentAndReveal() {
     if (!presentTarget())
       return false;
@@ -491,9 +579,20 @@ public:
     return true;
   }
 
+  bool waitPresentFence() {
+    if (!present_fence_ || !present_fence_->isValid())
+      return true;
+    const int result = present_fence_->waitForever("oos-compositor-present");
+    present_fence_.clear();
+    if (result == android::NO_ERROR)
+      return true;
+    std::fprintf(stderr, "OOS HWC2 present fence wait failed: %d\n", result);
+    return false;
+  }
+
   bool presentTarget() {
-    if (present_fence_ && present_fence_->isValid())
-      present_fence_->waitForever("oos-wasm-present");
+    if (!waitPresentFence())
+      return false;
     if (display_->setClientTarget(0, target_, android::Fence::NO_FENCE,
                                   android::ui::Dataspace::UNKNOWN) !=
         HWC2::Error::None) {
@@ -611,6 +710,10 @@ bool PrimaryGlesDisplay::initialize() { return impl_->initialize(); }
 
 bool PrimaryGlesDisplay::showBootFrame(const uint16_t *rgb565_pixels) {
   return impl_->showBootFrame(rgb565_pixels);
+}
+
+bool PrimaryGlesDisplay::presentSurface(const compositor::SurfaceFrame &frame) {
+  return impl_->presentSurface(frame);
 }
 
 void PrimaryGlesDisplay::refresh() { impl_->refresh(); }

@@ -1,7 +1,8 @@
-#include "oos/modem/modem_manager.h"
+#include "oos/device/services.h"
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 
 namespace {
@@ -107,8 +108,13 @@ int main(int argc, char **argv) {
     printUsage(argv[0]);
     return 2;
   }
+  std::unique_ptr<oos::device::Device> device = oos::device::createDevice();
+  if (!device) {
+    std::fprintf(stderr, "Device factory failed\n");
+    return 1;
+  }
   oos::modem::ModemManager modem;
-  if (!modem.initialize()) {
+  if (!oos::device::initializeService(*device, modem)) {
     std::fprintf(stderr, "Modem initialization failed: %s\n",
                  modem.lastError().c_str());
     return 1;

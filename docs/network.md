@@ -1,8 +1,8 @@
 # Wi-Fi and Bluetooth
 
-The Nokia 2780 networking implementation is a headless native C++ layer for
-the future long-running OOS process. It deliberately avoids Gecko and talks to
-the stock services already shipped in the extracted system image.
+The networking implementation is a device-independent native C++ layer for
+the long-running OOS process. It deliberately avoids Gecko and talks to the
+stock services shipped on each target.
 
 ## Architecture
 
@@ -12,11 +12,13 @@ properties and uses the stock `libnetutils.so` ABI for static IPv4 setup. The
 Wi-Fi credential is sent only to supplicant and is never printed by the test
 program.
 
-Bluetooth uses the Nokia 2780 B2G daemon architecture. OOS creates an abstract
-Unix `SOCK_SEQPACKET` listener, starts `bluetoothd_socket1`, accepts its command
-and notification channels, then registers the required Bluedroid modules. The
-implementation owns that daemon instance and returns the adapter to the off
-state on shutdown.
+Bluetooth uses the B2G daemon architecture. OOS creates an abstract Unix
+`SOCK_SEQPACKET` listener, starts the service selected by
+`Device::services()`, accepts its command and notification channels, then
+registers the required Bluedroid modules. The implementation owns that daemon
+instance and returns the adapter to the off state on shutdown. Nokia 2780 uses
+the scanner-based `bluetoothd_socket1` protocol; Nokia 8110 uses the older
+b2g48 GATT-client protocol exposed by `bluetoothd`.
 
 The public APIs are:
 
@@ -89,6 +91,14 @@ notification socket. The production OOS event loop must own one
 `BluetoothManager` for its full lifetime and turn those notifications into a
 persistent state model; short-lived CLI commands are only diagnostics.
 
-Nokia 8110 support remains a separate device adapter. Its older stock image must
-be audited before reusing the Nokia 2780 socket paths, init service names, or
-bluetoothd protocol version.
+## Nokia 8110 Validation
+
+The Android 6 adapter uses `/data/misc/wifi/sockets/wlan0`, legacy
+`dhcpcd_wlan0` service control, and `bluetoothd`. Wi-Fi status, scans,
+disconnect/reconnect, DHCP/static-IP restoration, and classic discovery passed.
+The corrected legacy BLE lifecycle registered a GATT client, discovered seven
+advertisers in a five-second sample, stopped scanning, unregistered the client,
+and stopped `bluetoothd` cleanly.
+
+Shared tests resolve all endpoint differences through `oos/device/services.h`;
+they no longer require an `OOS_BLUETOOTH_SERVICE` override.

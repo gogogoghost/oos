@@ -43,6 +43,7 @@ export XDG_CACHE_HOME=/data/cache
 export XDG_DATA_HOME=/data/share
 export LD_LIBRARY_PATH=/opt/oos/lib:/apex/com.android.runtime/lib:/system/lib:/vendor/lib
 export WEBKIT_EXEC_PATH=/opt/oos/libexec/wpe-webkit-2.0
+export WEBKIT_INJECTED_BUNDLE_PATH=/opt/oos/lib/wpe-webkit-2.0/injected-bundle
 export WPE_BACKEND=/opt/oos/lib/libWPEBackend-android.so
 export GIO_EXTRA_MODULES=/opt/oos/lib/gio/modules
 export GST_PLUGIN_SYSTEM_PATH=/opt/oos/lib/gstreamer-1.0

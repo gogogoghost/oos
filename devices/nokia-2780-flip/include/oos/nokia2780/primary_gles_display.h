@@ -3,11 +3,11 @@
 #include <cstdint>
 #include <memory>
 
-#include "oos/runtime/graphics_host.h"
+#include "oos/device/display.h"
 
 namespace oos::nokia2780 {
 
-class PrimaryGlesDisplay final : public runtime::GraphicsHost {
+class PrimaryGlesDisplay final : public device::Display {
 public:
   static constexpr uint32_t kWidth = 240;
   static constexpr uint32_t kHeight = 320;
@@ -18,10 +18,11 @@ public:
   PrimaryGlesDisplay(const PrimaryGlesDisplay &) = delete;
   PrimaryGlesDisplay &operator=(const PrimaryGlesDisplay &) = delete;
 
-  bool initialize();
-  bool showBootFrame(const uint16_t *rgb565_pixels);
-  void refresh();
-  void shutdown();
+  bool initialize() override;
+  bool showBootFrame(const uint16_t *rgb565_pixels) override;
+  bool presentSurface(const compositor::SurfaceFrame &frame) override;
+  void refresh() override;
+  void shutdown() override;
 
   uint32_t width() const override;
   uint32_t height() const override;

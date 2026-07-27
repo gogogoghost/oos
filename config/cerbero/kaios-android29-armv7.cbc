@@ -12,9 +12,14 @@ variants.override('norust')
 
 _project_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _cerbero_root = os.path.join(_project_root, "third_party", "wpe-android-cerbero")
-prefix = os.path.join(_project_root, "build", "wpe-sysroot", "nokia-2780-flip")
+num_of_cpus = int(os.environ.get("WPE_BUILD_JOBS", str(os.cpu_count() or 1)))
+prefix = os.environ.get(
+    "OOS_WPE_PREFIX",
+    os.path.join(_project_root, "build", "wpe-sysroot", "nokia-2780-flip"))
 # ICU and several Cerbero recipes locate host-built tools relative to this
 # directory. Keep target and build-tool sources in the same Cerbero build tree.
 sources = os.path.join(_cerbero_root, "build", "sources", "android_armv7")
-local_sources = os.path.join(_project_root, "build", "wpe-source-cache")
-logs = os.path.join(_project_root, "build", "wpe-logs")
+local_sources = os.path.join(
+    _project_root, "build", "wpe-source-cache", "android29-armv7-jit")
+logs = os.path.join(
+    _project_root, "build", "wpe-logs", "android29-armv7-jit")

@@ -33,8 +33,8 @@ oos/
 
 `/data/oos` is created with mode `0700` and bind-mounted at `rootfs/data` for
 persistent state. The selected version is bind-mounted at `rootfs/opt/oos`.
-The rootfs also receives `/system`, `/vendor`, Runtime APEX, `/dev`, `/proc`,
-and `/sys` mounts required by Android graphics, input, binder, and WebKit.
+The rootfs also receives `/system`, `/dev`, `/proc`, and `/sys`, plus `/vendor`
+and Runtime APEX when those trees exist on the selected Android release.
 
 `start.sh` always invokes `init.sh` itself so mount setup and chroot execution
 occur in the same mount namespace. It runs as a foreground supervisor,
@@ -66,12 +66,19 @@ generator copies target shared objects and runtime data while excluding the
 WPE sysroot's headers, static libraries, pkg-config metadata, and host tools.
 Each package contains a manifest, `SHA256SUMS`, and a `COMPLETE` marker.
 Packaging also checks the dynamic dependency closure against the packaged
-libraries and the stock system directory from `.env`; unresolved SONAMEs stop
-the build.
+libraries and `NOKIA_2780_SYSTEM_DIR` from `.env`; unresolved SONAMEs stop the
+build.
 
-Both scripts accept `--output`. Both currently support only
-`nokia-2780-flip`; the device option is explicit so Nokia 8110 packaging can be
-added without sharing incompatible rootfs or runtime files.
+Both scripts accept `--device` and `--output`. Nokia 2780 and Nokia 8110
+packages use separate scaffold directories, WPE sysroots, Android API metadata,
+compiled-prefix links, and system-library dependency checks. For example:
+
+```sh
+./scripts/package-oos-scaffold.sh --device nokia-8110-4g \
+  --res-version 1.0.0 --tgz
+./scripts/package-oos-res.sh 1.0.0 --device nokia-8110-4g \
+  --activate --tgz
+```
 
 ## Trial Installation
 

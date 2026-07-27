@@ -16,15 +16,15 @@ for Orange OS and its on-device tests. The target runs KaiOS 3 on Android API
   `nokia2780_hide_cover()` support a long-lived process that owns its HWC
   primary client.
 
-`oos_nokia_2780_wpe_display` provides
-`oos::nokia2780::WpeDisplayManager`. It owns the HWC2 client, RGB565 gralloc
-target, EGL/GLES blit path, panel backlights, retained WPE frame, and fast
-primary/cover switching. The public header uses a PIMPL boundary so HWC2,
-GraphicBuffer, and EGL implementation types do not leak into application code.
+WPE does not own a Nokia display manager. Its producer process transfers GPU
+buffers to the OOS host, and the normal `PrimaryGlesDisplay` imports them into
+the same RGB565 target used by native applications. Only that OOS-owned
+display backend accesses HWC2, panel power, or the backlight.
 
-The production `oos` entry point uses these libraries to present the packaged
-boot image, initialize WPE, load the launcher, retain the primary frame, and
-forward evdev keys to the Web System UI.
+The production `oos` entry point obtains this display through the shared
+`oos::device::Device` contract, presents the packaged boot image, starts WAMR,
+loads the egui launcher, and forwards evdev keys to the active native app. It
+does not include Nokia-specific headers.
 
 Physical keys are captured by the device-independent `oos_input` library.
 It discovers nodes by `EV_KEY` capability rather than relying on unstable
@@ -47,9 +47,9 @@ BufferQueue details stay in the device implementation. See `docs/hardware.md`.
 ## Validated Display Paths
 
 The primary display is 240x320 RGB565. WPE WebKit supplies Android hardware
-buffers, GLES copies them into a GPU/HWC-compatible RGB565 client target, and
-HWC2 presents the result. A black preroll and a settled first submission keep
-uninitialized panel memory hidden.
+buffers to the OOS host compositor, GLES composites them into its
+GPU/HWC-compatible RGB565 client target, and HWC2 presents the result. A black
+preroll and a settled first submission keep uninitialized panel memory hidden.
 
 The cover display is fb1 with 128x160 visible RGB565 pixels and a 128x320
 virtual framebuffer. The driver requires fb1 to remain open while the image is
@@ -80,8 +80,9 @@ or vendor HWC changes that expose the cover as a supported external display.
 
 All executable test entry points and fixtures live under `tests`:
 
-- `oos_test_nokia_2780_wpe_display`: WPE primary smoke test and the
-  single-process 3+3+3 second switch test.
+- `oos_test_nokia_2780_wpe_producer` and
+  `oos_test_nokia_2780_wpe_host`: isolated WPE-to-OOS-compositor Hello World,
+  JavaScript JIT, WebAssembly, and GPU-buffer transport smoke test.
 - `oos_test_nokia_2780_primary_gl`: EGL/HWC animation test.
 - `oos_test_nokia_2780_cover_secondary`: labeled cover fixture.
 - `oos_test_nokia_2780_cover_green`: solid RGB565 cover fixture.
@@ -91,15 +92,20 @@ All executable test entry points and fixtures live under `tests`:
 - `oos_test_nokia_2780_modem_headless`: read-only Radio HAL and baseband probe.
 - `oos_test_nokia_2780_hardware_headless`: audio, vibration, power, camera,
   flash, and hardware codec probe.
+- `oos_test_nokia_2780_device_contract`: descriptor and capability contract.
+- `oos_test_nokia_2780_service_contract`: standard Manager link contract.
 
-Run the validated fast switch test with:
+Run the validated display lifecycle and hardware tests with:
 
 ```sh
-./scripts/test-single-process-switch.sh
+./scripts/test-display-lifecycle.sh 3
 ./scripts/test-key-input.sh
 ./scripts/test-modem.sh smoke
 ./scripts/test-hardware.sh smoke
 ```
+
+The former single-process WPE display-switch test is retired. WPE surfaces
+must cross the common transport and be presented by the OOS compositor host.
 
 The device launcher creates a temporary chroot and overlays only its view of
 `libc++_shared.so`; it never modifies the device's system partition.

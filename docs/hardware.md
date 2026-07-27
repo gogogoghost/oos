@@ -1,24 +1,31 @@
 # Audio, Power, Camera, and Codecs
 
-The Nokia 2780 hardware layer provides native C++ APIs for the non-Web parts
-of the future OOS runtime. The Web System UI should consume typed state and
-events from these managers through the future native-to-Web bridge; it should
-not invoke shell commands or own Android HAL services directly.
+The hardware layer provides native C++ APIs shared by all OOS targets. System
+UI code consumes typed state and events from these managers; it must not invoke
+shell commands or own Android HAL services directly.
 
 ## Architecture
 
-| Area | Reusable API | Nokia 2780 backend |
-| --- | --- | --- |
-| Speaker and microphone | `oos::hardware::AudioManager` | Android AAudio through the stock audio server and Audio HAL |
-| Vibration | `oos::hardware::VibratorManager` | Vibrator HIDL 1.0 |
-| Battery, wake locks, suspend, and flip | `oos::hardware::PowerManager` | power-supply sysfs/uevents, Power HIDL 1.0, `libsuspend`, RTC, and evdev |
-| Camera and flash | `oos::hardware::CameraManager` | Camera Provider HIDL 2.4 and legacy Camera Device HIDL 1.0 |
-| Video codecs | `oos::hardware::CodecManager` | Media NDK backed by the stock Qualcomm OMX service |
+| Area | Reusable API | Nokia 2780 | Nokia 8110 |
+| --- | --- | --- | --- |
+| Speaker and microphone | `AudioManager` | AAudio | OpenSL ES |
+| Vibration | `VibratorManager` | Vibrator HIDL 1.0 | legacy vibrator HAL |
+| Battery, wake locks, suspend, and flip/slider | `PowerManager` | Power HIDL, sysfs, RTC, evdev | Power C HAL, sysfs, RTC, evdev |
+| Camera and flash | `CameraManager` | HAL1 over Camera HIDL | direct HAL1 and torch sysfs |
+| Video codecs | `CodecManager` | Media NDK/Qualcomm OMX | planned |
 
 The public headers contain C++ value types and PIMPL boundaries where needed.
 Android HIDL, BufferQueue, AAudio, and Media NDK types stay in implementation
-files. The production process can therefore expose a stable internal API to
-the Web UI without leaking the Nokia 2780 transport details.
+files. The production process can therefore expose a stable internal API
+without leaking target transport details. Endpoint differences are supplied by
+`oos::device::ServiceConfiguration`.
+
+On Nokia 8110, 48 kHz mono playback passed through OpenSL ES. Microphone input
+uses the working 16 kHz normal capture route; the vendor's advertised 48 kHz
+low-latency route returned silence. Camera capture produced a valid 640x480
+Exif JPEG, torch on/off passed, and battery/USB/slider plus wake-lock lifecycle
+passed. RTC wake and deep suspend are implemented but remain below
+`validated` until an unplugged suspend/resume cycle is completed.
 
 ## Audio and Vibration
 

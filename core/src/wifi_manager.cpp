@@ -16,6 +16,9 @@
 namespace oos::network {
 namespace {
 
+constexpr char kModernControlSocket[] = "/data/vendor/wifi/wpa/sockets/wlan0";
+constexpr char kLegacyControlSocket[] = "/data/misc/wifi/sockets/wlan0";
+
 std::vector<std::string> splitLines(const std::string &text) {
   std::vector<std::string> lines;
   std::istringstream stream(text);
@@ -158,6 +161,11 @@ WifiManager::~WifiManager() { shutdown(); }
 
 bool WifiManager::initialize() {
   shutdown();
+  if (implementation_->control_socket == kModernControlSocket &&
+      access(kModernControlSocket, F_OK) != 0 &&
+      access(kLegacyControlSocket, F_OK) == 0) {
+    implementation_->control_socket = kLegacyControlSocket;
+  }
   implementation_->fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
   if (implementation_->fd < 0) {
     implementation_->error = std::strerror(errno);

@@ -49,7 +49,6 @@ echo 0 > /sys/class/leds/sublcd-backlight/brightness 2>/dev/null || true
 echo 4 > /sys/class/graphics/fb1/blank 2>/dev/null || true
 
 status=0
-unmount_if_mounted "$OOS_ROOTFS/system/lib/libc++_shared.so" || status=1
 unmount_if_mounted "$OOS_ROOTFS/opt/oos" || status=1
 unmount_if_mounted "$OOS_ROOTFS/data" || status=1
 unmount_if_mounted "$OOS_ROOTFS/apex/com.android.runtime" || status=1
