@@ -80,8 +80,8 @@ public:
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::fprintf(stderr, "usage: %s launcher.wasm\n", argv[0]);
+  if (argc != 3) {
+    std::fprintf(stderr, "usage: %s launcher.wasm wit-smoke.wasm\n", argv[0]);
     return 2;
   }
   FakeGraphics graphics;
@@ -119,6 +119,15 @@ int main(int argc, char **argv) {
               graphics.texture_updates, graphics.last_vertices,
               graphics.last_indices, graphics.last_commands);
   apps.shutdown();
+  oos::runtime::NativeAppManager wit_smoke(graphics, 1);
+  if (!wit_smoke.load("wit-smoke", argv[2]) ||
+      !wit_smoke.activate("wit-smoke") || !wit_smoke.render(1'500'000)) {
+    std::fprintf(stderr, "WIT device API smoke failed: %s\n",
+                 wit_smoke.lastError());
+    return 1;
+  }
+  wit_smoke.shutdown();
+  std::printf("WAMR WIT device API imports passed\n");
   return graphics.frames == 5 && resident_textures == 3 &&
                  graphics.textures.empty() && graphics.texture_updates > 0
              ? 0

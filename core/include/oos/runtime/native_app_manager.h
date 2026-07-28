@@ -6,6 +6,10 @@
 
 #include "oos/input/key_input.h"
 
+namespace oos::device {
+class Device;
+}
+
 namespace oos::runtime {
 
 class GraphicsHost;
@@ -16,6 +20,9 @@ public:
 
   explicit NativeAppManager(
       GraphicsHost &graphics,
+      size_t resident_limit = NativeAppManager::kDefaultResidentLimit);
+  NativeAppManager(
+      GraphicsHost &graphics, device::Device &device,
       size_t resident_limit = NativeAppManager::kDefaultResidentLimit);
   ~NativeAppManager();
 

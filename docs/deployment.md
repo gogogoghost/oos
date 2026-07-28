@@ -25,6 +25,7 @@ oos/
 ├── res -> res-1.0.0
 ├── res-1.0.0/
 │   ├── apps/launcher.aot
+│   ├── apps/launcher.component.wasm
 │   ├── apps/launcher.wasm
 │   ├── bin/oos
 │   └── ...
@@ -112,6 +113,10 @@ keys to it. If no AOT file is present, `oos` can still be invoked explicitly
 with `/opt/oos/apps/launcher.wasm` for interpreter diagnostics. WPE libraries
 remain in the res package for the future single-foreground KaiOS application
 runner.
+
+`launcher.component.wasm` carries the same versioned WIT world as a standard
+Component Model artifact. It is packaged for compatible tooling and future
+runtimes; WAMR 2.4.4 continues to load the core-Wasm/AOT forms.
 
 ## Upgrade
 

@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "oos/wasm/abi.h"
+#include "oos/runtime/graphics_types.h"
 
 namespace oos::runtime {
 

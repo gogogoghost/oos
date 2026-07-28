@@ -13,10 +13,12 @@
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <tuple>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
+#include "oos/device/device.h"
 #include "oos/runtime/graphics_host.h"
 
 namespace oos::runtime {
@@ -25,6 +27,48 @@ namespace {
 constexpr size_t kErrorBufferSize = 512;
 constexpr uint32_t kMaxLogBytes = 4096;
 constexpr size_t kMaxModuleBytes = 32 * 1024 * 1024;
+constexpr const char *kRuntimeInterface = "oos:platform/runtime@0.1.0";
+constexpr const char *kGraphicsInterface = "oos:platform/graphics@0.1.0";
+constexpr const char *kDeviceInterface = "oos:platform/device@0.1.0";
+constexpr const char *kAudioInterface = "oos:platform/audio@0.1.0";
+constexpr const char *kCameraInterface = "oos:platform/camera@0.1.0";
+constexpr const char *kPowerInterface = "oos:platform/power@0.1.0";
+constexpr const char *kVibratorInterface = "oos:platform/vibrator@0.1.0";
+constexpr const char *kWifiInterface = "oos:platform/wifi@0.1.0";
+constexpr const char *kIpInterface = "oos:platform/ip@0.1.0";
+constexpr const char *kBluetoothInterface = "oos:platform/bluetooth@0.1.0";
+constexpr const char *kModemInterface = "oos:platform/modem@0.1.0";
+constexpr const char *kCodecInterface = "oos:platform/codec@0.1.0";
+constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
+constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.1.0#event";
+constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.1.0#frame";
+constexpr const char *kLifecycleShutdown =
+    "oos:platform/lifecycle@0.1.0#shutdown";
+
+enum class WitError : uint8_t {
+  Unavailable = 0,
+  InvalidArgument = 1,
+  PermissionDenied = 2,
+  LimitExceeded = 3,
+  Io = 4,
+  Timeout = 5,
+  Busy = 6,
+  Failed = 7,
+};
+
+const char *witErrorName(uint8_t error) {
+  constexpr const char *kNames[] = {
+      "unavailable",
+      "invalid-argument",
+      "permission-denied",
+      "limit-exceeded",
+      "io",
+      "timeout",
+      "busy",
+      "failed",
+  };
+  return error < std::size(kNames) ? kNames[error] : "invalid-error-code";
+}
 
 template <typename T>
 const T *appArray(wasm_exec_env_t environment, uint32_t offset, uint32_t count,
@@ -43,21 +87,70 @@ const T *appArray(wasm_exec_env_t environment, uint32_t offset, uint32_t count,
       wasm_runtime_addr_app_to_native(instance, offset));
 }
 
-GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
+template <typename T>
+T *appMutableArray(wasm_exec_env_t environment, uint32_t offset, uint32_t count,
+                   uint32_t maximum) {
+  return const_cast<T *>(appArray<T>(environment, offset, count, maximum));
+}
+
+struct AppHostContext {
+  GraphicsHost *graphics = nullptr;
+  device::Device *device = nullptr;
+};
+
+AppHostContext *hostFor(wasm_exec_env_t environment) {
   wasm_module_inst_t instance = wasm_runtime_get_module_inst(environment);
-  return static_cast<GraphicsHost *>(wasm_runtime_get_custom_data(instance));
+  return static_cast<AppHostContext *>(wasm_runtime_get_custom_data(instance));
+}
+
+GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->graphics : nullptr;
+}
+
+void trapInvalidReturnArea(wasm_exec_env_t environment) {
+  wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                             "invalid WIT canonical return area");
+}
+
+bool writeResult(wasm_exec_env_t environment, uint32_t result_offset,
+                 bool success, WitError error = WitError::Failed) {
+  uint8_t *result = appMutableArray<uint8_t>(environment, result_offset, 2, 2);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return false;
+  }
+  result[0] = success ? 0 : 1;
+  result[1] = static_cast<uint8_t>(error);
+  return true;
 }
 
 uint32_t nativeAbiVersion(wasm_exec_env_t) { return OOS_WASM_ABI_VERSION; }
 
-uint32_t nativeSurfaceWidth(wasm_exec_env_t environment) {
+void nativeSurfaceSize(wasm_exec_env_t environment, uint32_t result_offset) {
   GraphicsHost *graphics = graphicsFor(environment);
-  return graphics ? graphics->width() : 0;
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[0] = graphics ? graphics->width() : 0;
+  result[1] = graphics ? graphics->height() : 0;
 }
 
-uint32_t nativeSurfaceHeight(wasm_exec_env_t environment) {
-  GraphicsHost *graphics = graphicsFor(environment);
-  return graphics ? graphics->height() : 0;
+void nativeGraphicsLimits(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 5, 5);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[0] = OOS_GFX_MAX_TEXTURE_SIZE;
+  result[1] = OOS_GFX_MAX_TEXTURE_BYTES;
+  result[2] = OOS_GFX_MAX_VERTICES;
+  result[3] = OOS_GFX_MAX_INDICES;
+  result[4] = OOS_GFX_MAX_DRAW_COMMANDS;
 }
 
 uint32_t nativeWallClockMinutes(wasm_exec_env_t) {
@@ -82,35 +175,39 @@ void nativeLog(wasm_exec_env_t environment, uint32_t level, uint32_t offset,
   std::fflush(stderr);
 }
 
-int32_t nativeTextureSet(wasm_exec_env_t environment, uint32_t texture,
-                         uint32_t x, uint32_t y, uint32_t width,
-                         uint32_t height, uint32_t flags, uint32_t offset,
-                         uint32_t length) {
+void nativeTextureSet(wasm_exec_env_t environment, uint32_t texture, uint32_t x,
+                      uint32_t y, uint32_t width, uint32_t height,
+                      uint32_t flags, uint32_t offset, uint32_t length,
+                      uint32_t result_offset) {
   GraphicsHost *graphics = graphicsFor(environment);
   if (!graphics || texture == 0 || width == 0 || height == 0 ||
       width > OOS_GFX_MAX_TEXTURE_SIZE || height > OOS_GFX_MAX_TEXTURE_SIZE ||
       (flags & ~(OOS_TEXTURE_LINEAR | OOS_TEXTURE_REPLACE)) != 0 ||
       width > std::numeric_limits<uint32_t>::max() / height / 4 ||
       length != width * height * 4 || length > OOS_GFX_MAX_TEXTURE_BYTES) {
-    return -1;
+    writeResult(environment, result_offset, false, WitError::InvalidArgument);
+    return;
   }
   const uint8_t *rgba =
       appArray<uint8_t>(environment, offset, length, OOS_GFX_MAX_TEXTURE_BYTES);
-  return rgba && graphics->setTexture(texture, x, y, width, height, flags, rgba,
-                                      length)
-             ? 0
-             : -1;
+  writeResult(environment, result_offset,
+              rgba && graphics->setTexture(texture, x, y, width, height, flags,
+                                           rgba, length),
+              rgba ? WitError::Failed : WitError::InvalidArgument);
 }
 
-int32_t nativeTextureFree(wasm_exec_env_t environment, uint32_t texture) {
+void nativeTextureFree(wasm_exec_env_t environment, uint32_t texture,
+                       uint32_t result_offset) {
   GraphicsHost *graphics = graphicsFor(environment);
-  return graphics && graphics->freeTexture(texture) ? 0 : -1;
+  writeResult(environment, result_offset,
+              graphics && graphics->freeTexture(texture));
 }
 
-int32_t nativeSubmit(wasm_exec_env_t environment, uint32_t vertex_offset,
-                     uint32_t vertex_count, uint32_t index_offset,
-                     uint32_t index_count, uint32_t command_offset,
-                     uint32_t command_count, uint32_t clear_rgba) {
+void nativeSubmit(wasm_exec_env_t environment, uint32_t vertex_offset,
+                  uint32_t vertex_count, uint32_t index_offset,
+                  uint32_t index_count, uint32_t command_offset,
+                  uint32_t command_count, uint32_t clear_rgba,
+                  uint32_t result_offset) {
   GraphicsHost *graphics = graphicsFor(environment);
   const OosGfxVertex *vertices = appArray<OosGfxVertex>(
       environment, vertex_offset, vertex_count, OOS_GFX_MAX_VERTICES);
@@ -118,32 +215,358 @@ int32_t nativeSubmit(wasm_exec_env_t environment, uint32_t vertex_offset,
       environment, index_offset, index_count, OOS_GFX_MAX_INDICES);
   const OosGfxDrawCommand *commands = appArray<OosGfxDrawCommand>(
       environment, command_offset, command_count, OOS_GFX_MAX_DRAW_COMMANDS);
-  if (!graphics || !vertices || !indices || !commands)
-    return -1;
-  return graphics->submit(vertex_count == 0 ? nullptr : vertices, vertex_count,
-                          index_count == 0 ? nullptr : indices, index_count,
-                          command_count == 0 ? nullptr : commands,
-                          command_count, clear_rgba)
-             ? 0
-             : -1;
+  if (!graphics || !vertices || !indices || !commands) {
+    writeResult(environment, result_offset, false, WitError::InvalidArgument);
+    return;
+  }
+  writeResult(
+      environment, result_offset,
+      graphics->submit(vertex_count == 0 ? nullptr : vertices, vertex_count,
+                       index_count == 0 ? nullptr : indices, index_count,
+                       command_count == 0 ? nullptr : commands, command_count,
+                       clear_rgba));
 }
 
-NativeSymbol kNativeSymbols[] = {
-    {"oos_abi_version", reinterpret_cast<void *>(nativeAbiVersion), "()i",
-     nullptr},
-    {"oos_surface_width", reinterpret_cast<void *>(nativeSurfaceWidth), "()i",
-     nullptr},
-    {"oos_surface_height", reinterpret_cast<void *>(nativeSurfaceHeight), "()i",
-     nullptr},
-    {"oos_wall_clock_minutes", reinterpret_cast<void *>(nativeWallClockMinutes),
+uint32_t guestRealloc(wasm_exec_env_t environment, uint32_t old_pointer,
+                      uint32_t old_size, uint32_t alignment,
+                      uint32_t new_size) {
+  wasm_module_inst_t instance = wasm_runtime_get_module_inst(environment);
+  wasm_function_inst_t realloc =
+      wasm_runtime_lookup_function(instance, "cabi_realloc");
+  if (!realloc) {
+    wasm_runtime_set_exception(instance,
+                               "WIT guest does not export cabi_realloc");
+    return 0;
+  }
+  uint32_t arguments[4] = {old_pointer, old_size, alignment, new_size};
+  if (!wasm_runtime_call_wasm(environment, realloc, std::size(arguments),
+                              arguments)) {
+    return 0;
+  }
+  return arguments[0];
+}
+
+bool lowerString(wasm_exec_env_t environment, const char *value,
+                 uint32_t &pointer, uint32_t &length) {
+  value = value ? value : "";
+  const size_t native_length = std::strlen(value);
+  if (native_length > kMaxLogBytes)
+    return false;
+  length = static_cast<uint32_t>(native_length);
+  if (length == 0) {
+    pointer = 1;
+    return true;
+  }
+  pointer = guestRealloc(environment, 0, 0, 1, length);
+  uint8_t *destination =
+      appMutableArray<uint8_t>(environment, pointer, length, kMaxLogBytes);
+  if (!pointer || !destination)
+    return false;
+  std::memcpy(destination, value, length);
+  return true;
+}
+
+void nativeDeviceDescriptor(wasm_exec_env_t environment,
+                            uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 11, 11);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  const device::DeviceDescriptor empty_descriptor = {};
+  const device::DeviceDescriptor &descriptor =
+      host && host->device ? host->device->descriptor() : empty_descriptor;
+  if (!lowerString(environment, descriptor.id, result[0], result[1]) ||
+      !lowerString(environment, descriptor.manufacturer, result[2],
+                   result[3]) ||
+      !lowerString(environment, descriptor.model, result[4], result[5])) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower WIT device descriptor");
+    return;
+  }
+  result[6] = descriptor.android_api;
+  result[7] = descriptor.primary_width;
+  result[8] = descriptor.primary_height;
+  result[9] = descriptor.secondary_width;
+  result[10] = descriptor.secondary_height;
+}
+
+uint32_t nativeDeviceCapability(wasm_exec_env_t environment, uint32_t feature) {
+  AppHostContext *host = hostFor(environment);
+  if (!host || !host->device ||
+      feature >= static_cast<uint32_t>(device::Feature::Count)) {
+    return static_cast<uint32_t>(device::CapabilityState::Unsupported);
+  }
+  return static_cast<uint32_t>(
+      host->device->capability(static_cast<device::Feature>(feature)));
+}
+
+void writeUnavailable(wasm_exec_env_t environment, uint32_t result_offset) {
+  const size_t error_offset = reinterpret_cast<uintptr_t>(
+      wasm_runtime_get_function_attachment(environment));
+  if (error_offset > 64) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  uint8_t *result = appMutableArray<uint8_t>(
+      environment, result_offset, static_cast<uint32_t>(error_offset + 1), 65);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[0] = 1;
+  result[error_offset] = static_cast<uint8_t>(WitError::Unavailable);
+}
+
+template <typename... Args>
+void nativeUnavailable(wasm_exec_env_t environment, Args... arguments) {
+  static_assert(sizeof...(Args) > 0);
+  const auto values = std::make_tuple(arguments...);
+  writeUnavailable(environment, static_cast<uint32_t>(
+                                    std::get<sizeof...(Args) - 1>(values)));
+}
+
+void nativeUnavailableMessage(wasm_exec_env_t environment,
+                              uint32_t result_offset) {
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+  if (!result ||
+      !lowerString(environment, "service unavailable", result[0], result[1])) {
+    trapInvalidReturnArea(environment);
+  }
+}
+
+uint32_t nativeFalse(wasm_exec_env_t) { return 0; }
+
+NativeSymbol kRuntimeSymbols[] = {
+    {"abi-version", reinterpret_cast<void *>(nativeAbiVersion), "()i", nullptr},
+    {"wall-clock-minutes", reinterpret_cast<void *>(nativeWallClockMinutes),
      "()i", nullptr},
-    {"oos_log", reinterpret_cast<void *>(nativeLog), "(iii)", nullptr},
-    {"oos_gfx_texture_set", reinterpret_cast<void *>(nativeTextureSet),
-     "(iiiiiiii)i", nullptr},
-    {"oos_gfx_texture_free", reinterpret_cast<void *>(nativeTextureFree),
-     "(i)i", nullptr},
-    {"oos_gfx_submit", reinterpret_cast<void *>(nativeSubmit), "(iiiiiii)i",
+    {"log", reinterpret_cast<void *>(nativeLog), "(iii)", nullptr},
+};
+
+NativeSymbol kGraphicsSymbols[] = {
+    {"surface-size", reinterpret_cast<void *>(nativeSurfaceSize), "(i)",
      nullptr},
+    {"graphics-limits", reinterpret_cast<void *>(nativeGraphicsLimits), "(i)",
+     nullptr},
+    {"texture-set", reinterpret_cast<void *>(nativeTextureSet), "(iiiiiiiii)",
+     nullptr},
+    {"texture-free", reinterpret_cast<void *>(nativeTextureFree), "(ii)",
+     nullptr},
+    {"submit", reinterpret_cast<void *>(nativeSubmit), "(iiiiiiii)", nullptr},
+};
+
+NativeSymbol kDeviceSymbols[] = {
+    {"get-descriptor", reinterpret_cast<void *>(nativeDeviceDescriptor), "(i)",
+     nullptr},
+    {"get-capability", reinterpret_cast<void *>(nativeDeviceCapability), "(i)i",
+     nullptr},
+};
+
+NativeSymbol kAudioSymbols[] = {
+    {"play-tone",
+     reinterpret_cast<void *>(
+         nativeUnavailable<double, uint32_t, float, uint32_t, uint32_t>),
+     "(Fifii)", reinterpret_cast<void *>(8)},
+    {"record-wav",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiii)", reinterpret_cast<void *>(8)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kCameraSymbols[] = {
+    {"enumerate", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(4)},
+    {"set-torch",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiii)", reinterpret_cast<void *>(1)},
+    {"capture-jpeg",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                           uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiiiiiiii)", reinterpret_cast<void *>(8)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kPowerSymbols[] = {
+    {"query-battery", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
+     "(i)", reinterpret_cast<void *>(4)},
+    {"wait-for-battery-event",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(4)},
+    {"set-interactive",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"acquire-wake-lock",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     "(iii)", reinterpret_cast<void *>(1)},
+    {"release-wake-lock",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     "(iii)", reinterpret_cast<void *>(1)},
+    {"enable-auto-suspend",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"disable-auto-suspend",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"schedule-rtc-wake",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"clear-rtc-wake", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
+     "(i)", reinterpret_cast<void *>(1)},
+    {"suspend", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(1)},
+    {"query-flip-state", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
+     "(i)", reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kVibratorSymbols[] = {
+    {"vibrate", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(1)},
+    {"stop", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"supports-amplitude-control", reinterpret_cast<void *>(nativeFalse), "()i",
+     nullptr},
+    {"set-amplitude",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kWifiSymbols[] = {
+    {"get-status", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(4)},
+    {"scan", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(4)},
+    {"list-networks", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
+     "(i)", reinterpret_cast<void *>(4)},
+    {"connect",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t,
+                                                uint32_t, uint32_t, uint32_t>),
+     "(iiiiii)", reinterpret_cast<void *>(4)},
+    {"disconnect", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"reconnect", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"forget", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(1)},
+    {"save-configuration",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kIpSymbols[] = {
+    {"get-status", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+     reinterpret_cast<void *>(4)},
+    {"use-dhcp",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"use-static",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                           uint32_t, uint32_t>),
+     "(iiiiiiiiiiii)", reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kBluetoothSymbols[] = {
+    {"enable", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(1)},
+    {"disable", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(1)},
+    {"classic-scan",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(4)},
+    {"le-scan", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(4)},
+    {"pair",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiii)", reinterpret_cast<void *>(1)},
+    {"unpair",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     "(iii)", reinterpret_cast<void *>(1)},
+    {"cancel-pairing",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     "(iii)", reinterpret_cast<void *>(1)},
+    {"profile-connect",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiii)", reinterpret_cast<void *>(1)},
+    {"profile-disconnect",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiii)", reinterpret_cast<void *>(1)},
+    {"profile-connection-cycle",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiiii)", reinterpret_cast<void *>(1)},
+    {"le-connection-cycle",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiiii)", reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kModemSymbols[] = {
+    {"query-snapshot",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(4)},
+    {"set-radio-power",
+     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     "(iii)", reinterpret_cast<void *>(4)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+NativeSymbol kCodecSymbols[] = {
+    {"test-h264-round-trip",
+     reinterpret_cast<void *>(
+         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
+     "(iiiii)", reinterpret_cast<void *>(8)},
+    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+     nullptr},
+};
+
+struct WitNativeInterface {
+  const char *name;
+  NativeSymbol *symbols;
+  uint32_t count;
+};
+
+WitNativeInterface kOptionalInterfaces[] = {
+    {kAudioInterface, kAudioSymbols,
+     static_cast<uint32_t>(std::size(kAudioSymbols))},
+    {kCameraInterface, kCameraSymbols,
+     static_cast<uint32_t>(std::size(kCameraSymbols))},
+    {kPowerInterface, kPowerSymbols,
+     static_cast<uint32_t>(std::size(kPowerSymbols))},
+    {kVibratorInterface, kVibratorSymbols,
+     static_cast<uint32_t>(std::size(kVibratorSymbols))},
+    {kWifiInterface, kWifiSymbols,
+     static_cast<uint32_t>(std::size(kWifiSymbols))},
+    {kIpInterface, kIpSymbols, static_cast<uint32_t>(std::size(kIpSymbols))},
+    {kBluetoothInterface, kBluetoothSymbols,
+     static_cast<uint32_t>(std::size(kBluetoothSymbols))},
+    {kModemInterface, kModemSymbols,
+     static_cast<uint32_t>(std::size(kModemSymbols))},
+    {kCodecInterface, kCodecSymbols,
+     static_cast<uint32_t>(std::size(kCodecSymbols))},
 };
 
 uint32_t gRuntimeReferences = 0;
@@ -152,12 +575,28 @@ bool acquireRuntime(std::string &error) {
   if (gRuntimeReferences == 0) {
     RuntimeInitArgs arguments = {};
     arguments.mem_alloc_type = Alloc_With_System_Allocator;
-    arguments.native_module_name = "oos";
-    arguments.native_symbols = kNativeSymbols;
+    arguments.native_module_name = kRuntimeInterface;
+    arguments.native_symbols = kRuntimeSymbols;
     arguments.n_native_symbols =
-        static_cast<uint32_t>(std::size(kNativeSymbols));
+        static_cast<uint32_t>(std::size(kRuntimeSymbols));
     if (!wasm_runtime_full_init(&arguments)) {
       error = "WAMR initialization failed";
+      return false;
+    }
+    bool registered = wasm_runtime_register_natives(
+                          kGraphicsInterface, kGraphicsSymbols,
+                          static_cast<uint32_t>(std::size(kGraphicsSymbols))) &&
+                      wasm_runtime_register_natives(
+                          kDeviceInterface, kDeviceSymbols,
+                          static_cast<uint32_t>(std::size(kDeviceSymbols)));
+    for (const WitNativeInterface &interface : kOptionalInterfaces) {
+      registered =
+          registered && wasm_runtime_register_natives(
+                            interface.name, interface.symbols, interface.count);
+    }
+    if (!registered) {
+      error = "WAMR WIT interface registration failed";
+      wasm_runtime_destroy();
       return false;
     }
   }
@@ -312,8 +751,8 @@ private:
 
 class WasmApp::Impl {
 public:
-  Impl(GraphicsHost &graphics, WasmAppOptions options)
-      : graphics(graphics), options(options) {}
+  Impl(GraphicsHost &graphics, device::Device *device, WasmAppOptions options)
+      : graphics(graphics), host{&this->graphics, device}, options(options) {}
 
   ~Impl() { shutdown(); }
 
@@ -326,8 +765,7 @@ public:
     return true;
   }
 
-  bool call(const char *name, uint32_t argc, uint32_t *argv,
-            bool require_zero_result = false) {
+  bool call(const char *name, uint32_t argc, uint32_t *argv) {
     wasm_function_inst_t function =
         wasm_runtime_lookup_function(instance, name);
     if (!function) {
@@ -340,19 +778,28 @@ public:
               " failed: " + (exception ? exception : "unknown WASM exception");
       return false;
     }
-    if (require_zero_result && argv && argv[0] != 0) {
-      std::array<char, 32> result{};
-      std::snprintf(result.data(), result.size(), "%u", argv[0]);
-      error = std::string(name) + " returned " + result.data();
+    return true;
+  }
+
+  bool callResult(const char *name, uint32_t argc, uint32_t *argv) {
+    if (!call(name, argc, argv))
+      return false;
+    const uint32_t result_offset = argv ? argv[0] : 0;
+    const uint8_t *result = appArray<uint8_t>(environment, result_offset, 2, 2);
+    if (!result || result[0] > 1) {
+      error = std::string(name) + " returned an invalid WIT result";
       return false;
     }
-    return true;
+    if (result[0] == 0)
+      return true;
+    error = std::string(name) + " returned " + witErrorName(result[1]);
+    return false;
   }
 
   void shutdown() {
     if (instance && environment) {
       wasm_function_inst_t function =
-          wasm_runtime_lookup_function(instance, "oos_app_shutdown");
+          wasm_runtime_lookup_function(instance, kLifecycleShutdown);
       if (function)
         wasm_runtime_call_wasm(environment, function, 0, nullptr);
     }
@@ -378,6 +825,7 @@ public:
   }
 
   NamespacedGraphicsHost graphics;
+  AppHostContext host;
   WasmAppOptions options;
   MappedModule module_bytes;
   wasm_module_t module = nullptr;
@@ -389,7 +837,11 @@ public:
 };
 
 WasmApp::WasmApp(GraphicsHost &graphics, WasmAppOptions options)
-    : impl_(std::make_unique<Impl>(graphics, options)) {}
+    : impl_(std::make_unique<Impl>(graphics, nullptr, options)) {}
+
+WasmApp::WasmApp(GraphicsHost &graphics, device::Device &device,
+                 WasmAppOptions options)
+    : impl_(std::make_unique<Impl>(graphics, &device, options)) {}
 
 WasmApp::~WasmApp() = default;
 
@@ -420,7 +872,7 @@ bool WasmApp::load(const char *path) {
         std::string("instantiate WASM module: ") + error_buffer.data();
     return false;
   }
-  wasm_runtime_set_custom_data(impl_->instance, &impl_->graphics);
+  wasm_runtime_set_custom_data(impl_->instance, &impl_->host);
   impl_->environment =
       wasm_runtime_create_exec_env(impl_->instance, impl_->options.stack_size);
   if (!impl_->environment) {
@@ -436,7 +888,7 @@ bool WasmApp::initialize() {
     return false;
   }
   uint32_t result[1] = {};
-  impl_->initialized = impl_->call("oos_app_init", 0, result, true);
+  impl_->initialized = impl_->callResult(kLifecycleInit, 0, result);
   return impl_->initialized;
 }
 
@@ -450,7 +902,7 @@ bool WasmApp::dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) {
       static_cast<uint32_t>(timestamp),
       static_cast<uint32_t>(timestamp >> 32),
   };
-  return impl_->call("oos_app_event", std::size(arguments), arguments);
+  return impl_->call(kLifecycleEvent, std::size(arguments), arguments);
 }
 
 bool WasmApp::render(int64_t monotonic_us) {
@@ -461,7 +913,7 @@ bool WasmApp::render(int64_t monotonic_us) {
       static_cast<uint32_t>(timestamp),
       static_cast<uint32_t>(timestamp >> 32),
   };
-  return impl_->call("oos_app_frame", std::size(arguments), arguments, true);
+  return impl_->callResult(kLifecycleFrame, std::size(arguments), arguments);
 }
 
 void WasmApp::shutdown() { impl_->shutdown(); }

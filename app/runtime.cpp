@@ -127,7 +127,7 @@ int run(int argc, char **argv) {
   }
 
   Compositor compositor(display);
-  NativeAppManager apps(compositor);
+  NativeAppManager apps(compositor, *platform_device);
   if (!apps.load("launcher", module_path) || !apps.activate("launcher")) {
     std::fprintf(stderr, "failed to start native app %s: %s\n", module_path,
                  apps.lastError());

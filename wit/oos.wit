@@ -1,0 +1,513 @@
+package oos:platform@0.1.0;
+
+interface types {
+  enum error-code {
+    unavailable,
+    invalid-argument,
+    permission-denied,
+    limit-exceeded,
+    io,
+    timeout,
+    busy,
+    failed,
+  }
+
+  record size {
+    width: u32,
+    height: u32,
+  }
+
+  record point {
+    x: u32,
+    y: u32,
+  }
+}
+
+/// Process-safe services that every OOS application can import.
+interface runtime {
+  enum log-level {
+    debug,
+    info,
+    warn,
+    error,
+  }
+
+  abi-version: func() -> u32;
+  wall-clock-minutes: func() -> u32;
+  log: func(level: log-level, message: string);
+}
+
+/// Retained texture and indexed-triangle drawing for the application surface.
+interface graphics {
+  use types.{error-code, point, size};
+
+  flags texture-flags {
+    linear,
+    replace,
+  }
+
+  record limits {
+    max-texture-size: u32,
+    max-texture-bytes: u32,
+    max-vertices: u32,
+    max-indices: u32,
+    max-draw-commands: u32,
+  }
+
+  /// Premultiplied RGBA vertex. Its canonical memory layout is 20 bytes.
+  record vertex {
+    position-x: f32,
+    position-y: f32,
+    uv-x: f32,
+    uv-y: f32,
+    red: u8,
+    green: u8,
+    blue: u8,
+    alpha: u8,
+  }
+
+  /// Indexed draw command. Its canonical memory layout is 28 bytes.
+  record draw-command {
+    first-index: u32,
+    index-count: u32,
+    texture: u32,
+    clip-min-x: f32,
+    clip-min-y: f32,
+    clip-max-x: f32,
+    clip-max-y: f32,
+  }
+
+  surface-size: func() -> size;
+  graphics-limits: func() -> limits;
+  texture-set: func(
+    texture: u32,
+    position: point,
+    dimensions: size,
+    options: texture-flags,
+    rgba: list<u8>,
+  ) -> result<_, error-code>;
+  texture-free: func(texture: u32) -> result<_, error-code>;
+  submit: func(
+    vertices: list<vertex>,
+    indices: list<u16>,
+    commands: list<draw-command>,
+    clear-rgba: u32,
+  ) -> result<_, error-code>;
+}
+
+/// Static device identity and capability discovery. Applications must query a
+/// capability before using the corresponding optional service interface.
+interface device {
+  enum feature {
+    primary-display,
+    secondary-display,
+    key-input,
+    audio-playback,
+    audio-capture,
+    camera-capture,
+    torch,
+    vibration,
+    battery,
+    suspend,
+    rtc-wake,
+    wifi,
+    ip-configuration,
+    bluetooth-classic,
+    bluetooth-low-energy,
+    modem,
+    hardware-video-codec,
+    location,
+    sensors,
+    fm-radio,
+    nfc,
+  }
+
+  enum capability-state {
+    unsupported,
+    planned,
+    implemented,
+    validated,
+  }
+
+  record descriptor {
+    id: string,
+    manufacturer: string,
+    model: string,
+    android-api: u32,
+    primary-width: u32,
+    primary-height: u32,
+    secondary-width: u32,
+    secondary-height: u32,
+  }
+
+  get-descriptor: func() -> descriptor;
+  get-capability: func(feature: feature) -> capability-state;
+}
+
+interface audio {
+  use types.{error-code};
+
+  enum usage {
+    media,
+    voice,
+    ringtone,
+    alarm,
+    notification,
+  }
+
+  record stream-info {
+    sample-rate: s32,
+    channel-count: s32,
+    device-id: s32,
+    frames-transferred: s64,
+  }
+
+  record recording-result {
+    audio-stream: stream-info,
+    peak: f64,
+    rms: f64,
+    path: string,
+  }
+
+  play-tone: func(
+    frequency-hz: f64,
+    duration-ms: u32,
+    volume: f32,
+    usage: usage,
+  ) -> result<stream-info, error-code>;
+  record-wav: func(path: string, duration-ms: u32) -> result<recording-result, error-code>;
+  last-error: func() -> string;
+}
+
+interface camera {
+  use types.{error-code};
+
+  enum lens-facing {
+    unknown,
+    front,
+    back,
+    external,
+  }
+
+  record info {
+    id: string,
+    facing: lens-facing,
+    sensor-orientation: s32,
+    hardware-level: s32,
+    flash-available: bool,
+    max-jpeg-width: s32,
+    max-jpeg-height: s32,
+  }
+
+  record photo-result {
+    path: string,
+    width: s32,
+    height: s32,
+    bytes: u64,
+  }
+
+  enumerate: func() -> result<list<info>, error-code>;
+  set-torch: func(camera-id: string, enabled: bool) -> result<_, error-code>;
+  capture-jpeg: func(
+    camera-id: string,
+    path: string,
+    width: s32,
+    height: s32,
+    flash: bool,
+    timeout-ms: u32,
+  ) -> result<photo-result, error-code>;
+  last-error: func() -> string;
+}
+
+interface power {
+  use types.{error-code};
+
+  enum battery-state {
+    unknown,
+    charging,
+    discharging,
+    not-charging,
+    full,
+  }
+
+  enum flip-state {
+    unknown,
+    open,
+    closed,
+  }
+
+  record battery-snapshot {
+    state: battery-state,
+    capacity-percent: s32,
+    voltage-microvolts: s32,
+    current-microamps: s32,
+    temperature-tenths-celsius: s32,
+    usb-online: bool,
+  }
+
+  query-battery: func() -> result<battery-snapshot, error-code>;
+  wait-for-battery-event: func(timeout-ms: u32) -> result<option<battery-snapshot>, error-code>;
+  set-interactive: func(interactive: bool) -> result<_, error-code>;
+  acquire-wake-lock: func(name: string) -> result<_, error-code>;
+  release-wake-lock: func(name: string) -> result<_, error-code>;
+  enable-auto-suspend: func() -> result<_, error-code>;
+  disable-auto-suspend: func() -> result<_, error-code>;
+  schedule-rtc-wake: func(delay-seconds: u32) -> result<_, error-code>;
+  clear-rtc-wake: func() -> result<_, error-code>;
+  suspend: func(graceful-timeout-ms: u32) -> result<_, error-code>;
+  query-flip-state: func() -> result<flip-state, error-code>;
+  last-error: func() -> string;
+}
+
+interface vibrator {
+  use types.{error-code};
+
+  vibrate: func(duration-ms: u32) -> result<_, error-code>;
+  stop: func() -> result<_, error-code>;
+  supports-amplitude-control: func() -> bool;
+  set-amplitude: func(amplitude: u8) -> result<_, error-code>;
+  last-error: func() -> string;
+}
+
+interface wifi {
+  use types.{error-code};
+
+  enum security {
+    open,
+    wpa-psk,
+  }
+
+  record status {
+    state: string,
+    ssid: string,
+    bssid: string,
+    ip-address: string,
+    network-id: s32,
+  }
+
+  record access-point {
+    bssid: string,
+    frequency-mhz: s32,
+    signal-dbm: s32,
+    capabilities: string,
+    ssid: string,
+  }
+
+  record network {
+    id: s32,
+    ssid: string,
+    bssid: string,
+    capabilities: string,
+  }
+
+  get-status: func() -> result<status, error-code>;
+  scan: func(wait-ms: u32) -> result<list<access-point>, error-code>;
+  list-networks: func() -> result<list<network>, error-code>;
+  connect: func(ssid: string, security: security, credential: string) -> result<s32, error-code>;
+  disconnect: func() -> result<_, error-code>;
+  reconnect: func() -> result<_, error-code>;
+  forget: func(network-id: s32) -> result<_, error-code>;
+  save-configuration: func() -> result<_, error-code>;
+  last-error: func() -> string;
+}
+
+interface ip {
+  use types.{error-code};
+
+  record configuration {
+    interface-name: string,
+    address: string,
+    prefix-length: u32,
+    gateway: string,
+    dns1: string,
+    dns2: string,
+  }
+
+  get-status: func() -> result<configuration, error-code>;
+  use-dhcp: func(timeout-ms: u32) -> result<_, error-code>;
+  use-static: func(configuration: configuration) -> result<_, error-code>;
+  last-error: func() -> string;
+}
+
+interface bluetooth {
+  use types.{error-code};
+
+  enum transport {
+    auto,
+    classic,
+    low-energy,
+  }
+
+  enum profile {
+    hid,
+    hands-free,
+    a2dp,
+  }
+
+  record discovered-device {
+    address: string,
+    name: string,
+    rssi: s32,
+    device-class: u32,
+    device-type: s32,
+    advertising-data: list<u8>,
+  }
+
+  enable: func(timeout-ms: u32) -> result<_, error-code>;
+  disable: func(timeout-ms: u32) -> result<_, error-code>;
+  classic-scan: func(duration-ms: u32) -> result<list<discovered-device>, error-code>;
+  le-scan: func(duration-ms: u32) -> result<list<discovered-device>, error-code>;
+  pair: func(address: string, transport: transport) -> result<_, error-code>;
+  unpair: func(address: string) -> result<_, error-code>;
+  cancel-pairing: func(address: string) -> result<_, error-code>;
+  profile-connect: func(address: string, profile: profile) -> result<_, error-code>;
+  profile-disconnect: func(address: string, profile: profile) -> result<_, error-code>;
+  profile-connection-cycle: func(
+    address: string,
+    profile: profile,
+    hold-ms: u32,
+  ) -> result<_, error-code>;
+  le-connection-cycle: func(address: string, hold-ms: u32, timeout-ms: u32) -> result<_, error-code>;
+  last-error: func() -> string;
+}
+
+interface modem {
+  use types.{error-code};
+
+  record request-status {
+    operation: string,
+    error: s32,
+    timed-out: bool,
+  }
+
+  record sim-status {
+    card-state: s32,
+    universal-pin-state: s32,
+    application-count: s32,
+  }
+
+  record device-identity {
+    imei: string,
+    imei-software-version: string,
+    esn: string,
+    meid: string,
+  }
+
+  record signal-status {
+    gsm-strength: s32,
+    gsm-bit-error-rate: s32,
+    cdma-dbm: s32,
+    cdma-ecio: s32,
+    evdo-dbm: s32,
+    evdo-ecio: s32,
+    evdo-snr: s32,
+    lte-strength: s32,
+    lte-rsrp: s32,
+    lte-rsrq: s32,
+    lte-rssnr: s32,
+    lte-cqi: s32,
+    lte-timing-advance: s32,
+    tdscdma-rscp: s32,
+  }
+
+  record registration-status {
+    state: s32,
+    radio-technology: s32,
+    denial-reason: s32,
+    max-data-calls: s32,
+  }
+
+  record operator-status {
+    long-name: string,
+    short-name: string,
+    numeric: string,
+  }
+
+  record snapshot {
+    service-connected: bool,
+    radio-state: s32,
+    baseband-version: string,
+    identity: device-identity,
+    sim: sim-status,
+    signal: signal-status,
+    voice-registration: registration-status,
+    data-registration: registration-status,
+    network-operator: operator-status,
+    preferred-network-type: s32,
+    voice-radio-technology: s32,
+    current-call-count: s32,
+    data-call-count: s32,
+    hardware-config-count: s32,
+    radio-access-family: u32,
+    logical-modem-uuid: string,
+    requests: list<request-status>,
+  }
+
+  query-snapshot: func(timeout-ms: u32) -> result<snapshot, error-code>;
+  set-radio-power: func(enabled: bool, timeout-ms: u32) -> result<request-status, error-code>;
+  last-error: func() -> string;
+}
+
+interface codec {
+  use types.{error-code};
+
+  record round-trip-result {
+    encoder-name: string,
+    decoder-name: string,
+    encoder-hardware-accelerated: bool,
+    decoder-hardware-accelerated: bool,
+    width: s32,
+    height: s32,
+    input-frames: s32,
+    output-buffers: s32,
+    decoded-frames: s32,
+    encoded-bytes: u64,
+  }
+
+  test-h264-round-trip: func(
+    width: s32,
+    height: s32,
+    frame-count: s32,
+    timeout-ms: u32,
+  ) -> result<round-trip-result, error-code>;
+  last-error: func() -> string;
+}
+
+/// Lifecycle exported by every OOS application.
+interface lifecycle {
+  use types.{error-code};
+
+  enum key-action {
+    released,
+    pressed,
+    repeated,
+  }
+
+  record key-event {
+    code: u32,
+    action: key-action,
+    monotonic-time-us: u64,
+  }
+
+  init: func() -> result<_, error-code>;
+  event: func(event: key-event);
+  frame: func(monotonic-time-us: u64) -> result<_, error-code>;
+  shutdown: func();
+}
+
+world app {
+  import runtime;
+  import graphics;
+  import device;
+  import audio;
+  import camera;
+  import power;
+  import vibrator;
+  import wifi;
+  import ip;
+  import bluetooth;
+  import modem;
+  import codec;
+
+  export lifecycle;
+}

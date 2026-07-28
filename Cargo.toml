@@ -3,6 +3,7 @@ members = [
   "apps/launcher",
   "sdk/rust/oos-app",
   "sdk/rust/oos-egui",
+  "tests/guest/wit-smoke",
 ]
 resolver = "2"
 

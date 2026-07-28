@@ -57,9 +57,14 @@ pub fn submit(context: &Context, output: FullOutput, clear_rgba: [u8; 4]) -> Res
             return Err(Error::VertexLimit);
         }
         vertices.extend(mesh.vertices.iter().map(|vertex| GfxVertex {
-            position: [vertex.pos.x, vertex.pos.y],
-            uv: [vertex.uv.x, vertex.uv.y],
-            color: vertex.color.to_array(),
+            position_x: vertex.pos.x,
+            position_y: vertex.pos.y,
+            uv_x: vertex.uv.x,
+            uv_y: vertex.uv.y,
+            red: vertex.color.r(),
+            green: vertex.color.g(),
+            blue: vertex.color.b(),
+            alpha: vertex.color.a(),
         }));
         for index in &mesh.indices {
             let adjusted = vertex_base + *index as usize;
@@ -69,8 +74,10 @@ pub fn submit(context: &Context, output: FullOutput, clear_rgba: [u8; 4]) -> Res
             first_index: first_index as u32,
             index_count: mesh.indices.len() as u32,
             texture: texture_handle(mesh.texture_id)?,
-            clip_min: [primitive.clip_rect.min.x, primitive.clip_rect.min.y],
-            clip_max: [primitive.clip_rect.max.x, primitive.clip_rect.max.y],
+            clip_min_x: primitive.clip_rect.min.x,
+            clip_min_y: primitive.clip_rect.min.y,
+            clip_max_x: primitive.clip_rect.max.x,
+            clip_max_y: primitive.clip_rect.max.y,
         });
     }
     oos_app::submit(&vertices, &indices, &commands, clear_rgba)

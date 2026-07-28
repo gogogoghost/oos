@@ -3,16 +3,18 @@
 Orange OS (`oos`) is a native C++ system shell intended to replace B2G on
 KaiOS devices. The production executable presents a native boot frame, starts
 the WAMR native-app runtime, loads an egui Launcher compiled to WebAssembly,
-and forwards physical keys through the capability-limited OOS ABI. WPE WebKit
-remains packaged for running compatible KaiOS applications; it is no longer
-the system Launcher runtime.
+and forwards physical keys through the capability-limited OOS WIT interfaces.
+WPE WebKit remains packaged for running compatible KaiOS applications; it is
+no longer the system Launcher runtime.
 
 ## Repository Layout
 
 - `app/main.cpp` and `app/runtime.cpp`: device-independent production entry
   point and launcher lifecycle.
 - `apps/launcher`: production egui Launcher compiled to WebAssembly.
-- `sdk/rust/oos-app`: low-level Rust bindings for the OOS native-app ABI.
+- `wit/oos.wit`: versioned source of truth for runtime, graphics, device,
+  hardware-service, and application lifecycle interfaces.
+- `sdk/rust/oos-app`: `wit-bindgen` Rust bindings plus stable convenience APIs.
 - `sdk/rust/oos-egui`: reusable egui texture and mesh adapter.
 - `launcher`: retained Solid.js/WPE prototype for KaiOS web-app work.
 - `runtime/wamr`: pinned WAMR runtime configuration.
@@ -87,6 +89,8 @@ The outputs are:
 
 - `build/android-nokia-2780-flip/bin/oos`: production executable.
 - `build/native-apps/launcher.wasm`: portable interpreter/debug Launcher.
+- `build/native-apps/launcher.component.wasm`: standard Component Model
+  Launcher for compatible runtimes and interface tooling.
 - `build/native-apps/launcher.aot`: production ARMv7 AOT Launcher.
 - `build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/`: on-device tests.
 - `build/android-nokia-8110-4g/bin/oos`: Nokia 8110 production executable.
@@ -191,6 +195,6 @@ See [docs/deployment.md](docs/deployment.md) for the production
 `/system/oos`, trial `/data/local/tmp/oos`, persistent `/data/oos`, upgrade,
 mount, and lifecycle contract.
 
-See [docs/wasm-runtime.md](docs/wasm-runtime.md) for the native-app lifecycle,
-graphics ABI, WAMR isolation model, egui adapter, and iced/LVGL integration
-plan.
+See [docs/wasm-runtime.md](docs/wasm-runtime.md) for the WIT lifecycle and
+device interfaces, WAMR/Component Model boundary, isolation model, egui
+adapter, and cross-language application path.

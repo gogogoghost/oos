@@ -77,6 +77,7 @@ package_require_directory "$WPE_SYSROOT/lib"
 package_require_directory "$WPE_SYSROOT/libexec"
 "$ROOT_DIR/scripts/build-native-app-aot.sh"
 package_require_file "$NATIVE_APPS/launcher.wasm"
+package_require_file "$NATIVE_APPS/launcher.component.wasm"
 package_require_file "$NATIVE_APPS/launcher.aot"
 package_require_file "$BOOT_SPLASH"
 package_require_file "$LUCIDE_LICENSE"
@@ -117,6 +118,8 @@ mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
   "$STAGING/etc"
 
 install -m 0644 "$NATIVE_APPS/launcher.wasm" "$STAGING/apps/launcher.wasm"
+install -m 0644 "$NATIVE_APPS/launcher.component.wasm" \
+  "$STAGING/apps/launcher.component.wasm"
 install -m 0644 "$NATIVE_APPS/launcher.aot" "$STAGING/apps/launcher.aot"
 install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
 install -m 0644 "$LUCIDE_LICENSE" \
@@ -226,6 +229,7 @@ printf '%s\n' \
   "webassembly_jit=bbq" \
   "native_app_runtime=wamr-2.4.4" \
   "native_app_execution=aot" \
+  "native_app_interface=wit-component-model-0.1.0" \
   "launcher_framework=egui-0.35" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \

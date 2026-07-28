@@ -5,6 +5,10 @@
 
 #include "oos/input/key_input.h"
 
+namespace oos::device {
+class Device;
+}
+
 namespace oos::runtime {
 
 class GraphicsHost;
@@ -17,6 +21,8 @@ struct WasmAppOptions {
 class WasmApp {
 public:
   explicit WasmApp(GraphicsHost &graphics, WasmAppOptions options = {});
+  WasmApp(GraphicsHost &graphics, device::Device &device,
+          WasmAppOptions options = {});
   ~WasmApp();
 
   WasmApp(const WasmApp &) = delete;

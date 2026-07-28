@@ -341,44 +341,48 @@ thread_local! {
     static LAUNCHER: RefCell<Option<Launcher>> = const { RefCell::new(None) };
 }
 
-#[no_mangle]
-pub extern "C" fn oos_app_init() -> i32 {
-    if oos_app::abi_version() != oos_app::ABI_VERSION {
-        return -1;
-    }
-    LAUNCHER.with(|launcher| *launcher.borrow_mut() = Some(Launcher::new()));
-    oos_app::log(1, "egui launcher initialized");
-    0
-}
+struct App;
 
-#[no_mangle]
-pub extern "C" fn oos_app_event(code: u32, action: u32, now_us_low: u32, now_us_high: u32) {
-    let now_us = (now_us_high as u64) << 32 | now_us_low as u64;
-    LAUNCHER.with(|launcher| {
-        if let Some(launcher) = launcher.borrow_mut().as_mut() {
-            launcher.key(code, action, now_us);
+impl oos_app::App for App {
+    fn init() -> Result<(), oos_app::ErrorCode> {
+        if oos_app::abi_version() != oos_app::ABI_VERSION {
+            return Err(oos_app::ErrorCode::Failed);
         }
-    });
+        LAUNCHER.with(|launcher| *launcher.borrow_mut() = Some(Launcher::new()));
+        oos_app::log(1, "egui launcher initialized");
+        Ok(())
+    }
+
+    fn event(event: oos_app::KeyEvent) {
+        let action = match event.action {
+            oos_app::KeyAction::Released => 0,
+            oos_app::KeyAction::Pressed => 1,
+            oos_app::KeyAction::Repeated => 2,
+        };
+        LAUNCHER.with(|launcher| {
+            if let Some(launcher) = launcher.borrow_mut().as_mut() {
+                launcher.key(event.code, action, event.monotonic_time_us);
+            }
+        });
+    }
+
+    fn frame(monotonic_time_us: u64) -> Result<(), oos_app::ErrorCode> {
+        LAUNCHER.with(|launcher| {
+            launcher
+                .borrow_mut()
+                .as_mut()
+                .ok_or("launcher is not initialized")
+                .and_then(|launcher| launcher.frame(monotonic_time_us))
+                .map_err(|message| {
+                    oos_app::log(3, message);
+                    oos_app::ErrorCode::Failed
+                })
+        })
+    }
+
+    fn shutdown() {
+        LAUNCHER.with(|launcher| *launcher.borrow_mut() = None);
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn oos_app_frame(now_us_low: u32, now_us_high: u32) -> i32 {
-    let now_us = (now_us_high as u64) << 32 | now_us_low as u64;
-    LAUNCHER.with(|launcher| {
-        launcher
-            .borrow_mut()
-            .as_mut()
-            .ok_or("launcher is not initialized")
-            .and_then(|launcher| launcher.frame(now_us))
-            .map(|_| 0)
-            .unwrap_or_else(|message| {
-                oos_app::log(3, message);
-                -1
-            })
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn oos_app_shutdown() {
-    LAUNCHER.with(|launcher| *launcher.borrow_mut() = None);
-}
+oos_app::bindings::export!(App with_types_in oos_app::bindings);

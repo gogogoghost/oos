@@ -17,8 +17,8 @@ public:
     std::unique_ptr<WasmApp> app;
   };
 
-  Impl(GraphicsHost &graphics, size_t resident_limit)
-      : graphics(graphics), resident_limit(resident_limit) {}
+  Impl(GraphicsHost &graphics, device::Device *device, size_t resident_limit)
+      : graphics(graphics), device(device), resident_limit(resident_limit) {}
 
   Entry *find(const char *id) {
     if (!id)
@@ -31,6 +31,7 @@ public:
   }
 
   GraphicsHost &graphics;
+  device::Device *device;
   size_t resident_limit;
   std::vector<Entry> apps;
   size_t active_index = std::numeric_limits<size_t>::max();
@@ -39,7 +40,12 @@ public:
 
 NativeAppManager::NativeAppManager(GraphicsHost &graphics,
                                    size_t resident_limit)
-    : impl_(std::make_unique<Impl>(graphics, resident_limit)) {}
+    : impl_(std::make_unique<Impl>(graphics, nullptr, resident_limit)) {}
+
+NativeAppManager::NativeAppManager(GraphicsHost &graphics,
+                                   device::Device &device,
+                                   size_t resident_limit)
+    : impl_(std::make_unique<Impl>(graphics, &device, resident_limit)) {}
 
 NativeAppManager::~NativeAppManager() = default;
 
@@ -59,7 +65,9 @@ bool NativeAppManager::load(const char *id, const char *module_path) {
     return false;
   }
 
-  auto app = std::make_unique<WasmApp>(impl_->graphics);
+  auto app = impl_->device
+                 ? std::make_unique<WasmApp>(impl_->graphics, *impl_->device)
+                 : std::make_unique<WasmApp>(impl_->graphics);
   if (!app->load(module_path) || !app->initialize()) {
     impl_->error =
         std::string("load native app ") + id + ": " + app->lastError();
