@@ -41,9 +41,21 @@ interface runtime {
 interface graphics {
   use types.{error-code, point, size};
 
+  /// Texture storage and upload formats. Alpha-bearing color formats contain
+  /// premultiplied color. Packed 16-bit values use little-endian byte order.
+  enum texture-format {
+    a8,
+    rgb565,
+    rgba4444,
+    rgba8888,
+  }
+
   flags texture-flags {
     linear,
     replace,
+    repeat-x,
+    repeat-y,
+    mipmaps,
   }
 
   record limits {
@@ -78,13 +90,20 @@ interface graphics {
   }
 
   surface-size: func() -> size;
+  surface-format: func() -> texture-format;
+  /// Bit N reports support for texture-format discriminant N.
+  supported-texture-formats: func() -> u32;
   graphics-limits: func() -> limits;
   texture-set: func(
     texture: u32,
+    format: texture-format,
     position: point,
     dimensions: size,
+    /// Source bytes between consecutive rows. This may exceed the packed row
+    /// size; the host uploads strided rows without repacking them.
+    row-stride: u32,
     options: texture-flags,
-    rgba: list<u8>,
+    pixels: list<u8>,
   ) -> result<_, error-code>;
   texture-free: func(texture: u32) -> result<_, error-code>;
   submit: func(
@@ -92,6 +111,197 @@ interface graphics {
     indices: list<u16>,
     commands: list<draw-command>,
     clear-rgba: u32,
+  ) -> result<_, error-code>;
+}
+
+/// A validated, batched OpenGL ES 2.0 programmable pipeline. Resources and
+/// commands are scoped to one application. The host owns the EGL context,
+/// render target, composition, and presentation; applications never receive
+/// native GL, framebuffer, or display handles.
+interface gles {
+  use types.{error-code};
+
+  enum buffer-usage {
+    static-draw,
+    dynamic-draw,
+    stream-draw,
+  }
+
+  enum shader-stage {
+    vertex,
+    fragment,
+  }
+
+  enum command-opcode {
+    begin-frame,
+    viewport,
+    scissor,
+    blend,
+    depth,
+    color-mask,
+    stencil,
+    stencil-function,
+    stencil-operation,
+    raster,
+    cull,
+    use-program,
+    bind-texture,
+    bind-vertex-buffer,
+    bind-index-buffer,
+    vertex-attribute,
+    uniform,
+    draw-arrays,
+    draw-elements,
+    end-frame,
+  }
+
+  enum primitive {
+    points,
+    lines,
+    line-strip,
+    triangles,
+    triangle-strip,
+    triangle-fan,
+  }
+
+  enum vertex-type {
+    float32,
+    uint8,
+    sint8,
+    uint16,
+    sint16,
+  }
+
+  enum blend-factor {
+    zero,
+    one,
+    src-color,
+    one-minus-src-color,
+    dst-color,
+    one-minus-dst-color,
+    src-alpha,
+    one-minus-src-alpha,
+    dst-alpha,
+    one-minus-dst-alpha,
+    constant-color,
+    one-minus-constant-color,
+    constant-alpha,
+    one-minus-constant-alpha,
+    src-alpha-saturate,
+  }
+
+  enum blend-equation {
+    add,
+    subtract,
+    reverse-subtract,
+  }
+
+  enum compare-function {
+    never,
+    less,
+    equal,
+    less-equal,
+    greater,
+    not-equal,
+    greater-equal,
+    always,
+  }
+
+  enum cull-face {
+    front,
+    back,
+    front-and-back,
+  }
+
+  enum front-face {
+    counter-clockwise,
+    clockwise,
+  }
+
+  enum stencil-operation {
+    keep,
+    zero,
+    replace,
+    increment-clamp,
+    decrement-clamp,
+    invert,
+    increment-wrap,
+    decrement-wrap,
+  }
+
+  enum uniform-type {
+    i1,
+    f1,
+    f2,
+    f3,
+    f4,
+    mat2,
+    mat3,
+    mat4,
+  }
+
+  record capabilities {
+    major-version: u32,
+    minor-version: u32,
+    max-texture-size: u32,
+    max-texture-units: u32,
+    max-vertex-attributes: u32,
+    max-varying-vectors: u32,
+    max-vertex-uniform-vectors: u32,
+    max-fragment-uniform-vectors: u32,
+    depth-bits: u32,
+    stencil-bits: u32,
+    max-buffer-bytes: u32,
+    max-commands: u32,
+    max-command-data-words: u32,
+  }
+
+  /// Fixed 36-byte command. `opcode` and arguments use the constants exposed
+  /// by each language SDK. Float arguments are their IEEE-754 bit patterns.
+  /// Uniform commands address the separate, naturally aligned submit data
+  /// list by u32 word offset. Floating-point values use their IEEE-754 bits.
+  record command {
+    opcode: command-opcode,
+    a0: u32,
+    a1: u32,
+    a2: u32,
+    a3: u32,
+    a4: u32,
+    a5: u32,
+    a6: u32,
+    a7: u32,
+  }
+
+  get-capabilities: func() -> capabilities;
+  buffer-set: func(
+    buffer: u32,
+    size: u32,
+    usage: buffer-usage,
+    initial-data: list<u8>,
+  ) -> result<_, error-code>;
+  buffer-write: func(
+    buffer: u32,
+    offset: u32,
+    data: list<u8>,
+  ) -> result<_, error-code>;
+  buffer-free: func(buffer: u32) -> result<_, error-code>;
+  shader-set: func(
+    shader: u32,
+    stage: shader-stage,
+    source: string,
+  ) -> result<_, error-code>;
+  shader-free: func(shader: u32) -> result<_, error-code>;
+  program-set: func(
+    program: u32,
+    vertex-shader: u32,
+    fragment-shader: u32,
+  ) -> result<_, error-code>;
+  program-free: func(program: u32) -> result<_, error-code>;
+  attribute-location: func(program: u32, name: string) -> s32;
+  uniform-location: func(program: u32, name: string) -> s32;
+  submit: func(
+    commands: list<command>,
+    data: list<u32>,
   ) -> result<_, error-code>;
 }
 
@@ -498,6 +708,7 @@ interface lifecycle {
 world app {
   import runtime;
   import graphics;
+  import gles;
   import device;
   import audio;
   import camera;

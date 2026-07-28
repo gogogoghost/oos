@@ -7,11 +7,11 @@ export lifecycle symbols by hand.
 - `rust/oos-app` runs `wit-bindgen` for the `oos:platform/app@0.1.0` world and
   provides small Rust convenience wrappers.
 - `rust/oos-egui` converts egui textures and meshes into the generated WIT
-  graphics records.
+  graphics records and exposes user canvas textures for direct RGB565 updates.
 - `system/src/oos/runtime/graphics_types.h` is the renderer's internal
   canonical-layout mirror. It is deliberately outside the SDK.
 
-The world imports runtime, graphics, device discovery, audio, camera, power,
+The world imports runtime, portable graphics, validated batched GLES2, device discovery, audio, camera, power,
 vibration, Wi-Fi/IP, Bluetooth, modem, and codec interfaces, and exports the
 application lifecycle interface. `wit-bindgen` dead-strips unused core-Wasm
 imports, so an application pays only for the capabilities it calls.
@@ -40,7 +40,10 @@ or ARMv7 AOT file. `build-native-apps.sh` also wraps the same module as a real
 Component Model artifact for runtimes that support components. WAMR 2.4.4 does
 not itself load component binaries.
 
-Framework adapters belong under `apps/sdk/`, not in an individual application. An
-iced adapter can emit the same texture/mesh records. An LVGL adapter can use
-bindings generated from the same WIT rather than introducing another device
-ABI.
+Framework adapters belong under `apps/sdk/`, not in an individual application.
+egui, imgui, iced, and GPU-backed LVGL adapters can emit the same texture/mesh
+records. Software LVGL/J2ME ports can upload strided RGB565 dirty rectangles.
+2D/3D engine backends can translate a render queue into one validated GLES2
+command batch per frame rather than introducing another device ABI. See
+[graphics documentation](../../docs/graphics.md) for the format and
+host-composition contract.

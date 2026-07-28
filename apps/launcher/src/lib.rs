@@ -60,6 +60,7 @@ const APPS: [AppEntry; 6] = [
 
 struct Launcher {
     context: Context,
+    renderer: oos_egui::Renderer,
     view: View,
     selected: usize,
     notice_until_us: u64,
@@ -73,6 +74,7 @@ impl Launcher {
         context.set_visuals(egui::Visuals::dark());
         Self {
             context,
+            renderer: oos_egui::Renderer::new(),
             view: View::Home,
             selected: 0,
             notice_until_us: 0,
@@ -159,7 +161,9 @@ impl Launcher {
         let output = self.context.run_ui(input, |ui| {
             render_launcher(ui, view, selected, notice);
         });
-        oos_egui::submit(&self.context, output, [16, 18, 22, 255]).map_err(|error| error.message())
+        self.renderer
+            .submit(&self.context, output, [16, 18, 22, 255])
+            .map_err(|error| error.message())
     }
 }
 

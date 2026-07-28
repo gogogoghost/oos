@@ -111,7 +111,7 @@ target_include_directories(oos_nokia_2780_gles_display PUBLIC
 target_include_directories(oos_nokia_2780_gles_display PRIVATE
   "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(oos_nokia_2780_gles_display PUBLIC
-  oos_nokia_2780_display EGL GLESv2 android)
+  oos_gles_executor oos_nokia_2780_display EGL GLESv2 android)
 
 add_library(oos_nokia_2780_device STATIC src/device.cpp)
 oos_nokia_2780_android_target(oos_nokia_2780_device)

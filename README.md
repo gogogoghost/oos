@@ -38,6 +38,8 @@ by `system/src/main.cpp`.
 
 See [docs/device-platform.md](docs/device-platform.md) for the standard API,
 capability matrix, service initialization helpers, and new-device checklist.
+See [docs/graphics.md](docs/graphics.md) for the portable GUI/canvas path,
+batched GLES2 engine path, RGB565 policy, and host-composition boundary.
 Run `./scripts/test-device-contract.sh DEVICE` for the common non-mutating
 device and Manager link contracts.
 

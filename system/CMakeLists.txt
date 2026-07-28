@@ -62,6 +62,10 @@ add_library(oos_device_api STATIC src/oos/device/device.cpp)
 target_include_directories(oos_device_api PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
+add_library(oos_gles_executor STATIC src/oos/runtime/gles_executor.cpp)
+target_include_directories(oos_gles_executor PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 add_library(oos_compositor STATIC src/oos/compositor/compositor.cpp)
 target_include_directories(oos_compositor PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")

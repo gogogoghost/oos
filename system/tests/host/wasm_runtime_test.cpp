@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
@@ -13,23 +14,32 @@ class FakeGraphics final : public oos::runtime::GraphicsHost {
 public:
   uint32_t width() const override { return 240; }
   uint32_t height() const override { return 320; }
+  uint32_t surfaceFormat() const override { return OOS_TEXTURE_RGB565; }
+  uint32_t supportedTextureFormats() const override {
+    return OOS_TEXTURE_FORMAT_MASK;
+  }
 
-  bool setTexture(uint32_t texture, uint32_t x, uint32_t y, uint32_t width,
-                  uint32_t height, uint32_t flags, const uint8_t *rgba,
-                  size_t rgba_size) override {
-    if (!texture || !rgba ||
-        rgba_size != static_cast<size_t>(width) * height * 4)
+  bool setTexture(uint32_t texture, uint32_t format, uint32_t x, uint32_t y,
+                  uint32_t width, uint32_t height, uint32_t row_stride,
+                  uint32_t flags, const uint8_t *pixels,
+                  size_t pixel_bytes) override {
+    const uint32_t bytes_per_pixel = oosTextureBytesPerPixel(format);
+    if (!texture || !pixels || !bytes_per_pixel ||
+        row_stride < width * bytes_per_pixel ||
+        pixel_bytes != static_cast<size_t>(row_stride) * (height - 1) +
+                           width * bytes_per_pixel)
       return false;
     auto found = textures.find(texture);
     if (found == textures.end()) {
       if (x || y)
         return false;
-      textures.emplace(texture, Size{width, height});
+      textures.emplace(texture, Size{width, height, format});
     } else if ((flags & OOS_TEXTURE_REPLACE) != 0) {
       if (x || y)
         return false;
-      found->second = Size{width, height};
-    } else if (x + width > found->second.width ||
+      found->second = Size{width, height, format};
+    } else if (format != found->second.format ||
+               x + width > found->second.width ||
                y + height > found->second.height) {
       return false;
     }
@@ -67,9 +77,83 @@ public:
     return true;
   }
 
+  bool glesCapabilities(OosGlesCapabilities &result) override {
+    result = {2,
+              0,
+              2048,
+              8,
+              8,
+              8,
+              128,
+              64,
+              16,
+              8,
+              OOS_GLES_MAX_BUFFER_BYTES,
+              OOS_GLES_MAX_COMMANDS,
+              OOS_GLES_MAX_COMMAND_DATA_WORDS};
+    return true;
+  }
+
+  bool setGlesBuffer(uint32_t buffer, uint32_t size, uint32_t, const uint8_t *,
+                     size_t data_size) override {
+    if (!buffer || !size || (data_size && data_size != size))
+      return false;
+    buffers.insert(buffer);
+    return true;
+  }
+  bool writeGlesBuffer(uint32_t buffer, uint32_t, const uint8_t *,
+                       size_t data_size) override {
+    return buffers.count(buffer) && data_size;
+  }
+  bool freeGlesBuffer(uint32_t buffer) override {
+    buffers.erase(buffer);
+    return true;
+  }
+  bool setGlesShader(uint32_t shader, uint32_t, const char *,
+                     size_t source_size) override {
+    if (!shader || !source_size)
+      return false;
+    shaders.insert(shader);
+    return true;
+  }
+  bool freeGlesShader(uint32_t shader) override {
+    shaders.erase(shader);
+    return true;
+  }
+  bool setGlesProgram(uint32_t program, uint32_t vertex_shader,
+                      uint32_t fragment_shader) override {
+    if (!program || !shaders.count(vertex_shader) ||
+        !shaders.count(fragment_shader))
+      return false;
+    programs.insert(program);
+    return true;
+  }
+  bool freeGlesProgram(uint32_t program) override {
+    programs.erase(program);
+    return true;
+  }
+  int32_t glesAttributeLocation(uint32_t program, const char *,
+                                size_t name_size) override {
+    return programs.count(program) && name_size ? 0 : -1;
+  }
+  int32_t glesUniformLocation(uint32_t program, const char *,
+                              size_t name_size) override {
+    return programs.count(program) && name_size ? 1 : -1;
+  }
+  bool submitGles(const OosGlesCommand *commands, size_t command_count,
+                  const uint32_t *, size_t) override {
+    if (!commands || command_count < 2 ||
+        commands[0].opcode != OOS_GLES_BEGIN_FRAME ||
+        commands[command_count - 1].opcode != OOS_GLES_END_FRAME)
+      return false;
+    ++gles_frames;
+    return true;
+  }
+
   struct Size {
     uint32_t width;
     uint32_t height;
+    uint32_t format;
   };
   std::unordered_map<uint32_t, Size> textures;
   size_t texture_updates = 0;
@@ -77,6 +161,10 @@ public:
   size_t last_vertices = 0;
   size_t last_indices = 0;
   size_t last_commands = 0;
+  size_t gles_frames = 0;
+  std::unordered_set<uint32_t> buffers;
+  std::unordered_set<uint32_t> shaders;
+  std::unordered_set<uint32_t> programs;
 };
 
 class MockDevice final : public oos::device::Device {
@@ -163,7 +251,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   wit_smoke.shutdown();
-  std::printf("WAMR WIT device API imports passed\n");
+  std::printf("WAMR WIT device/GLES API imports passed: gles_frames=%zu\n",
+              graphics.gles_frames);
   MockDevice mock_device;
   oos::runtime::NativeAppManager mock_smoke(graphics, mock_device, 1);
   if (!mock_smoke.load("local-mock", argv[2]) ||
@@ -175,7 +264,8 @@ int main(int argc, char **argv) {
   mock_smoke.shutdown();
   std::printf("WAMR WIT local mock API imports passed\n");
   return graphics.frames == 5 && resident_textures == 3 &&
-                 graphics.textures.empty() && graphics.texture_updates > 0
+                 graphics.textures.empty() && graphics.texture_updates > 0 &&
+                 graphics.gles_frames == 2
              ? 0
              : 1;
 }

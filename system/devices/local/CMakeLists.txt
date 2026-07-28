@@ -24,6 +24,7 @@ target_compile_definitions(oos_local_platform PRIVATE
   OOS_LOCAL_DEFAULT_KEYMAP="${OOS_LOCAL_KEYMAP_BUILD}")
 target_link_libraries(oos_local_platform PUBLIC
   oos_device_api
+  oos_gles_executor
   SDL3::SDL3
   OpenGL::GLES2)
 add_library(oos::platform ALIAS oos_local_platform)

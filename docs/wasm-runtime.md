@@ -18,7 +18,7 @@ evdev -> OOS key normalization -> oos:platform/lifecycle#event
                                   |
                               egui Launcher
                                   |
-                 vertices + indices + textures
+        textures + indexed meshes or GLES2 command batch
                                   |
 WIT Canonical ABI validation -> GLES2 -> RGB565 HWC target
 ```
@@ -55,12 +55,14 @@ Wi-Fi/IP, Bluetooth, modem, codec, and lifecycle interfaces with WIT records,
 enums, flags, lists, strings, and results. The host registers matching
 versioned WAMR modules and implements the Canonical ABI lowering.
 
-The graphics interface provides surface dimensions, bounded RGBA8 texture
-create/update/free, and indexed triangle batches with clip rectangles.
-Vertices contain logical pixel position, UV, and premultiplied RGBA color. The
-host converts commands to GLES and presents its retained RGB565 HWC buffer, so
-the guest never maps a framebuffer or receives a GPU handle. The canonical
-vertex and draw-command layouts remain 20 and 28 bytes respectively.
+The portable graphics interface provides surface dimensions and format,
+bounded A8/RGB565/RGBA4444/RGBA8888 texture updates, and indexed triangle
+batches with clip rectangles. Vertices contain logical pixel position, UV, and
+premultiplied RGBA color. The validated GLES2 interface adds shaders, programs,
+buffers, depth/stencil state, and one fixed-record command batch per frame for
+game-engine backends. Both paths present the host's retained target, so the
+guest never maps a framebuffer or receives a native GPU handle. See
+[graphics.md](graphics.md) for the complete format and composition contract.
 
 Limits are part of the interface: 2048-pixel texture dimensions, 16 MiB per
 upload, 65,535 vertices, 196,605 indices, and 4,096 draw commands per
@@ -116,19 +118,22 @@ that permission layer.
 ## Framework Compatibility
 
 egui is implemented first and validates the complete route from framework UI
-to phone GPU. `oos-egui` handles texture deltas, tessellation, index rebasing,
-clip rectangles, and WIT submissions, leaving Launcher with application UI
-logic only.
+to phone GPU. `oos-egui::Renderer` retains its frame buffers and handles
+texture deltas, tessellation, index rebasing, clip rectangles, and WIT
+submissions, leaving Launcher with application UI logic only. Its
+`CanvasTexture` accepts direct RGB565 and other supported formats for emulator
+or software-rendered content embedded in a UI.
 
 iced is next: its custom renderer/backend can target the same WIT texture and
 mesh interface. The adapter must live in the SDK and avoid depending on wgpu
 because the device graphics stack is GLES-oriented.
 
 LVGL can use C guest bindings generated from the same WIT. Its display and
-input ports can target OOS without exposing Linux devices. Initial
-compatibility may upload dirty rectangles as textures; a later draw-unit
-adapter can preserve more vector work on the GPU. This is a different
-performance path but does not require a second device display implementation.
+input ports can target OOS without exposing Linux devices. It can upload
+RGB565 dirty rectangles directly; a draw-unit adapter can instead emit the
+portable indexed-mesh path. imgui maps its vertices, indices, texture IDs, and
+clip rectangles to the same records. Engines that need custom shaders use the
+batched GLES2 interface while the host continues to own composition.
 
 ## Build And Test
 

@@ -86,6 +86,7 @@ target_include_directories(oos_nokia_8110_gles_display PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
   "${NOKIA_8110_SYSTEM_CORE_DIR}/libsync/include")
 target_link_libraries(oos_nokia_8110_gles_display PUBLIC
+  oos_gles_executor
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libEGL.so"
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libGLESv2.so"
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libhardware.so"

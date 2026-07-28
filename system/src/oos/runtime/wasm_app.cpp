@@ -29,6 +29,7 @@ constexpr uint32_t kMaxLogBytes = 4096;
 constexpr size_t kMaxModuleBytes = 32 * 1024 * 1024;
 constexpr const char *kRuntimeInterface = "oos:platform/runtime@0.1.0";
 constexpr const char *kGraphicsInterface = "oos:platform/graphics@0.1.0";
+constexpr const char *kGlesInterface = "oos:platform/gles@0.1.0";
 constexpr const char *kDeviceInterface = "oos:platform/device@0.1.0";
 constexpr const char *kAudioInterface = "oos:platform/audio@0.1.0";
 constexpr const char *kCameraInterface = "oos:platform/camera@0.1.0";
@@ -139,6 +140,16 @@ void nativeSurfaceSize(wasm_exec_env_t environment, uint32_t result_offset) {
   result[1] = graphics ? graphics->height() : 0;
 }
 
+uint32_t nativeSurfaceFormat(wasm_exec_env_t environment) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  return graphics ? graphics->surfaceFormat() : OOS_TEXTURE_RGBA8888;
+}
+
+uint32_t nativeSupportedTextureFormats(wasm_exec_env_t environment) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  return graphics ? graphics->supportedTextureFormats() : 0;
+}
+
 void nativeGraphicsLimits(wasm_exec_env_t environment, uint32_t result_offset) {
   uint32_t *result =
       appMutableArray<uint32_t>(environment, result_offset, 5, 5);
@@ -175,24 +186,34 @@ void nativeLog(wasm_exec_env_t environment, uint32_t level, uint32_t offset,
   std::fflush(stderr);
 }
 
-void nativeTextureSet(wasm_exec_env_t environment, uint32_t texture, uint32_t x,
-                      uint32_t y, uint32_t width, uint32_t height,
-                      uint32_t flags, uint32_t offset, uint32_t length,
+void nativeTextureSet(wasm_exec_env_t environment, uint32_t texture,
+                      uint32_t format, uint32_t x, uint32_t y, uint32_t width,
+                      uint32_t height, uint32_t row_stride, uint32_t flags,
+                      uint32_t offset, uint32_t length,
                       uint32_t result_offset) {
   GraphicsHost *graphics = graphicsFor(environment);
+  const uint32_t bytes_per_pixel = oosTextureBytesPerPixel(format);
+  const bool row_overflow =
+      bytes_per_pixel &&
+      width > std::numeric_limits<uint32_t>::max() / bytes_per_pixel;
+  const uint32_t row_bytes = row_overflow ? 0 : width * bytes_per_pixel;
+  const uint64_t required_bytes =
+      height == 0
+          ? 0
+          : static_cast<uint64_t>(row_stride) * (height - 1) + row_bytes;
   if (!graphics || texture == 0 || width == 0 || height == 0 ||
+      bytes_per_pixel == 0 || row_overflow || row_stride < row_bytes ||
       width > OOS_GFX_MAX_TEXTURE_SIZE || height > OOS_GFX_MAX_TEXTURE_SIZE ||
-      (flags & ~(OOS_TEXTURE_LINEAR | OOS_TEXTURE_REPLACE)) != 0 ||
-      width > std::numeric_limits<uint32_t>::max() / height / 4 ||
-      length != width * height * 4 || length > OOS_GFX_MAX_TEXTURE_BYTES) {
+      (flags & ~OOS_TEXTURE_FLAGS_MASK) != 0 || required_bytes != length ||
+      length > OOS_GFX_MAX_TEXTURE_BYTES) {
     writeResult(environment, result_offset, false, WitError::InvalidArgument);
     return;
   }
   const uint8_t *rgba =
       appArray<uint8_t>(environment, offset, length, OOS_GFX_MAX_TEXTURE_BYTES);
   writeResult(environment, result_offset,
-              rgba && graphics->setTexture(texture, x, y, width, height, flags,
-                                           rgba, length),
+              rgba && graphics->setTexture(texture, format, x, y, width, height,
+                                           row_stride, flags, rgba, length),
               rgba ? WitError::Failed : WitError::InvalidArgument);
 }
 
@@ -225,6 +246,129 @@ void nativeSubmit(wasm_exec_env_t environment, uint32_t vertex_offset,
                        index_count == 0 ? nullptr : indices, index_count,
                        command_count == 0 ? nullptr : commands, command_count,
                        clear_rgba));
+}
+
+void nativeGlesCapabilities(wasm_exec_env_t environment,
+                            uint32_t result_offset) {
+  auto *result =
+      appMutableArray<OosGlesCapabilities>(environment, result_offset, 1, 1);
+  GraphicsHost *graphics = graphicsFor(environment);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  *result = {};
+  if (graphics)
+    graphics->glesCapabilities(*result);
+}
+
+void nativeGlesBufferSet(wasm_exec_env_t environment, uint32_t buffer,
+                         uint32_t size, uint32_t usage, uint32_t data_offset,
+                         uint32_t data_size, uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const uint8_t *data = appArray<uint8_t>(environment, data_offset, data_size,
+                                          OOS_GLES_MAX_BUFFER_BYTES);
+  const bool valid = buffer != 0 && size != 0 &&
+                     size <= OOS_GLES_MAX_BUFFER_BYTES && data &&
+                     (data_size == 0 || data_size == size);
+  writeResult(environment, result_offset,
+              valid && graphics &&
+                  graphics->setGlesBuffer(buffer, size, usage,
+                                          data_size ? data : nullptr,
+                                          data_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeGlesBufferWrite(wasm_exec_env_t environment, uint32_t buffer,
+                           uint32_t write_offset, uint32_t data_offset,
+                           uint32_t data_size, uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const uint8_t *data = appArray<uint8_t>(environment, data_offset, data_size,
+                                          OOS_GLES_MAX_BUFFER_BYTES);
+  const bool valid = buffer != 0 && data_size != 0 && data;
+  writeResult(
+      environment, result_offset,
+      valid && graphics &&
+          graphics->writeGlesBuffer(buffer, write_offset, data, data_size),
+      valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeGlesBufferFree(wasm_exec_env_t environment, uint32_t buffer,
+                          uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  writeResult(environment, result_offset,
+              graphics && graphics->freeGlesBuffer(buffer));
+}
+
+void nativeGlesShaderSet(wasm_exec_env_t environment, uint32_t shader,
+                         uint32_t stage, uint32_t source_offset,
+                         uint32_t source_size, uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const char *source = appArray<char>(environment, source_offset, source_size,
+                                      OOS_GLES_MAX_SHADER_BYTES);
+  const bool valid = shader != 0 && source_size != 0 && source;
+  writeResult(environment, result_offset,
+              valid && graphics &&
+                  graphics->setGlesShader(shader, stage, source, source_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeGlesShaderFree(wasm_exec_env_t environment, uint32_t shader,
+                          uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  writeResult(environment, result_offset,
+              graphics && graphics->freeGlesShader(shader));
+}
+
+void nativeGlesProgramSet(wasm_exec_env_t environment, uint32_t program,
+                          uint32_t vertex_shader, uint32_t fragment_shader,
+                          uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  writeResult(environment, result_offset,
+              graphics && graphics->setGlesProgram(program, vertex_shader,
+                                                   fragment_shader));
+}
+
+void nativeGlesProgramFree(wasm_exec_env_t environment, uint32_t program,
+                           uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  writeResult(environment, result_offset,
+              graphics && graphics->freeGlesProgram(program));
+}
+
+int32_t nativeGlesAttributeLocation(wasm_exec_env_t environment,
+                                    uint32_t program, uint32_t name_offset,
+                                    uint32_t name_size) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const char *name = appArray<char>(environment, name_offset, name_size, 255);
+  return graphics && name
+             ? graphics->glesAttributeLocation(program, name, name_size)
+             : -1;
+}
+
+int32_t nativeGlesUniformLocation(wasm_exec_env_t environment, uint32_t program,
+                                  uint32_t name_offset, uint32_t name_size) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const char *name = appArray<char>(environment, name_offset, name_size, 255);
+  return graphics && name
+             ? graphics->glesUniformLocation(program, name, name_size)
+             : -1;
+}
+
+void nativeGlesSubmit(wasm_exec_env_t environment, uint32_t command_offset,
+                      uint32_t command_count, uint32_t data_offset,
+                      uint32_t data_words, uint32_t result_offset) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const OosGlesCommand *commands = appArray<OosGlesCommand>(
+      environment, command_offset, command_count, OOS_GLES_MAX_COMMANDS);
+  const uint32_t *data = appArray<uint32_t>(
+      environment, data_offset, data_words, OOS_GLES_MAX_COMMAND_DATA_WORDS);
+  const bool valid = command_count >= 2 && commands && data;
+  writeResult(environment, result_offset,
+              valid && graphics &&
+                  graphics->submitGles(commands, command_count,
+                                       data_words ? data : nullptr, data_words),
+              valid ? WitError::Failed : WitError::InvalidArgument);
 }
 
 uint32_t guestRealloc(wasm_exec_env_t environment, uint32_t old_pointer,
@@ -683,13 +827,41 @@ NativeSymbol kRuntimeSymbols[] = {
 NativeSymbol kGraphicsSymbols[] = {
     {"surface-size", reinterpret_cast<void *>(nativeSurfaceSize), "(i)",
      nullptr},
+    {"surface-format", reinterpret_cast<void *>(nativeSurfaceFormat), "()i",
+     nullptr},
+    {"supported-texture-formats",
+     reinterpret_cast<void *>(nativeSupportedTextureFormats), "()i", nullptr},
     {"graphics-limits", reinterpret_cast<void *>(nativeGraphicsLimits), "(i)",
      nullptr},
-    {"texture-set", reinterpret_cast<void *>(nativeTextureSet), "(iiiiiiiii)",
+    {"texture-set", reinterpret_cast<void *>(nativeTextureSet), "(iiiiiiiiiii)",
      nullptr},
     {"texture-free", reinterpret_cast<void *>(nativeTextureFree), "(ii)",
      nullptr},
     {"submit", reinterpret_cast<void *>(nativeSubmit), "(iiiiiiii)", nullptr},
+};
+
+NativeSymbol kGlesSymbols[] = {
+    {"get-capabilities", reinterpret_cast<void *>(nativeGlesCapabilities),
+     "(i)", nullptr},
+    {"buffer-set", reinterpret_cast<void *>(nativeGlesBufferSet), "(iiiiii)",
+     nullptr},
+    {"buffer-write", reinterpret_cast<void *>(nativeGlesBufferWrite), "(iiiii)",
+     nullptr},
+    {"buffer-free", reinterpret_cast<void *>(nativeGlesBufferFree), "(ii)",
+     nullptr},
+    {"shader-set", reinterpret_cast<void *>(nativeGlesShaderSet), "(iiiii)",
+     nullptr},
+    {"shader-free", reinterpret_cast<void *>(nativeGlesShaderFree), "(ii)",
+     nullptr},
+    {"program-set", reinterpret_cast<void *>(nativeGlesProgramSet), "(iiii)",
+     nullptr},
+    {"program-free", reinterpret_cast<void *>(nativeGlesProgramFree), "(ii)",
+     nullptr},
+    {"attribute-location",
+     reinterpret_cast<void *>(nativeGlesAttributeLocation), "(iii)i", nullptr},
+    {"uniform-location", reinterpret_cast<void *>(nativeGlesUniformLocation),
+     "(iii)i", nullptr},
+    {"submit", reinterpret_cast<void *>(nativeGlesSubmit), "(iiiii)", nullptr},
 };
 
 NativeSymbol kDeviceSymbols[] = {
@@ -901,6 +1073,9 @@ bool acquireRuntime(std::string &error) {
                           kGraphicsInterface, kGraphicsSymbols,
                           static_cast<uint32_t>(std::size(kGraphicsSymbols))) &&
                       wasm_runtime_register_natives(
+                          kGlesInterface, kGlesSymbols,
+                          static_cast<uint32_t>(std::size(kGlesSymbols))) &&
+                      wasm_runtime_register_natives(
                           kDeviceInterface, kDeviceSymbols,
                           static_cast<uint32_t>(std::size(kDeviceSymbols)));
     for (const WitNativeInterface &interface : kOptionalInterfaces) {
@@ -932,23 +1107,28 @@ public:
 
   uint32_t width() const override { return host_.width(); }
   uint32_t height() const override { return host_.height(); }
+  uint32_t surfaceFormat() const override { return host_.surfaceFormat(); }
+  uint32_t supportedTextureFormats() const override {
+    return host_.supportedTextureFormats();
+  }
 
-  bool setTexture(uint32_t texture, uint32_t x, uint32_t y, uint32_t width,
-                  uint32_t height, uint32_t flags, const uint8_t *rgba,
-                  size_t rgba_size) override {
-    auto *found = findTexture(texture);
+  bool setTexture(uint32_t texture, uint32_t format, uint32_t x, uint32_t y,
+                  uint32_t width, uint32_t height, uint32_t row_stride,
+                  uint32_t flags, const uint8_t *pixels,
+                  size_t pixel_bytes) override {
+    auto *found = findHandle(textures_, texture);
     const bool inserted = found == nullptr;
     if (inserted) {
       if (x != 0 || y != 0)
         return false;
-      const uint32_t host_texture = nextTextureHandle();
+      const uint32_t host_texture = nextHostHandle();
       if (host_texture == 0)
         return false;
       textures_.emplace_back(texture, host_texture);
       found = &textures_.back();
     }
-    if (host_.setTexture(found->second, x, y, width, height, flags, rgba,
-                         rgba_size)) {
+    if (host_.setTexture(found->second, format, x, y, width, height, row_stride,
+                         flags, pixels, pixel_bytes)) {
       return true;
     }
     if (inserted)
@@ -972,36 +1152,201 @@ public:
               const uint16_t *indices, size_t index_count,
               const OosGfxDrawCommand *commands, size_t command_count,
               uint32_t clear_rgba) override {
-    std::vector<OosGfxDrawCommand> translated;
-    translated.reserve(command_count);
+    translated_draw_commands_.clear();
+    translated_draw_commands_.reserve(command_count);
     for (size_t index = 0; index < command_count; ++index) {
-      const auto *texture = findTexture(commands[index].texture);
+      const auto *texture = findHandle(textures_, commands[index].texture);
       if (!texture)
         return false;
-      translated.push_back(commands[index]);
-      translated.back().texture = texture->second;
+      translated_draw_commands_.push_back(commands[index]);
+      translated_draw_commands_.back().texture = texture->second;
     }
     return host_.submit(vertices, vertex_count, indices, index_count,
-                        translated.empty() ? nullptr : translated.data(),
-                        translated.size(), clear_rgba);
+                        translated_draw_commands_.empty()
+                            ? nullptr
+                            : translated_draw_commands_.data(),
+                        translated_draw_commands_.size(), clear_rgba);
+  }
+
+  bool glesCapabilities(OosGlesCapabilities &result) override {
+    return host_.glesCapabilities(result);
+  }
+
+  bool setGlesBuffer(uint32_t buffer, uint32_t size, uint32_t usage,
+                     const uint8_t *data, size_t data_size) override {
+    auto *found = findHandle(buffers_, buffer);
+    const bool inserted = found == nullptr;
+    if (inserted) {
+      buffers_.emplace_back(buffer, nextHostHandle());
+      found = &buffers_.back();
+    }
+    if (host_.setGlesBuffer(found->second, size, usage, data, data_size))
+      return true;
+    if (inserted)
+      buffers_.pop_back();
+    return false;
+  }
+
+  bool writeGlesBuffer(uint32_t buffer, uint32_t offset, const uint8_t *data,
+                       size_t data_size) override {
+    const auto *found = findHandle(buffers_, buffer);
+    return found &&
+           host_.writeGlesBuffer(found->second, offset, data, data_size);
+  }
+
+  bool freeGlesBuffer(uint32_t buffer) override {
+    return freeHandle(buffers_, buffer, [this](uint32_t host) {
+      return host_.freeGlesBuffer(host);
+    });
+  }
+
+  bool setGlesShader(uint32_t shader, uint32_t stage, const char *source,
+                     size_t source_size) override {
+    auto *found = findHandle(shaders_, shader);
+    const bool inserted = found == nullptr;
+    if (inserted) {
+      shaders_.emplace_back(shader, nextHostHandle());
+      found = &shaders_.back();
+    }
+    if (host_.setGlesShader(found->second, stage, source, source_size))
+      return true;
+    if (inserted)
+      shaders_.pop_back();
+    return false;
+  }
+
+  bool freeGlesShader(uint32_t shader) override {
+    return freeHandle(shaders_, shader, [this](uint32_t host) {
+      return host_.freeGlesShader(host);
+    });
+  }
+
+  bool setGlesProgram(uint32_t program, uint32_t vertex_shader,
+                      uint32_t fragment_shader) override {
+    const auto *vertex = findHandle(shaders_, vertex_shader);
+    const auto *fragment = findHandle(shaders_, fragment_shader);
+    if (!vertex || !fragment)
+      return false;
+    auto *found = findHandle(programs_, program);
+    const bool inserted = found == nullptr;
+    if (inserted) {
+      programs_.emplace_back(program, nextHostHandle());
+      found = &programs_.back();
+    }
+    if (host_.setGlesProgram(found->second, vertex->second, fragment->second))
+      return true;
+    if (inserted)
+      programs_.pop_back();
+    return false;
+  }
+
+  bool freeGlesProgram(uint32_t program) override {
+    return freeHandle(programs_, program, [this](uint32_t host) {
+      return host_.freeGlesProgram(host);
+    });
+  }
+
+  int32_t glesAttributeLocation(uint32_t program, const char *name,
+                                size_t name_size) override {
+    const auto *found = findHandle(programs_, program);
+    return found ? host_.glesAttributeLocation(found->second, name, name_size)
+                 : -1;
+  }
+
+  int32_t glesUniformLocation(uint32_t program, const char *name,
+                              size_t name_size) override {
+    const auto *found = findHandle(programs_, program);
+    return found ? host_.glesUniformLocation(found->second, name, name_size)
+                 : -1;
+  }
+
+  bool submitGles(const OosGlesCommand *commands, size_t command_count,
+                  const uint32_t *data, size_t data_words) override {
+    if (!commands || command_count < 2 ||
+        command_count > OOS_GLES_MAX_COMMANDS ||
+        data_words > OOS_GLES_MAX_COMMAND_DATA_WORDS ||
+        (data_words != 0 && !data))
+      return false;
+    translated_gles_commands_.assign(commands, commands + command_count);
+    for (OosGlesCommand &command : translated_gles_commands_) {
+      const HandleMap *resources = nullptr;
+      uint32_t argument = 0;
+      switch (command.opcode) {
+      case OOS_GLES_USE_PROGRAM:
+        resources = &programs_;
+        break;
+      case OOS_GLES_BIND_TEXTURE:
+        resources = &textures_;
+        argument = 1;
+        break;
+      case OOS_GLES_BIND_VERTEX_BUFFER:
+      case OOS_GLES_BIND_INDEX_BUFFER:
+        resources = &buffers_;
+        break;
+      default:
+        continue;
+      }
+      const auto *found = findHandle(*resources, command.args[argument]);
+      if (!found)
+        return false;
+      command.args[argument] = found->second;
+    }
+    return host_.submitGles(translated_gles_commands_.data(),
+                            translated_gles_commands_.size(), data, data_words);
   }
 
   void reset() {
+    for (const auto &program : programs_)
+      host_.freeGlesProgram(program.second);
+    for (const auto &shader : shaders_)
+      host_.freeGlesShader(shader.second);
+    for (const auto &buffer : buffers_)
+      host_.freeGlesBuffer(buffer.second);
     for (const auto &texture : textures_)
       host_.freeTexture(texture.second);
+    programs_.clear();
+    shaders_.clear();
+    buffers_.clear();
     textures_.clear();
+    translated_draw_commands_.clear();
+    translated_gles_commands_.clear();
   }
 
 private:
-  std::pair<uint32_t, uint32_t> *findTexture(uint32_t guest) {
-    for (auto &texture : textures_) {
-      if (texture.first == guest)
-        return &texture;
+  using HandleMap = std::vector<std::pair<uint32_t, uint32_t>>;
+
+  static std::pair<uint32_t, uint32_t> *findHandle(HandleMap &handles,
+                                                   uint32_t guest) {
+    for (auto &handle : handles) {
+      if (handle.first == guest)
+        return &handle;
     }
     return nullptr;
   }
 
-  static uint32_t nextTextureHandle() {
+  static const std::pair<uint32_t, uint32_t> *
+  findHandle(const HandleMap &handles, uint32_t guest) {
+    for (const auto &handle : handles) {
+      if (handle.first == guest)
+        return &handle;
+    }
+    return nullptr;
+  }
+
+  template <typename Free>
+  static bool freeHandle(HandleMap &handles, uint32_t guest, Free free_host) {
+    for (size_t index = 0; index < handles.size(); ++index) {
+      if (handles[index].first != guest)
+        continue;
+      if (!free_host(handles[index].second))
+        return false;
+      handles.erase(handles.begin() + index);
+      return true;
+    }
+    return true;
+  }
+
+  static uint32_t nextHostHandle() {
     static std::atomic<uint32_t> next{1};
     uint32_t handle = next.fetch_add(1, std::memory_order_relaxed);
     if (handle == 0)
@@ -1010,7 +1355,12 @@ private:
   }
 
   GraphicsHost &host_;
-  std::vector<std::pair<uint32_t, uint32_t>> textures_;
+  HandleMap textures_;
+  HandleMap buffers_;
+  HandleMap shaders_;
+  HandleMap programs_;
+  std::vector<OosGfxDrawCommand> translated_draw_commands_;
+  std::vector<OosGlesCommand> translated_gles_commands_;
 };
 
 class MappedModule {

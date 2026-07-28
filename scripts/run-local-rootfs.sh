@@ -38,7 +38,10 @@ common_env=(
   --setenv GST_REGISTRY /opt/oos/share/gstreamer-1.0/registry.bin
   --setenv GST_REGISTRY_UPDATE no
   --setenv LIBGL_ALWAYS_SOFTWARE 1
-  --setenv GALLIUM_DRIVER llvmpipe)
+  --setenv GALLIUM_DRIVER llvmpipe
+  --setenv MESA_LOADER_DRIVER_OVERRIDE llvmpipe
+  --setenv __EGL_VENDOR_LIBRARY_FILENAMES /usr/share/glvnd/egl_vendor.d/50_mesa.json
+  --setenv __GLX_VENDOR_LIBRARY_NAME mesa)
 for name in DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR; do
   if [[ -n ${!name:-} ]]; then
     common_env+=(--setenv "$name" "${!name}")
@@ -83,6 +86,9 @@ if command -v proot >/dev/null 2>&1; then
   export GST_REGISTRY_UPDATE=no
   export LIBGL_ALWAYS_SOFTWARE=1
   export GALLIUM_DRIVER=llvmpipe
+  export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+  export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+  export __GLX_VENDOR_LIBRARY_NAME=mesa
   exec proot -0 -r "$ROOTFS" -b /usr -b /etc -b /proc \
     "$PROGRAM" "$ARGUMENT"
 fi
