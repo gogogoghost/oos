@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DEVICE=${1:-nokia-2780-flip}
-SOURCE="$ROOT_DIR/assets/boot/$DEVICE/boot-splash.svg"
-OUTPUT="$ROOT_DIR/assets/boot/$DEVICE/boot-splash.png"
+SOURCE="$ROOT_DIR/system/assets/boot/$DEVICE/boot-splash.svg"
+OUTPUT="$ROOT_DIR/system/assets/boot/$DEVICE/boot-splash.png"
 CHROME_BIN=${CHROME_BIN:-google-chrome}
 
 if [[ ! -f "$SOURCE" ]]; then

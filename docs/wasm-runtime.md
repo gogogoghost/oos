@@ -49,7 +49,7 @@ large per-app heap is not acceptable on this device.
 
 ## WIT Interface Package
 
-`wit/oos.wit` is the single source of truth. It describes runtime/logging,
+`apps/sdk/wit/oos.wit` is the single source of truth. It describes runtime/logging,
 graphics, device identity and capabilities, audio, camera, power, vibration,
 Wi-Fi/IP, Bluetooth, modem, codec, and lifecycle interfaces with WIT records,
 enums, flags, lists, strings, and results. The host registers matching
@@ -137,9 +137,9 @@ test:
 
 ```sh
 ./scripts/fetch-wamr.sh
-./scripts/build-native-app-aot.sh
-./scripts/test-wasm-runtime.sh
-./scripts/verify-wit-interfaces.sh
+make native-app-aot
+make test-wasm
+make verify-wit
 ```
 
 The host integration test loads three Launcher instances through

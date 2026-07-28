@@ -1,0 +1,15 @@
+[workspace]
+members = [
+  "launcher",
+  "sdk/rust/oos-app",
+  "sdk/rust/oos-egui",
+  "tests/wit-smoke",
+]
+resolver = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = "symbols"

@@ -59,7 +59,7 @@ by WPE over Android 6 gralloc0/native handles. It preserves GPU allocation,
 IPC handle transfer, and EGLImage import; it does not copy pixels through the
 CPU.
 
-Each device mapping lives in `config/wpe/devices/<device>.env`. Build with:
+Each device mapping lives in `system/config/wpe/devices/<device>.env`. Build with:
 
 ```sh
 ./scripts/build-wpe-sysroot.sh nokia-2780-flip
@@ -122,7 +122,7 @@ A new handset receives WPE support only after all of these pass:
    WebAssembly PASS, executable JIT mappings in `WPEWebProcess`, clean buffer
    release, and screen shutdown after the test.
 
-The shared fixture is `tests/web/assets/hello.html`. The process entry points
-are `tests/web/wpe_hello_producer.cpp` and
-`tests/web/wpe_surface_host_test.cpp`; both use the common transport in
-`core/src/surface_transport.c`.
+The shared fixture is `system/tests/web/assets/hello.html`. The process entry
+points are `system/tests/web/wpe_hello_producer.cpp` and
+`system/tests/web/wpe_surface_host_test.cpp`; both use the common transport in
+`system/src/oos/compositor/surface_transport.c`.

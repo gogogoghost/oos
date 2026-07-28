@@ -9,40 +9,30 @@ no longer the system Launcher runtime.
 
 ## Repository Layout
 
-- `app/main.cpp` and `app/runtime.cpp`: device-independent production entry
-  point and launcher lifecycle.
-- `apps/launcher`: production egui Launcher compiled to WebAssembly.
-- `wit/oos.wit`: versioned source of truth for runtime, graphics, device,
-  hardware-service, and application lifecycle interfaces.
-- `sdk/rust/oos-app`: `wit-bindgen` Rust bindings plus stable convenience APIs.
-- `sdk/rust/oos-egui`: reusable egui texture and mesh adapter.
-- `launcher`: retained Solid.js/WPE prototype for KaiOS web-app work.
-- `runtime/wamr`: pinned WAMR runtime configuration.
-- `core`: device-independent runtime modules. `oos_input` provides reusable
-  Linux evdev key capture for the production event loop. The native app
-  manager keeps up to three isolated WASM apps resident while only the active
-  app receives input and frame callbacks. The network
-  interfaces define reusable Wi-Fi, IP, and Bluetooth lifecycle APIs. The
-  modem interface exposes Radio HAL state without leaking HIDL types. Hardware
-  interfaces cover audio, vibration, power/flip lifecycle, camera/flash, and
-  hardware video codecs.
-- `core/include/oos/device`: standard device, display, capability, and service
-  initialization contracts used by OOS.
-- `devices/nokia-2780-flip`: Android 10/HWC2 platform implementation.
-- `devices/nokia-2780-flip/tests`: on-device smoke, lifecycle, animation, and
-  investigation test programs. Test-only fixtures live under `tests/support`.
-- `devices/nokia-8110-4g`: Android 6/HWC1 platform implementation.
-- `tests/device`: shared device/service contracts plus network and modem tests
-  compiled against both backends.
+- `apps`: self-contained application workspace. It owns the Rust workspace,
+  production WIT/egui launcher, legacy Web launcher, SDK, WIT package, and
+  guest tests.
+- `system`: self-contained CMake project for the native OOS process. Generic
+  code is co-located by domain under `system/src/oos`; device backends,
+  runtime integration, system assets/configuration, patches, packaging, and
+  native tests live alongside it.
+- `system/src/main.cpp` and `system/src/runtime.cpp`: production process entry
+  point and event loop.
+- `system/devices/nokia-2780-flip`: Android 10/HWC2 platform implementation.
+- `system/devices/nokia-8110-4g`: Android 6/HWC1 platform implementation.
+- `apps/sdk/wit/oos.wit`: versioned application interface source of truth.
+- `apps/sdk/rust`: generated Rust bindings and reusable framework adapters.
+- `apps/web-launcher`: retained Solid.js/WPE prototype for KaiOS web-app work.
+- `Makefile`: repository-level entry points; language manifests stay inside
+  the package they build.
 - `scripts`: build, deployment, and test runners.
-- `packaging/scaffold`: stable device-side bootstrap script templates.
 - `third_party`: local AOSP, Gecko, KaiOS, WAMR, and WPE checkouts, excluded
   from the main Git repository. Their pinned revisions are tracked separately.
-- `patches`: tracked compatibility changes for clean third-party checkouts.
+- `tools`: independently buildable host utilities.
 
 Production code must not depend on files under a device's `tests` directory.
 Validated functionality moves into a public device library before it is used
-by `app/main.cpp`.
+by `system/src/main.cpp`.
 
 See [docs/device-platform.md](docs/device-platform.md) for the standard API,
 capability matrix, service initialization helpers, and new-device checklist.
@@ -77,12 +67,9 @@ and compile Orange OS:
 ./scripts/build-wpe-sysroot.sh nokia-2780-flip
 ./scripts/build-wpe-sysroot.sh nokia-8110-4g
 ./scripts/fetch-wamr.sh
-./scripts/build-native-app-aot.sh
-./scripts/configure-android.sh nokia-2780-flip
-cmake --build build/android-nokia-2780-flip -j8
-
-./scripts/configure-android.sh nokia-8110-4g
-cmake --build build/android-nokia-8110-4g -j8
+make native-app-aot
+make system DEVICE=nokia-2780-flip
+make system DEVICE=nokia-8110-4g
 ```
 
 The outputs are:
@@ -107,8 +94,8 @@ runtime surface, disabled feature groups, and ARMv7 softfp JIT boundary.
 For a production-only build, configure with:
 
 ```sh
-./scripts/configure-android.sh nokia-2780-flip \
-  -DOOS_BUILD_DEVICE_TESTS=OFF
+make system DEVICE=nokia-2780-flip \
+  CMAKE_ARGS=-DOOS_BUILD_DEVICE_TESTS=OFF
 ```
 
 ## Display Tests
@@ -135,7 +122,7 @@ Other repeatable tests are:
 ./scripts/run-wpe-chroot.sh nokia-8110-4g stop
 ```
 
-See `devices/nokia-2780-flip/README.md` for the hardware constraints, public
+See `system/devices/nokia-2780-flip/README.md` for the hardware constraints, public
 API ownership rules, and individual test targets.
 
 See [docs/input.md](docs/input.md) for the shared key input API, the detected

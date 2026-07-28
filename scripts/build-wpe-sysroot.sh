@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ENV_FILE="$ROOT_DIR/.env"
 DEVICE=${1:-nokia-2780-flip}
-DEVICE_CONFIG="$ROOT_DIR/config/wpe/devices/$DEVICE.env"
+DEVICE_CONFIG="$ROOT_DIR/system/config/wpe/devices/$DEVICE.env"
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-LAUNCHER_DIR="$ROOT_DIR/launcher"
+LAUNCHER_DIR="$ROOT_DIR/apps/web-launcher"
 
 if ! command -v bun >/dev/null 2>&1; then
   echo "Bun is required to build the Solid.js launcher." >&2

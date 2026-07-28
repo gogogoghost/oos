@@ -20,7 +20,7 @@ for artifact in "$LAUNCHER_CORE" "$LAUNCHER_COMPONENT" "$SMOKE_CORE"; do
   }
 done
 
-wasm-tools component wit "$ROOT_DIR/wit/oos.wit" --json >/dev/null
+wasm-tools component wit "$ROOT_DIR/apps/sdk/wit/oos.wit" --json >/dev/null
 wasm-tools validate "$LAUNCHER_CORE"
 wasm-tools validate "$LAUNCHER_COMPONENT"
 wasm-tools validate "$SMOKE_CORE"

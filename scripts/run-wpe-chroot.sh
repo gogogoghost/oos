@@ -32,7 +32,7 @@ WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
 WPE_PRODUCER="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_${DEVICE//-/_}_wpe_producer"
 WPE_HOST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_${DEVICE//-/_}_wpe_host"
 INPUT_TEST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_nokia_2780_key_input"
-WPE_HTML="$ROOT_DIR/tests/web/assets/hello.html"
+WPE_HTML="$ROOT_DIR/system/tests/web/assets/hello.html"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -98,7 +98,7 @@ fi
 install -m 0644 "$WPE_HTML" "$STAGING/hello.html"
 install -m 0755 "$DEVICE_SCRIPT" "$STAGING/wpe_chroot_device.sh"
 
-source "$ROOT_DIR/config/wpe/devices/$DEVICE.env"
+source "$ROOT_DIR/system/config/wpe/devices/$DEVICE.env"
 printf '%s\n' \
   "DEVICE='$DEVICE'" \
   "BUILD_PREFIX='/home/jax/project/oos/build/wpe-sysroot/$OOS_WPE_SYSROOT_KEY'" \

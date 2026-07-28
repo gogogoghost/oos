@@ -57,7 +57,7 @@ if [[ -e "$OUTPUT_DIR" ]]; then
   package_die "Output already exists: $OUTPUT_DIR"
 fi
 
-TEMPLATE_DIR="$ROOT_DIR/packaging/scaffold"
+TEMPLATE_DIR="$ROOT_DIR/system/packaging/scaffold"
 package_require_directory "$TEMPLATE_DIR"
 
 STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/oos-scaffold.XXXXXX")

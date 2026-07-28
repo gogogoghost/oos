@@ -66,9 +66,9 @@ DESTINATION="$OUTPUT_DIR/$RES_NAME"
 OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
 WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
 NATIVE_APPS="$ROOT_DIR/build/native-apps"
-BOOT_SPLASH="$ROOT_DIR/assets/boot/$DEVICE/boot-splash.png"
+BOOT_SPLASH="$ROOT_DIR/system/assets/boot/$DEVICE/boot-splash.png"
 if [[ ! -f "$BOOT_SPLASH" ]]; then
-  BOOT_SPLASH="$ROOT_DIR/assets/boot/nokia-2780-flip/boot-splash.png"
+  BOOT_SPLASH="$ROOT_DIR/system/assets/boot/nokia-2780-flip/boot-splash.png"
 fi
 LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
@@ -99,7 +99,7 @@ case "$DEVICE" in
   nokia-8110-4g) SYSTEM_DIR=${NOKIA_8110_SYSTEM_DIR:-} ;;
 esac
 package_require_directory "$SYSTEM_DIR/lib"
-source "$ROOT_DIR/config/wpe/devices/$DEVICE.env"
+source "$ROOT_DIR/system/config/wpe/devices/$DEVICE.env"
 package_require_file "$WPE_SYSROOT/.oos-wpe-profile"
 grep -q "^device=$DEVICE$" "$WPE_SYSROOT/.oos-wpe-profile" ||
   package_die "WPE sysroot profile does not target $DEVICE"

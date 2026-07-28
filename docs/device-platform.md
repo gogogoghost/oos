@@ -11,7 +11,7 @@ The platform boundary has three layers:
 
 1. `oos::device::Device` identifies the handset, reports capabilities and
    service endpoints, and owns boot-critical display and key-input lifecycle.
-2. The public Manager APIs under `core/include/oos/{hardware,network,modem}`
+2. The public Manager APIs under `system/src/oos/{hardware,network,modem}`
    define typed operations shared by every target.
 3. A device directory supplies the display backend and any Manager
    implementations that differ from the reusable core implementation.
@@ -92,7 +92,7 @@ this table documents the current state rather than replacing runtime checks.
 
 A new target must:
 
-1. Add an isolated `devices/<device-id>` directory and a separate extracted
+1. Add an isolated `system/devices/<device-id>` directory and a separate extracted
    system path in `.env`; never overwrite another target's sysroot setting.
 2. Implement `oos::device::createDevice()` and `oos::device::Display` without
    exposing vendor types in public headers.
@@ -118,4 +118,4 @@ shell.
 
 Exploratory probes stay under the device's `tests` directory. Once a path is
 validated, reusable logic moves into the backend library and shared behavior
-moves under `tests/device`.
+moves under `system/tests/device`.

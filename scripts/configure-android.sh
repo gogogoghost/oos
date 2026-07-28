@@ -59,7 +59,7 @@ fi
 if [[ $GENERATE_HIDL -eq 1 ]]; then
   "$ROOT_DIR/scripts/generate-hidl-headers.sh"
 fi
-cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build/android-$DEVICE" \
+cmake -S "$ROOT_DIR/system" -B "$ROOT_DIR/build/android-$DEVICE" \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=armeabi-v7a \
   -DANDROID_PLATFORM="$ANDROID_PLATFORM" \

@@ -1,0 +1,11 @@
+[package]
+name = "oos-wit-smoke"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oos-app = { path = "../../sdk/rust/oos-app" }
