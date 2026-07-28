@@ -100,7 +100,7 @@ public:
 
   Display &display() override { return display_; }
 
-  input::KeyInput &keyInput() override {
+  input::KeyInputSource &keyInput() override {
     assert(input_);
     return *input_;
   }

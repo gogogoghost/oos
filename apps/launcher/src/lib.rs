@@ -6,10 +6,10 @@ const LINUX_KEY_UP: u32 = 103;
 const LINUX_KEY_LEFT: u32 = 105;
 const LINUX_KEY_RIGHT: u32 = 106;
 const LINUX_KEY_DOWN: u32 = 108;
-const LINUX_KEY_OK: u32 = 139;
+const LINUX_KEY_SOFT_LEFT: u32 = 139;
 const LINUX_KEY_BACK: u32 = 158;
-const LINUX_KEY_OK_ALT: u32 = 352;
-const LINUX_KEY_BACK_ALT: u32 = 357;
+const LINUX_KEY_OK: u32 = 352;
+const LINUX_KEY_SOFT_RIGHT: u32 = 357;
 
 const ACTION_PRESSED: u32 = 1;
 
@@ -90,8 +90,8 @@ impl Launcher {
             LINUX_KEY_DOWN => Some(Key::ArrowDown),
             LINUX_KEY_LEFT => Some(Key::ArrowLeft),
             LINUX_KEY_RIGHT => Some(Key::ArrowRight),
-            LINUX_KEY_OK | LINUX_KEY_OK_ALT => Some(Key::Enter),
-            LINUX_KEY_BACK | LINUX_KEY_BACK_ALT => Some(Key::Escape),
+            LINUX_KEY_OK => Some(Key::Enter),
+            LINUX_KEY_BACK => Some(Key::Escape),
             _ => None,
         };
         if let Some(key) = egui_key {
@@ -105,8 +105,16 @@ impl Launcher {
         }
 
         match (self.view, code) {
-            (View::Home, LINUX_KEY_OK | LINUX_KEY_OK_ALT) => self.view = View::Apps,
-            (View::Apps, LINUX_KEY_BACK | LINUX_KEY_BACK_ALT) => {
+            (View::Home, LINUX_KEY_OK) => self.view = View::Apps,
+            (View::Home, LINUX_KEY_SOFT_LEFT) => {
+                self.notice = Some("No alerts");
+                self.notice_until_us = now_us + 1_400_000;
+            }
+            (View::Home, LINUX_KEY_SOFT_RIGHT) => {
+                self.notice = Some("Camera is not installed");
+                self.notice_until_us = now_us + 1_400_000;
+            }
+            (View::Apps, LINUX_KEY_BACK | LINUX_KEY_SOFT_LEFT) => {
                 self.view = View::Home;
                 self.notice = None;
             }
@@ -118,8 +126,12 @@ impl Launcher {
                 self.selected = (self.selected + APPS.len() - 3) % APPS.len()
             }
             (View::Apps, LINUX_KEY_DOWN) => self.selected = (self.selected + 3) % APPS.len(),
-            (View::Apps, LINUX_KEY_OK | LINUX_KEY_OK_ALT) => {
+            (View::Apps, LINUX_KEY_OK) => {
                 self.notice = Some("App is not installed");
+                self.notice_until_us = now_us + 1_400_000;
+            }
+            (View::Apps, LINUX_KEY_SOFT_RIGHT) => {
+                self.notice = Some("Options are not available");
                 self.notice_until_us = now_us + 1_400_000;
             }
             _ => {}

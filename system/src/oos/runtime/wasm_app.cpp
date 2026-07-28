@@ -320,25 +320,358 @@ void writeUnavailable(wasm_exec_env_t environment, uint32_t result_offset) {
   result[error_offset] = static_cast<uint8_t>(WitError::Unavailable);
 }
 
-template <typename... Args>
-void nativeUnavailable(wasm_exec_env_t environment, Args... arguments) {
-  static_assert(sizeof...(Args) > 0);
-  const auto values = std::make_tuple(arguments...);
-  writeUnavailable(environment, static_cast<uint32_t>(
-                                    std::get<sizeof...(Args) - 1>(values)));
+bool mockHardwareFor(wasm_exec_env_t environment) {
+  const AppHostContext *host = hostFor(environment);
+  return host && host->device && host->device->services().mock_hardware;
 }
 
-void nativeUnavailableMessage(wasm_exec_env_t environment,
-                              uint32_t result_offset) {
+template <typename T>
+void storeCanonical(uint8_t *area, size_t offset, T value) {
+  std::memcpy(area + offset, &value, sizeof(value));
+}
+
+uint8_t *mockResultArea(wasm_exec_env_t environment, uint32_t result_offset,
+                        uint32_t size) {
+  if (!mockHardwareFor(environment)) {
+    writeUnavailable(environment, result_offset);
+    return nullptr;
+  }
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, size, size);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return nullptr;
+  }
+  std::memset(result, 0, size);
+  return result;
+}
+
+uint8_t *allocateGuestRecord(wasm_exec_env_t environment, uint32_t size,
+                             uint32_t alignment, uint32_t &pointer) {
+  pointer = guestRealloc(environment, 0, 0, alignment, size);
+  uint8_t *record =
+      appMutableArray<uint8_t>(environment, pointer, size, 16 * 1024);
+  if (!pointer || !record) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to allocate WIT mock result");
+    return nullptr;
+  }
+  std::memset(record, 0, size);
+  return record;
+}
+
+bool lowerStringAt(wasm_exec_env_t environment, const char *value,
+                   uint8_t *record, size_t offset) {
+  uint32_t pointer = 0;
+  uint32_t length = 0;
+  if (!lowerString(environment, value, pointer, length))
+    return false;
+  storeCanonical(record, offset, pointer);
+  storeCanonical(record, offset + 4, length);
+  return true;
+}
+
+template <typename... Args>
+void nativeMockUnit(wasm_exec_env_t environment, Args... arguments) {
+  static_assert(sizeof...(Args) > 0);
+  const auto values = std::make_tuple(arguments...);
+  const uint32_t result_offset =
+      static_cast<uint32_t>(std::get<sizeof...(Args) - 1>(values));
+  if (mockHardwareFor(environment))
+    writeResult(environment, result_offset, true);
+  else
+    writeUnavailable(environment, result_offset);
+}
+
+void nativeServiceMessage(wasm_exec_env_t environment, uint32_t result_offset) {
   uint32_t *result =
       appMutableArray<uint32_t>(environment, result_offset, 2, 2);
-  if (!result ||
-      !lowerString(environment, "service unavailable", result[0], result[1])) {
+  const char *message = mockHardwareFor(environment) ? "mock service ready"
+                                                     : "service unavailable";
+  if (!result || !lowerString(environment, message, result[0], result[1])) {
     trapInvalidReturnArea(environment);
   }
 }
 
-uint32_t nativeFalse(wasm_exec_env_t) { return 0; }
+void nativeMockAudioPlayTone(wasm_exec_env_t environment, double,
+                             uint32_t duration_ms, float, uint32_t,
+                             uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 32);
+  if (!result)
+    return;
+  storeCanonical<int32_t>(result, 8, 48000);
+  storeCanonical<int32_t>(result, 12, 2);
+  storeCanonical<int32_t>(result, 16, 1);
+  storeCanonical<int64_t>(result, 24, static_cast<int64_t>(duration_ms) * 48);
+}
+
+void nativeMockAudioRecord(wasm_exec_env_t environment, uint32_t, uint32_t,
+                           uint32_t duration_ms, uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 56);
+  if (!result)
+    return;
+  storeCanonical<int32_t>(result, 8, 16000);
+  storeCanonical<int32_t>(result, 12, 1);
+  storeCanonical<int32_t>(result, 16, 2);
+  storeCanonical<int64_t>(result, 24, static_cast<int64_t>(duration_ms) * 16);
+  storeCanonical<double>(result, 32, 0.5);
+  storeCanonical<double>(result, 40, 0.25);
+  if (!lowerStringAt(environment, "/tmp/oos-local-recording.wav", result, 48))
+    trapInvalidReturnArea(environment);
+}
+
+void nativeMockCameraEnumerate(wasm_exec_env_t environment,
+                               uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  uint32_t pointer = 0;
+  uint8_t *camera = allocateGuestRecord(environment, 32, 4, pointer);
+  if (!camera)
+    return;
+  if (!lowerStringAt(environment, "mock-camera-0", camera, 0)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  camera[8] = 2; // back
+  storeCanonical<int32_t>(camera, 12, 90);
+  storeCanonical<int32_t>(camera, 16, 3);
+  camera[20] = 1;
+  storeCanonical<int32_t>(camera, 24, 1920);
+  storeCanonical<int32_t>(camera, 28, 1080);
+  storeCanonical(result, 4, pointer);
+  storeCanonical<uint32_t>(result, 8, 1);
+}
+
+void nativeMockCameraCapture(wasm_exec_env_t environment, uint32_t, uint32_t,
+                             uint32_t, uint32_t, uint32_t width,
+                             uint32_t height, uint32_t, uint32_t,
+                             uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 32);
+  if (!result)
+    return;
+  if (!lowerStringAt(environment, "/tmp/oos-local-photo.jpg", result, 8)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(result, 16, static_cast<int32_t>(width));
+  storeCanonical<int32_t>(result, 20, static_cast<int32_t>(height));
+  storeCanonical<uint64_t>(result, 24, 4096);
+}
+
+void writeMockBattery(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 28);
+  if (!result)
+    return;
+  result[4] = 1; // charging
+  storeCanonical<int32_t>(result, 8, 82);
+  storeCanonical<int32_t>(result, 12, 4'050'000);
+  storeCanonical<int32_t>(result, 16, 350'000);
+  storeCanonical<int32_t>(result, 20, 250);
+  result[24] = 1;
+}
+
+void nativeMockBattery(wasm_exec_env_t environment, uint32_t result_offset) {
+  writeMockBattery(environment, result_offset);
+}
+
+void nativeMockBatteryEvent(wasm_exec_env_t environment, uint32_t,
+                            uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 8);
+  if (result)
+    result[4] = 0; // ok(none)
+}
+
+void nativeMockFlipState(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 2);
+  if (result)
+    result[1] = 1; // open
+}
+
+uint32_t nativeMockAmplitude(wasm_exec_env_t environment) {
+  return mockHardwareFor(environment) ? 1 : 0;
+}
+
+void nativeMockWifiStatus(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 40);
+  if (!result)
+    return;
+  if (!lowerStringAt(environment, "COMPLETED", result, 4) ||
+      !lowerStringAt(environment, "OOS Mock Network", result, 12) ||
+      !lowerStringAt(environment, "02:00:00:00:00:01", result, 20) ||
+      !lowerStringAt(environment, "192.0.2.2", result, 28)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(result, 36, 1);
+}
+
+void nativeMockWifiScan(wasm_exec_env_t environment, uint32_t,
+                        uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  uint32_t pointer = 0;
+  uint8_t *access_point = allocateGuestRecord(environment, 32, 4, pointer);
+  if (!access_point)
+    return;
+  if (!lowerStringAt(environment, "02:00:00:00:00:01", access_point, 0) ||
+      !lowerStringAt(environment, "[WPA2-PSK-CCMP][ESS]", access_point, 16) ||
+      !lowerStringAt(environment, "OOS Mock Network", access_point, 24)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(access_point, 8, 2412);
+  storeCanonical<int32_t>(access_point, 12, -42);
+  storeCanonical(result, 4, pointer);
+  storeCanonical<uint32_t>(result, 8, 1);
+}
+
+void nativeMockWifiNetworks(wasm_exec_env_t environment,
+                            uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  uint32_t pointer = 0;
+  uint8_t *network = allocateGuestRecord(environment, 28, 4, pointer);
+  if (!network)
+    return;
+  storeCanonical<int32_t>(network, 0, 1);
+  if (!lowerStringAt(environment, "OOS Mock Network", network, 4) ||
+      !lowerStringAt(environment, "02:00:00:00:00:01", network, 12) ||
+      !lowerStringAt(environment, "[CURRENT]", network, 20)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical(result, 4, pointer);
+  storeCanonical<uint32_t>(result, 8, 1);
+}
+
+void nativeMockWifiConnect(wasm_exec_env_t environment, uint32_t, uint32_t,
+                           uint32_t, uint32_t, uint32_t,
+                           uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 8);
+  if (result)
+    storeCanonical<int32_t>(result, 4, 1);
+}
+
+void nativeMockIpStatus(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 48);
+  if (!result)
+    return;
+  if (!lowerStringAt(environment, "wlan0", result, 4) ||
+      !lowerStringAt(environment, "192.0.2.2", result, 12) ||
+      !lowerStringAt(environment, "192.0.2.1", result, 24) ||
+      !lowerStringAt(environment, "192.0.2.53", result, 32) ||
+      !lowerStringAt(environment, "198.51.100.53", result, 40)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<uint32_t>(result, 20, 24);
+}
+
+void nativeMockBluetoothScan(wasm_exec_env_t environment, uint32_t,
+                             uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  uint32_t pointer = 0;
+  uint8_t *device = allocateGuestRecord(environment, 36, 4, pointer);
+  if (!device)
+    return;
+  if (!lowerStringAt(environment, "02:00:00:00:00:02", device, 0) ||
+      !lowerStringAt(environment, "OOS Mock Headset", device, 8)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(device, 16, -38);
+  storeCanonical<uint32_t>(device, 20, 0x240404);
+  storeCanonical<int32_t>(device, 24, 3);
+  storeCanonical<uint32_t>(device, 28, 1);
+  storeCanonical<uint32_t>(device, 32, 0);
+  storeCanonical(result, 4, pointer);
+  storeCanonical<uint32_t>(result, 8, 1);
+}
+
+void nativeMockModemSnapshot(wasm_exec_env_t environment, uint32_t,
+                             uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 216);
+  if (!result)
+    return;
+  uint8_t *snapshot = result + 4;
+  snapshot[0] = 1;
+  storeCanonical<int32_t>(snapshot, 4, 1);
+  if (!lowerStringAt(environment, "OOS-MOCK-1.0", snapshot, 8) ||
+      !lowerStringAt(environment, "000000000000000", snapshot, 16) ||
+      !lowerStringAt(environment, "00", snapshot, 24) ||
+      !lowerStringAt(environment, "00000000", snapshot, 32) ||
+      !lowerStringAt(environment, "00000000000000", snapshot, 40) ||
+      !lowerStringAt(environment, "OOS Mock Carrier", snapshot, 148) ||
+      !lowerStringAt(environment, "OOS", snapshot, 156) ||
+      !lowerStringAt(environment, "00101", snapshot, 164) ||
+      !lowerStringAt(environment, "00000000-0000-0000-0000-000000000001",
+                     snapshot, 196)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(snapshot, 48, 1);
+  storeCanonical<int32_t>(snapshot, 52, 0);
+  storeCanonical<int32_t>(snapshot, 56, 1);
+  storeCanonical<int32_t>(snapshot, 60, 20);
+  storeCanonical<int32_t>(snapshot, 64, 0);
+  storeCanonical<int32_t>(snapshot, 88, 30);
+  storeCanonical<int32_t>(snapshot, 92, -95);
+  storeCanonical<int32_t>(snapshot, 96, -10);
+  storeCanonical<int32_t>(snapshot, 100, 45);
+  storeCanonical<int32_t>(snapshot, 104, 12);
+  storeCanonical<int32_t>(snapshot, 116, 1);
+  storeCanonical<int32_t>(snapshot, 120, 14);
+  storeCanonical<int32_t>(snapshot, 128, 1);
+  storeCanonical<int32_t>(snapshot, 132, 1);
+  storeCanonical<int32_t>(snapshot, 136, 14);
+  storeCanonical<int32_t>(snapshot, 144, 1);
+  storeCanonical<int32_t>(snapshot, 172, 9);
+  storeCanonical<int32_t>(snapshot, 176, 14);
+  storeCanonical<int32_t>(snapshot, 180, 0);
+  storeCanonical<int32_t>(snapshot, 184, 0);
+  storeCanonical<int32_t>(snapshot, 188, 1);
+  storeCanonical<uint32_t>(snapshot, 192, 0x1000);
+  storeCanonical<uint32_t>(snapshot, 204, 1);
+  storeCanonical<uint32_t>(snapshot, 208, 0);
+}
+
+void nativeMockRadioPower(wasm_exec_env_t environment, uint32_t, uint32_t,
+                          uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 20);
+  if (!result)
+    return;
+  if (!lowerStringAt(environment, "set-radio-power", result, 4)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(result, 12, 0);
+  result[16] = 0;
+}
+
+void nativeMockCodec(wasm_exec_env_t environment, uint32_t width,
+                     uint32_t height, uint32_t frame_count, uint32_t,
+                     uint32_t result_offset) {
+  uint8_t *result = mockResultArea(environment, result_offset, 56);
+  if (!result)
+    return;
+  if (!lowerStringAt(environment, "mock.h264.encoder", result, 8) ||
+      !lowerStringAt(environment, "mock.h264.decoder", result, 16)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(result, 28, static_cast<int32_t>(width));
+  storeCanonical<int32_t>(result, 32, static_cast<int32_t>(height));
+  storeCanonical<int32_t>(result, 36, static_cast<int32_t>(frame_count));
+  storeCanonical<int32_t>(result, 40, static_cast<int32_t>(frame_count));
+  storeCanonical<int32_t>(result, 44, static_cast<int32_t>(frame_count));
+  storeCanonical<uint64_t>(result, 48,
+                           static_cast<uint64_t>(frame_count) * 1024);
+}
 
 NativeSymbol kRuntimeSymbols[] = {
     {"abi-version", reinterpret_cast<void *>(nativeAbiVersion), "()i", nullptr},
@@ -367,179 +700,160 @@ NativeSymbol kDeviceSymbols[] = {
 };
 
 NativeSymbol kAudioSymbols[] = {
-    {"play-tone",
-     reinterpret_cast<void *>(
-         nativeUnavailable<double, uint32_t, float, uint32_t, uint32_t>),
-     "(Fifii)", reinterpret_cast<void *>(8)},
-    {"record-wav",
-     reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiii)", reinterpret_cast<void *>(8)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"play-tone", reinterpret_cast<void *>(nativeMockAudioPlayTone), "(Fifii)",
+     reinterpret_cast<void *>(8)},
+    {"record-wav", reinterpret_cast<void *>(nativeMockAudioRecord), "(iiii)",
+     reinterpret_cast<void *>(8)},
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kCameraSymbols[] = {
-    {"enumerate", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+    {"enumerate", reinterpret_cast<void *>(nativeMockCameraEnumerate), "(i)",
      reinterpret_cast<void *>(4)},
     {"set-torch",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
      "(iiii)", reinterpret_cast<void *>(1)},
-    {"capture-jpeg",
-     reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                           uint32_t, uint32_t, uint32_t, uint32_t>),
+    {"capture-jpeg", reinterpret_cast<void *>(nativeMockCameraCapture),
      "(iiiiiiiii)", reinterpret_cast<void *>(8)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kPowerSymbols[] = {
-    {"query-battery", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
-     "(i)", reinterpret_cast<void *>(4)},
-    {"wait-for-battery-event",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+    {"query-battery", reinterpret_cast<void *>(nativeMockBattery), "(i)",
      reinterpret_cast<void *>(4)},
+    {"wait-for-battery-event", reinterpret_cast<void *>(nativeMockBatteryEvent),
+     "(ii)", reinterpret_cast<void *>(4)},
     {"set-interactive",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>), "(ii)",
      reinterpret_cast<void *>(1)},
     {"acquire-wake-lock",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
      "(iii)", reinterpret_cast<void *>(1)},
     {"release-wake-lock",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
      "(iii)", reinterpret_cast<void *>(1)},
-    {"enable-auto-suspend",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
-     reinterpret_cast<void *>(1)},
-    {"disable-auto-suspend",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
-     reinterpret_cast<void *>(1)},
+    {"enable-auto-suspend", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
+     "(i)", reinterpret_cast<void *>(1)},
+    {"disable-auto-suspend", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
+     "(i)", reinterpret_cast<void *>(1)},
     {"schedule-rtc-wake",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>), "(ii)",
      reinterpret_cast<void *>(1)},
-    {"clear-rtc-wake", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
+    {"clear-rtc-wake", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
      "(i)", reinterpret_cast<void *>(1)},
-    {"suspend", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+    {"suspend", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
      "(ii)", reinterpret_cast<void *>(1)},
-    {"query-flip-state", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
-     "(i)", reinterpret_cast<void *>(1)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"query-flip-state", reinterpret_cast<void *>(nativeMockFlipState), "(i)",
+     reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kVibratorSymbols[] = {
-    {"vibrate", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+    {"vibrate", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
      "(ii)", reinterpret_cast<void *>(1)},
-    {"stop", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+    {"stop", reinterpret_cast<void *>(nativeMockUnit<uint32_t>), "(i)",
      reinterpret_cast<void *>(1)},
-    {"supports-amplitude-control", reinterpret_cast<void *>(nativeFalse), "()i",
-     nullptr},
+    {"supports-amplitude-control",
+     reinterpret_cast<void *>(nativeMockAmplitude), "()i", nullptr},
     {"set-amplitude",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>), "(ii)",
      reinterpret_cast<void *>(1)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kWifiSymbols[] = {
-    {"get-status", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+    {"get-status", reinterpret_cast<void *>(nativeMockWifiStatus), "(i)",
      reinterpret_cast<void *>(4)},
-    {"scan", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(4)},
-    {"list-networks", reinterpret_cast<void *>(nativeUnavailable<uint32_t>),
-     "(i)", reinterpret_cast<void *>(4)},
-    {"connect",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t,
-                                                uint32_t, uint32_t, uint32_t>),
-     "(iiiiii)", reinterpret_cast<void *>(4)},
-    {"disconnect", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+    {"scan", reinterpret_cast<void *>(nativeMockWifiScan), "(ii)",
+     reinterpret_cast<void *>(4)},
+    {"list-networks", reinterpret_cast<void *>(nativeMockWifiNetworks), "(i)",
+     reinterpret_cast<void *>(4)},
+    {"connect", reinterpret_cast<void *>(nativeMockWifiConnect), "(iiiiii)",
+     reinterpret_cast<void *>(4)},
+    {"disconnect", reinterpret_cast<void *>(nativeMockUnit<uint32_t>), "(i)",
      reinterpret_cast<void *>(1)},
-    {"reconnect", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+    {"reconnect", reinterpret_cast<void *>(nativeMockUnit<uint32_t>), "(i)",
      reinterpret_cast<void *>(1)},
-    {"forget", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+    {"forget", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
      "(ii)", reinterpret_cast<void *>(1)},
-    {"save-configuration",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
-     reinterpret_cast<void *>(1)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"save-configuration", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
+     "(i)", reinterpret_cast<void *>(1)},
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kIpSymbols[] = {
-    {"get-status", reinterpret_cast<void *>(nativeUnavailable<uint32_t>), "(i)",
+    {"get-status", reinterpret_cast<void *>(nativeMockIpStatus), "(i)",
      reinterpret_cast<void *>(4)},
-    {"use-dhcp",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
-     reinterpret_cast<void *>(1)},
+    {"use-dhcp", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
+     "(ii)", reinterpret_cast<void *>(1)},
     {"use-static",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                           uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                           uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                        uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                        uint32_t, uint32_t>),
      "(iiiiiiiiiiii)", reinterpret_cast<void *>(1)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kBluetoothSymbols[] = {
-    {"enable", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+    {"enable", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
      "(ii)", reinterpret_cast<void *>(1)},
-    {"disable", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
+    {"disable", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
      "(ii)", reinterpret_cast<void *>(1)},
-    {"classic-scan",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+    {"classic-scan", reinterpret_cast<void *>(nativeMockBluetoothScan), "(ii)",
      reinterpret_cast<void *>(4)},
-    {"le-scan", reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(4)},
+    {"le-scan", reinterpret_cast<void *>(nativeMockBluetoothScan), "(ii)",
+     reinterpret_cast<void *>(4)},
     {"pair",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
      "(iiii)", reinterpret_cast<void *>(1)},
     {"unpair",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
      "(iii)", reinterpret_cast<void *>(1)},
     {"cancel-pairing",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
+     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
      "(iii)", reinterpret_cast<void *>(1)},
     {"profile-connect",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
      "(iiii)", reinterpret_cast<void *>(1)},
     {"profile-disconnect",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
      "(iiii)", reinterpret_cast<void *>(1)},
     {"profile-connection-cycle",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
      "(iiiii)", reinterpret_cast<void *>(1)},
     {"le-connection-cycle",
      reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
+         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
      "(iiiii)", reinterpret_cast<void *>(1)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kModemSymbols[] = {
-    {"query-snapshot",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t>), "(ii)",
+    {"query-snapshot", reinterpret_cast<void *>(nativeMockModemSnapshot),
+     "(ii)", reinterpret_cast<void *>(4)},
+    {"set-radio-power", reinterpret_cast<void *>(nativeMockRadioPower), "(iii)",
      reinterpret_cast<void *>(4)},
-    {"set-radio-power",
-     reinterpret_cast<void *>(nativeUnavailable<uint32_t, uint32_t, uint32_t>),
-     "(iii)", reinterpret_cast<void *>(4)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kCodecSymbols[] = {
-    {"test-h264-round-trip",
-     reinterpret_cast<void *>(
-         nativeUnavailable<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
+    {"test-h264-round-trip", reinterpret_cast<void *>(nativeMockCodec),
      "(iiiii)", reinterpret_cast<void *>(8)},
-    {"last-error", reinterpret_cast<void *>(nativeUnavailableMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 

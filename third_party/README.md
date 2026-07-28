@@ -14,8 +14,9 @@ Android 10-era checkouts:
 - `kaios-hidl-gen`
 - `wasm-micro-runtime` (WAMR 2.4.4; fetched and revision-checked by
   `scripts/fetch-wamr.sh`)
-- `wpewebkit` (fixed at upstream `wpewebkit-2.52.5`)
-- `wpe-android` and `wpe-android-cerbero` (Android dependency build reference)
+- `libwpe`, `wpebackend-fdo`, and `wpewebkit` (verified release archives for
+  the local runtime)
+- `wpe-android-cerbero` (fixed Android dependency build checkout)
 
 The Nokia 8110 4G build additionally uses matching Android 6.0.1 r3 ABI
 headers:
@@ -37,7 +38,9 @@ audio backend uses OpenSL ES.
 `scripts/apply-third-party-patches.sh` applies the small compatibility patch
 recorded in `patches/` after a clean Gecko checkout is placed here.
 
-Pinned downloadable revisions are recorded in `third_party/versions.env`.
-The WAMR checkout itself is ignored like the larger Android and WPE trees.
+Pinned URLs, checksums, tags, and commits are recorded in
+`third_party/versions.env`. Run `make fetch-wpe` to fetch and verify every WPE
+source, or `scripts/fetch-wpe.sh local|android` for one platform. The WAMR and
+WPE source trees are ignored like the larger Android checkouts.
 
 The WPE sysroot is generated under `build/wpe-sysroot/` and is not committed.

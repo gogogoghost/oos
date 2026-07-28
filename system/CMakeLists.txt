@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 project(orange_os C CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -14,12 +16,19 @@ set(HIDL_GENERATED_DIR "${OOS_REPO_ROOT}/build/generated/hidl-android10"
 
 option(BUILD_NOKIA_2780_FLIP "Build Nokia 2780 Flip platform support" ON)
 option(BUILD_NOKIA_8110_4G "Build Nokia 8110 4G platform support" OFF)
+option(BUILD_LOCAL "Build the local SDL/OpenGL test platform" OFF)
 option(OOS_BUILD_DEVICE_TESTS "Build on-device display tests" ON)
 
-if(BUILD_NOKIA_2780_FLIP AND BUILD_NOKIA_8110_4G)
+set(OOS_SELECTED_DEVICE_COUNT 0)
+foreach(OOS_DEVICE_OPTION BUILD_NOKIA_2780_FLIP BUILD_NOKIA_8110_4G BUILD_LOCAL)
+  if(${OOS_DEVICE_OPTION})
+    math(EXPR OOS_SELECTED_DEVICE_COUNT "${OOS_SELECTED_DEVICE_COUNT}+1")
+  endif()
+endforeach()
+if(OOS_SELECTED_DEVICE_COUNT GREATER 1)
   message(FATAL_ERROR "Select exactly one target device per build directory.")
 endif()
-if(NOT BUILD_NOKIA_2780_FLIP AND NOT BUILD_NOKIA_8110_4G)
+if(OOS_SELECTED_DEVICE_COUNT EQUAL 0)
   message(FATAL_ERROR "No target device selected.")
 endif()
 
@@ -28,7 +37,7 @@ if(BUILD_NOKIA_8110_4G)
   add_compile_definitions(_LIBCPP_HAS_NO_ALIGNED_ALLOCATION)
 endif()
 
-if(NOT SYSTEM_DIR OR NOT EXISTS "${SYSTEM_DIR}/lib/libc++.so")
+if(NOT BUILD_LOCAL AND (NOT SYSTEM_DIR OR NOT EXISTS "${SYSTEM_DIR}/lib/libc++.so"))
   message(FATAL_ERROR
     "SYSTEM_DIR must point to an extracted Android /system directory containing lib/libc++.so. "
     "Set it in .env and configure with scripts/configure-android.sh.")
@@ -59,9 +68,11 @@ target_include_directories(oos_compositor PUBLIC
 target_link_libraries(oos_compositor PUBLIC oos_device_api)
 add_library(oos::compositor ALIAS oos_compositor)
 
-add_library(oos_surface_transport STATIC src/oos/compositor/surface_transport.c)
-target_include_directories(oos_surface_transport PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+if(NOT BUILD_LOCAL)
+  add_library(oos_surface_transport STATIC src/oos/compositor/surface_transport.c)
+  target_include_directories(oos_surface_transport PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+endif()
 
 add_library(oos_wasm_runtime STATIC
   src/oos/runtime/native_app_manager.cpp
@@ -72,7 +83,9 @@ target_link_libraries(oos_wasm_runtime PUBLIC oos_wamr oos_input)
 
 add_executable(oos src/main.cpp src/runtime.cpp)
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
-target_link_options(oos PRIVATE -nostdlib++)
+if(NOT BUILD_LOCAL)
+  target_link_options(oos PRIVATE -nostdlib++)
+endif()
 target_link_libraries(oos PRIVATE oos_device_api oos_compositor)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -82,4 +95,7 @@ if(BUILD_NOKIA_2780_FLIP)
 endif()
 if(BUILD_NOKIA_8110_4G)
   add_subdirectory(devices/nokia-8110-4g)
+endif()
+if(BUILD_LOCAL)
+  add_subdirectory(devices/local)
 endif()

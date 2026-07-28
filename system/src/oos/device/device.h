@@ -11,7 +11,7 @@ class Display;
 } // namespace oos::device
 
 namespace oos::input {
-class KeyInput;
+class KeyInputSource;
 }
 
 namespace oos::device {
@@ -69,6 +69,9 @@ struct ServiceConfiguration {
   const char *power_service = "default";
   const char *vibrator_service = "default";
   const char *primary_camera_id = "0";
+  // Test backends may expose deterministic WIT service data without starting
+  // platform HAL managers. Production device configurations leave this false.
+  bool mock_hardware = false;
 };
 
 struct DeviceInitOptions {
@@ -93,7 +96,7 @@ public:
   // Accessors require the corresponding initialize() option to have
   // completed successfully.
   virtual Display &display() = 0;
-  virtual input::KeyInput &keyInput() = 0;
+  virtual input::KeyInputSource &keyInput() = 0;
   virtual const std::string &lastError() const = 0;
 };
 

@@ -1,0 +1,12 @@
+diff --git a/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp b/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp
+index 5b61d35c589f..352281a21a1b 100644
+--- a/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp
++++ b/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp
+@@ -853,7 +853,7 @@ bool MediaControlsHost::showMediaControlsContextMenu(HTMLElement& target, String
+ 
+     return true;
+ #else // USE(UICONTEXTMENU) || (ENABLE(CONTEXT_MENUS) && USE(ACCESSIBILITY_CONTEXT_MENUS))
+-    return false;
++    return { };
+ #endif
+ }

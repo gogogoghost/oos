@@ -22,11 +22,17 @@ using oos::compositor::Compositor;
 using oos::device::Device;
 using oos::device::Display;
 using oos::input::KeyEvent;
-using oos::input::KeyInput;
+using oos::input::KeyInputSource;
 using oos::runtime::NativeAppManager;
 
-constexpr const char *kDefaultBootSplash = "/opt/oos/share/oos/boot-splash.png";
-constexpr const char *kDefaultLauncherModule = "/opt/oos/apps/launcher.aot";
+#ifndef OOS_DEFAULT_BOOT_SPLASH
+#define OOS_DEFAULT_BOOT_SPLASH "/opt/oos/share/oos/boot-splash.png"
+#endif
+#ifndef OOS_DEFAULT_LAUNCHER_MODULE
+#define OOS_DEFAULT_LAUNCHER_MODULE "/opt/oos/apps/launcher.aot"
+#endif
+constexpr const char *kDefaultBootSplash = OOS_DEFAULT_BOOT_SPLASH;
+constexpr const char *kDefaultLauncherModule = OOS_DEFAULT_LAUNCHER_MODULE;
 constexpr int kFrameIntervalMs = 33;
 
 volatile std::sig_atomic_t g_stop_requested = 0;
@@ -113,7 +119,7 @@ int run(int argc, char **argv) {
     return 1;
   }
   Display &display = platform_device->display();
-  KeyInput &input = platform_device->keyInput();
+  KeyInputSource &input = platform_device->keyInput();
   const device::DeviceDescriptor &descriptor = platform_device->descriptor();
 
   std::vector<uint16_t> boot_frame;
@@ -142,7 +148,7 @@ int run(int argc, char **argv) {
   std::signal(SIGTERM, stopRuntime);
   InputContext input_context{&apps};
   auto next_frame = std::chrono::steady_clock::now();
-  while (!g_stop_requested) {
+  while (!g_stop_requested && !input.stopRequested()) {
     if (input.poll(0, dispatchKey, &input_context) < 0 ||
         !input_context.success) {
       break;
@@ -159,9 +165,10 @@ int run(int argc, char **argv) {
       std::this_thread::sleep_until(next_frame);
   }
 
+  const bool stopped = g_stop_requested || input.stopRequested();
   apps.shutdown();
   platform_device->shutdown();
-  return g_stop_requested ? 0 : 1;
+  return stopped ? 0 : 1;
 }
 
 } // namespace oos::platform

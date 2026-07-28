@@ -6,6 +6,7 @@ namespace oos::compositor {
 
 enum class NativeBufferType : uint8_t {
   AndroidHardwareBuffer,
+  SharedMemoryArgb8888,
 };
 
 // The producer retains ownership until presentSurface() returns. The acquire
@@ -16,6 +17,7 @@ struct SurfaceFrame {
   void *buffer = nullptr;
   uint32_t buffer_width = 0;
   uint32_t buffer_height = 0;
+  uint32_t buffer_stride = 0;
   int acquire_fence_fd = -1;
   int32_t x = 0;
   int32_t y = 0;

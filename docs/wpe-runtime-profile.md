@@ -24,6 +24,29 @@ on both Android 6 and Android 10.
 WPE code must never open HWC, write a framebuffer, switch displays, or control
 a backlight. Only the OOS host owns those capabilities.
 
+The local path preserves the same ownership rule. WebKit's Web process remains
+separate, while the OOS Web runner owns both the WPE host adapter and the OOS
+compositor:
+
+```text
+WPEWebProcess -> WPEBackend-fdo SHM -> OOS WpeSurfaceHost
+              -> OOS Compositor -> local llvmpipe GLES -> SDL window
+```
+
+WPEBackend-fdo lends the ARGB8888 buffer to OOS for the duration of the frame
+callback. `WpeSurfaceHost` does not allocate or copy an intermediate image; it
+passes the borrowed pointer synchronously through the compositor. The local
+display uploads it into one persistent llvmpipe texture, then returns the SHM
+buffer to WPE after presentation. That single bounded pixel upload is the
+necessary copy in the deliberately GPU-independent local backend. WPE never
+opens the SDL/Wayland display or bypasses OOS composition.
+
+`package-local-rootfs.sh` generates a GStreamer plugin registry from the same
+host `/usr` tree that is bound into the namespace. `run-local-rootfs.sh` uses
+that registry with updates disabled because the rootfs is read-only. Repackage
+the rootfs after changing host GStreamer plugins; otherwise WebKit would have
+to synchronously rescan them during WebProcess startup.
+
 Native/WASM applications also use this compositor. The initial interface
 accepts one opaque full-screen surface; surface placement, z-order, opacity,
 and multi-surface transactions remain OOS policy and can be expanded without
@@ -53,6 +76,7 @@ Current validated build mappings are:
 | --- | --- | --- | --- | --- |
 | Nokia 2780 Flip | `android29-armv7-jit` | AHardwareBuffer | HWC2/HIDL | `build/wpe-sysroot/nokia-2780-flip` |
 | Nokia 8110 4G | `android23-armv7-jit` | gralloc0 AHardwareBuffer compatibility ABI | HWC1 | `build/wpe-sysroot/nokia-8110-4g` |
+| Local | `linux-x86_64-jit` | SHM ARGB8888 | SDL/llvmpipe GLES | `build/wpe-sysroot/local-root/opt/oos` |
 
 The 8110 compatibility library implements the small AHardwareBuffer ABI used
 by WPE over Android 6 gralloc0/native handles. It preserves GPU allocation,
@@ -64,7 +88,27 @@ Each device mapping lives in `system/config/wpe/devices/<device>.env`. Build wit
 ```sh
 ./scripts/build-wpe-sysroot.sh nokia-2780-flip
 ./scripts/build-wpe-sysroot.sh nokia-8110-4g
+./scripts/build-wpe-local.sh
 ```
+
+## Shared KaiOS Capability Profile
+
+`system/config/wpe/features.conf` is the only WPE feature source for local and
+Android builds. It retains the browser capabilities used by KaiOS 2.5/3
+applications, including HTML audio/video, AudioContext, MediaSource,
+getUserMedia/WebRTC, MediaRecorder, notifications, geolocation, fullscreen,
+WebGL, and WebAssembly. XR, gamepad, PDF.js, WebDriver, and OOS-owned browser
+shell facilities remain disabled.
+
+The Android Cerbero recipe receives this list through a build environment
+bridge. Device patches contain only toolchain, dependency, Bionic, JIT codegen,
+or GPU-buffer compatibility changes. Both build paths verify every option in
+the generated CMake cache and reject mismatches in `cmakeconfig.h`.
+
+This profile controls WebKit compile-time APIs. KaiOS-specific privileged
+objects such as `navigator.moz*` and `navigator.b2g` still require an OOS
+permission and JavaScript bridge; compiling WPE does not claim those objects
+are implemented.
 
 The API 23 profile defaults to eight compiler jobs because 32 simultaneous
 WebCore unified sources exceed the available practical memory even with swap.

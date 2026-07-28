@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include <unordered_map>
 
+#include "oos/device/device.h"
+#include "oos/input/key_input.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/runtime/native_app_manager.h"
 
@@ -77,6 +79,40 @@ public:
   size_t last_commands = 0;
 };
 
+class MockDevice final : public oos::device::Device {
+public:
+  const oos::device::DeviceDescriptor &descriptor() const override {
+    static constexpr oos::device::DeviceDescriptor descriptor = {
+        "local", "OOS", "Local Test Device", 0, 240, 320, 0, 0};
+    return descriptor;
+  }
+
+  const oos::device::ServiceConfiguration &services() const override {
+    static constexpr oos::device::ServiceConfiguration services = {
+        "local",      "mock:wlan0",    "mock:bluetooth", "mock:modem",
+        "mock:power", "mock:vibrator", "mock:camera",    true};
+    return services;
+  }
+
+  oos::device::CapabilityState
+  capability(oos::device::Feature feature) const override {
+    return feature == oos::device::Feature::PrimaryDisplay
+               ? oos::device::CapabilityState::Validated
+               : oos::device::CapabilityState::Implemented;
+  }
+
+  bool initialize(const oos::device::DeviceInitOptions &) override {
+    return true;
+  }
+  void shutdown() override {}
+  oos::device::Display &display() override { std::abort(); }
+  oos::input::KeyInputSource &keyInput() override { std::abort(); }
+  const std::string &lastError() const override { return error_; }
+
+private:
+  std::string error_;
+};
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -128,6 +164,16 @@ int main(int argc, char **argv) {
   }
   wit_smoke.shutdown();
   std::printf("WAMR WIT device API imports passed\n");
+  MockDevice mock_device;
+  oos::runtime::NativeAppManager mock_smoke(graphics, mock_device, 1);
+  if (!mock_smoke.load("local-mock", argv[2]) ||
+      !mock_smoke.activate("local-mock") || !mock_smoke.render(1'600'000)) {
+    std::fprintf(stderr, "WIT local mock API smoke failed: %s\n",
+                 mock_smoke.lastError());
+    return 1;
+  }
+  mock_smoke.shutdown();
+  std::printf("WAMR WIT local mock API imports passed\n");
   return graphics.frames == 5 && resident_textures == 3 &&
                  graphics.textures.empty() && graphics.texture_updates > 0
              ? 0

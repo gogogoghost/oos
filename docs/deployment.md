@@ -137,8 +137,12 @@ updating the link
 must be performed by the firmware/OTA installation environment or after an
 explicit writable remount; the runtime scripts do not remount `/system`.
 
-WPE 2.52.5 currently embeds the original build prefix for injected-bundle
-lookup. The generated rootfs contains a chroot-only compatibility symlink from
-that prefix to `/opt/oos`. A future WPE rebuild with `/opt/oos` as its native
-install prefix can remove this compatibility path without changing the
-external package layout.
+The local WPE build uses `/opt/oos` as its native install prefix and stages it
+with `DESTDIR`, so user-namespace tests exercise the final paths directly.
+Local packaging records the host GStreamer version and generates the plugin
+registry consumed from `/opt/oos/share/gstreamer-1.0`; the namespace disables
+runtime registry updates to keep WebProcess startup deterministic.
+The current Android Cerbero outputs still embed their isolated build prefixes;
+Android scaffold generation supplies the corresponding chroot-only
+compatibility link until those profiles also move to a staged `/opt/oos`
+install.

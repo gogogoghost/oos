@@ -11,6 +11,10 @@ if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
   set +a
 fi
+# Repository pins are authoritative and cannot be overridden by .env.
+source "$ROOT_DIR/third_party/versions.env"
+source "$ROOT_DIR/scripts/lib/wpe-features.sh"
+oos_wpe_load_features "$ROOT_DIR/system/config/wpe/features.conf"
 
 if [[ ! -f "$DEVICE_CONFIG" ]]; then
   echo "Unsupported WPE device: $DEVICE (missing $DEVICE_CONFIG)" >&2
@@ -29,7 +33,6 @@ fi
 
 WPE_CERBERO_DIR=${WPE_CERBERO_DIR:-"$ROOT_DIR/third_party/wpe-android-cerbero"}
 WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
-WPEWEBKIT_COMMIT=${WPEWEBKIT_COMMIT:-9d11fa1a37e61a75d8167ee4bc1a8e7604aff408}
 WPE_BUILD_JOBS=${WPE_BUILD_JOBS:-${OOS_WPE_DEFAULT_JOBS:-$(nproc)}}
 export WPE_BUILD_JOBS
 BASE_CONFIG="$WPE_CERBERO_DIR/config/cross-android-armv7.cbc"
@@ -63,6 +66,8 @@ if [[ $PROFILE_SOURCE == "$WPE_CERBERO_DIR/build/sources/android_armv7" && \
   echo "Refusing to mix an API $OOS_WPE_ANDROID_API build into the API 29 source tree" >&2
   exit 2
 fi
+
+"$ROOT_DIR/scripts/fetch-wpe.sh" android
 
 if ! python3 -c 'import distro' >/dev/null 2>&1; then
   echo "Missing Python module distro. Install Debian package python3-distro." >&2
@@ -112,20 +117,8 @@ fi
 "$CERBERO" -c "$BASE_CONFIG" -c "$KAIOS_CONFIG" build -j "$WPE_BUILD_JOBS" \
   wpewebkit
 
-verify_define() {
-  local name=$1
-  local expected=$2
-  grep -q "^#define $name $expected$" "$WPE_BUILD_DIR/cmakeconfig.h" || {
-    echo "WPE feature verification failed: expected $name=$expected" >&2
-    exit 1
-  }
-}
-
-verify_define ENABLE_JIT 1
-verify_define ENABLE_DFG_JIT 1
-verify_define ENABLE_WEBASSEMBLY 1
-verify_define ENABLE_C_LOOP 0
-verify_define ENABLE_FTL_JIT 0
+oos_wpe_verify_features "$WPE_BUILD_DIR/cmakeconfig.h" \
+  "$WPE_BUILD_DIR/CMakeCache.txt"
 
 for jit_object in \
   Source/JavaScriptCore/CMakeFiles/JavaScriptCore.dir/dfg/DFGSpeculativeJIT32_64.cpp.o \

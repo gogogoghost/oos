@@ -15,7 +15,15 @@ import { Dynamic } from "solid-js/web";
 import citrusMark from "./citrus.svg";
 
 type ViewName = "home" | "apps";
-type NavigationAction = "up" | "down" | "left" | "right" | "ok" | "back";
+type NavigationAction =
+  | "up"
+  | "down"
+  | "left"
+  | "right"
+  | "ok"
+  | "back"
+  | "soft-left"
+  | "soft-right";
 
 interface AppEntry {
   label: string;
@@ -43,10 +51,10 @@ const linuxKeyMap: Record<number, NavigationAction> = {
   105: "left",
   106: "right",
   108: "down",
-  139: "ok",
+  139: "soft-left",
   158: "back",
   352: "ok",
-  357: "back",
+  357: "soft-right",
 };
 
 function formatTime(date: Date) {
@@ -79,16 +87,22 @@ export function Launcher() {
   const navigate = (action: NavigationAction) => {
     if (view() === "home") {
       if (action === "ok") setView("apps");
+      if (action === "soft-left") showNotice("No alerts");
+      if (action === "soft-right") showNotice("Camera is not installed");
       return;
     }
 
-    if (action === "back") {
+    if (action === "back" || action === "soft-left") {
       setView("home");
       setNotice("");
       return;
     }
     if (action === "ok") {
       showNotice(`${applications[selected()].label} is not installed`);
+      return;
+    }
+    if (action === "soft-right") {
+      showNotice("Options are not available");
       return;
     }
 
@@ -108,6 +122,10 @@ export function Launcher() {
       Enter: "ok",
       Escape: "back",
       Backspace: "back",
+      ContextMenu: "soft-left",
+      Unidentified: "soft-right",
+      q: "soft-left",
+      w: "soft-right",
     };
     const action = keyMap[event.key];
     if (!action) return;

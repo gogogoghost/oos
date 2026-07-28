@@ -57,6 +57,16 @@ The observed node column is diagnostic information, not an API guarantee.
 The headset jack's separate `event4` node exposes only `EV_SW` and is
 intentionally excluded from key capture.
 
+## Local Device
+
+The local backend implements the same allocation-free `KeyInputSource`
+contract over SDL events. It parses
+`system/devices/local/config/keymap.conf` once during startup, sorts the fixed
+mapping table, and performs a binary lookup without allocating for each key.
+Digits map to the T9 number keys, Enter to OK, Backspace to Back, and Q/W to
+the left/right soft keys. Change the configuration file rather than adding
+host keyboard conditionals to the runtime.
+
 ## On-device Test
 
 Build and start the WPE visualizer:

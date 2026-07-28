@@ -1,46 +1,8 @@
 diff --git a/recipes/wpewebkit.recipe b/recipes/wpewebkit.recipe
-index fd1aa06..56cc1f1 100644
+index 92a9220..87d9134 100644
 --- a/recipes/wpewebkit.recipe
 +++ b/recipes/wpewebkit.recipe
-@@ -57,14 +57,33 @@ class Recipe(recipe.Recipe):
-         -DENABLE_SPELLCHECK=OFF \
-         -DENABLE_WEBXR=OFF \
-         -DENABLE_GAMEPAD=OFF \
--        -DENABLE_JIT=OFF \
--        -DENABLE_DFG_JIT=OFF \
-+        -DENABLE_CONTENT_EXTENSIONS=OFF \
-+        -DENABLE_CONTEXT_MENUS=OFF \
-+        -DENABLE_CURSOR_VISIBILITY=OFF \
-+        -DENABLE_DRAG_SUPPORT=OFF \
-+        -DENABLE_FULLSCREEN_API=OFF \
-+        -DENABLE_GEOLOCATION=OFF \
-+        -DENABLE_IMAGE_DIFF=OFF \
-+        -DENABLE_JAVASCRIPT_SHELL=OFF \
-+        -DENABLE_MATHML=OFF \
-+        -DENABLE_MEMORY_SAMPLER=OFF \
-+        -DENABLE_OFFSCREEN_CANVAS=OFF \
-+        -DENABLE_OFFSCREEN_CANVAS_IN_WORKERS=OFF \
-+        -DENABLE_PERIODIC_MEMORY_MONITOR=OFF \
-+        -DENABLE_REMOTE_INSPECTOR=OFF \
-+        -DENABLE_RESOURCE_USAGE=OFF \
-+        -DENABLE_TOUCH_EVENTS=OFF \
-+        -DENABLE_VARIATION_FONTS=OFF \
-+        -DENABLE_JIT=ON \
-+        -DENABLE_DFG_JIT=ON \
-         -DENABLE_FTL_JIT=OFF \
--        -DENABLE_C_LOOP=ON \
-+        -DENABLE_C_LOOP=OFF \
-         -DENABLE_SAMPLING_PROFILER=OFF \
--        -DENABLE_WEBASSEMBLY=OFF \
-+        -DENABLE_WEBASSEMBLY=ON \
-         -DENABLE_NOTIFICATIONS=OFF \
-         -DENABLE_MHTML=OFF \
-+        -DUSE_CXX_STDLIB_ASSERTIONS=OFF \
-+        -DUSE_SKIA_ENCODERS=OFF \
-         -DUSE_ATK=OFF \
-         -DUSE_LCMS=OFF \
-         -DUSE_AVIF=OFF \
-@@ -93,6 +112,7 @@ class Recipe(recipe.Recipe):
+@@ -45,6 +45,7 @@ class Recipe(recipe.Recipe):
      patches = [
          'wpewebkit/0001-WPE-Decouple-touch-driven-scrolling-unconditionally.patch',
          'wpewebkit/0002-KaiOS-Android-use-GioUnix.patch',

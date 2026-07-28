@@ -1,86 +1,55 @@
 diff --git a/recipes/wpewebkit.recipe b/recipes/wpewebkit.recipe
-index 4430b87..fd1aa06 100644
+index 4430b875..2ea9b9ff 100644
 --- a/recipes/wpewebkit.recipe
 +++ b/recipes/wpewebkit.recipe
-@@ -18,10 +18,6 @@ class Recipe(recipe.Recipe):
-         'icu',
-         'freetype',
-         'gettext',
--        'gstreamer-1.0',
--        'gst-plugins-base-1.0',
--        'gst-plugins-good-1.0',
--        'gst-plugins-bad-1.0',
-         'harfbuzz',
-         'libepoxy',
-         'libgcrypt',
-@@ -31,9 +27,7 @@ class Recipe(recipe.Recipe):
-         'libtasn1',
+@@ -32,8 +32,7 @@ class Recipe(recipe.Recipe):
          'libxslt',
          'libwebp',
--        'libwpe',
+         'libwpe',
 -        'openjpeg',
 -        'openxr',
 +        'xkbcommon',
      ]
      # FIXME: support accessibility, woff2, hyphenation
      #
-@@ -45,7 +39,16 @@ class Recipe(recipe.Recipe):
+@@ -45,46 +44,20 @@ class Recipe(recipe.Recipe):
      # proper fix for this.
      configure_options = '\
          -DPORT=WPE \
 -        -DUSE_GSTREAMER_GL=ON \
-+        -DUSE_GSTREAMER=OFF \
-+        -DUSE_GSTREAMER_GL=OFF \
-+        -DENABLE_VIDEO=OFF \
-+        -DENABLE_WEB_AUDIO=OFF \
-+        -DENABLE_WEB_RTC=OFF \
-+        -DENABLE_WEB_CODECS=OFF \
-+        -DENABLE_MEDIA_STREAM=OFF \
-+        -DENABLE_MEDIA_RECORDER=OFF \
-+        -DENABLE_PDFJS=OFF \
-+        -DENABLE_XSLT=OFF \
-         -DUSE_WOFF2=OFF \
-         -DENABLE_DOCUMENTATION=OFF \
-         -DENABLE_INTROSPECTION=OFF \
-@@ -53,9 +56,16 @@ class Recipe(recipe.Recipe):
-         -DENABLE_BUBBLEWRAP_SANDBOX=OFF \
-         -DENABLE_SPEECH_SYNTHESIS=OFF \
-         -DENABLE_SPELLCHECK=OFF \
+-        -DUSE_WOFF2=OFF \
+-        -DENABLE_DOCUMENTATION=OFF \
+-        -DENABLE_INTROSPECTION=OFF \
+-        -DENABLE_JOURNALD_LOG=OFF \
+-        -DENABLE_BUBBLEWRAP_SANDBOX=OFF \
+-        -DENABLE_SPEECH_SYNTHESIS=OFF \
+-        -DENABLE_SPELLCHECK=OFF \
 -        -DENABLE_WEBXR=ON \
 -        -DENABLE_WEBXR_LAYERS=ON \
 -        -DENABLE_WEBXR_HIT_TEST=ON \
-+        -DENABLE_WEBXR=OFF \
-+        -DENABLE_GAMEPAD=OFF \
-+        -DENABLE_JIT=OFF \
-+        -DENABLE_DFG_JIT=OFF \
-+        -DENABLE_FTL_JIT=OFF \
-+        -DENABLE_C_LOOP=ON \
-+        -DENABLE_SAMPLING_PROFILER=OFF \
-+        -DENABLE_WEBASSEMBLY=OFF \
-+        -DENABLE_NOTIFICATIONS=OFF \
-+        -DENABLE_MHTML=OFF \
-         -DUSE_ATK=OFF \
-         -DUSE_LCMS=OFF \
-         -DUSE_AVIF=OFF \
-@@ -66,13 +76,15 @@ class Recipe(recipe.Recipe):
-         -DUSE_LIBBACKTRACE=OFF \
-         -DUSE_SKIA_OPENTYPE_SVG=OFF \
-         -DUSE_SYSPROF_CAPTURE=OFF \
+-        -DUSE_ATK=OFF \
+-        -DUSE_LCMS=OFF \
+-        -DUSE_AVIF=OFF \
+-        -DUSE_GBM=OFF \
+-        -DUSE_LIBHYPHEN=OFF \
+-        -DUSE_LIBDRM=OFF \
+-        -DUSE_JPEGXL=OFF \
+-        -DUSE_LIBBACKTRACE=OFF \
+-        -DUSE_SKIA_OPENTYPE_SVG=OFF \
+-        -DUSE_SYSPROF_CAPTURE=OFF \
 -        -DENABLE_WEBDRIVER=ON \
-+        -DENABLE_WEBDRIVER=OFF \
-         -DENABLE_WPE_PLATFORM=ON \
-+        -DENABLE_WPE_LEGACY_API=ON \
-         -DENABLE_WPE_PLATFORM_DRM=OFF \
-         -DENABLE_WPE_PLATFORM_WAYLAND=OFF \
+-        -DENABLE_WPE_PLATFORM=ON \
+-        -DENABLE_WPE_PLATFORM_DRM=OFF \
+-        -DENABLE_WPE_PLATFORM_WAYLAND=OFF \
 -        -DENABLE_WPE_PLATFORM_HEADLESS=ON \
-+        -DENABLE_WPE_PLATFORM_HEADLESS=OFF \
-         -DENABLE_SWIFT_DEMO_URI_SCHEME=OFF \
-         -DENABLE_BACK_FORWARD_LIST_SWIFT=OFF \
-+        -DCMAKE_CXX_FLAGS=-I%(prefix)s/include/gio-unix-2.0 \
+-        -DENABLE_SWIFT_DEMO_URI_SCHEME=OFF \
+-        -DENABLE_BACK_FORWARD_LIST_SWIFT=OFF \
          -DCMAKE_BUILD_TYPE=Release \
          -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON \
++        -DCMAKE_CXX_FLAGS=-I%(prefix)s/include/gio-unix-2.0 \
      '
-@@ -80,11 +92,11 @@ class Recipe(recipe.Recipe):
++    configure_options += ' ' + os.environ['OOS_WPE_FEATURE_OPTIONS']
+     cmake_generator = 'ninja'
  
      patches = [
          'wpewebkit/0001-WPE-Decouple-touch-driven-scrolling-unconditionally.patch',

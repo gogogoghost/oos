@@ -67,23 +67,23 @@ Radio, or media dependency graph during launcher startup.
 
 ## Current Matrix
 
-| Feature | Nokia 2780 Flip | Nokia 8110 4G |
-| --- | --- | --- |
-| Primary GPU display | validated, HWC2/HIDL | validated, HWC1 |
-| Secondary display | validated, mutually exclusive fb1 | unsupported |
-| Key input | validated evdev | validated evdev |
-| Speaker/microphone | validated AAudio | validated OpenSL ES |
-| Camera/torch | validated HAL1 over HIDL | validated direct HAL1/sysfs |
-| Vibration | validated HIDL | validated legacy HAL |
-| Battery/wake locks | validated | validated |
-| Deep suspend | implemented, unplugged cycle pending | implemented, unplugged cycle pending |
-| RTC wake | validated | implemented, final lifecycle pending |
-| Wi-Fi/static IP | validated | validated |
-| Classic Bluetooth/BLE scan | validated | validated, b2g48 daemon protocol |
-| Modem read-only snapshot | validated Radio HIDL | validated RIL socket |
-| Hardware H.264 codec | validated | planned |
-| Location/sensors/FM | planned | planned |
-| NFC | unsupported | unsupported |
+| Feature | Nokia 2780 Flip | Nokia 8110 4G | Local |
+| --- | --- | --- | --- |
+| Primary display | validated, HWC2/HIDL | validated, HWC1 | validated, SDL/llvmpipe GLES |
+| Secondary display | validated, mutually exclusive fb1 | unsupported | unsupported |
+| Key input | validated evdev | validated evdev | validated, configured SDL map |
+| Speaker/microphone | validated AAudio | validated OpenSL ES | deterministic mock |
+| Camera/torch | validated HAL1 over HIDL | validated direct HAL1/sysfs | deterministic mock |
+| Vibration | validated HIDL | validated legacy HAL | deterministic mock |
+| Battery/wake locks | validated | validated | deterministic mock |
+| Deep suspend | implemented, unplugged cycle pending | implemented, unplugged cycle pending | deterministic mock |
+| RTC wake | validated | implemented, final lifecycle pending | deterministic mock |
+| Wi-Fi/static IP | validated | validated | deterministic mock |
+| Classic Bluetooth/BLE scan | validated | validated, b2g48 daemon protocol | deterministic mock |
+| Modem read-only snapshot | validated Radio HIDL | validated RIL socket | deterministic mock |
+| Hardware H.264 codec | validated | planned | deterministic mock |
+| Location/sensors/FM | planned | planned | unsupported |
+| NFC | unsupported | unsupported | unsupported |
 
 The source of truth is each backend's `Device::capability()` implementation;
 this table documents the current state rather than replacing runtime checks.

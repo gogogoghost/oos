@@ -1,31 +1,31 @@
 #include "oos/device/device.h"
 
-#include "oos/input/key_input.h"
-#include "oos/nokia2780/primary_gles_display.h"
+#include "oos/local/local_display.h"
+#include "oos/local/local_key_input.h"
 
 #include <cassert>
+#include <cstdlib>
 #include <memory>
-#include <utility>
 
 namespace oos::device {
 namespace {
 
 constexpr DeviceDescriptor kDescriptor = {
-    "nokia-2780-flip", "Nokia", "2780 Flip", 29, 240, 320, 128, 160};
+    "local", "OOS", "Local Test Device", 0, 240, 320, 0, 0};
 
 constexpr ServiceConfiguration kServices = {
-    "/dev/input",
-    "/data/vendor/wifi/wpa/sockets/wlan0",
-    "bluetoothd_socket1",
-    "slot1",
-    "default",
-    "default",
-    "0",
+    "local",      "mock:wlan0",    "mock:bluetooth", "mock:modem",
+    "mock:power", "mock:vibrator", "mock:camera",    true,
 };
 
-class Nokia2780Device final : public Device {
+const char *keymapPath() {
+  const char *configured = std::getenv("OOS_LOCAL_KEYMAP");
+  return configured && configured[0] ? configured : OOS_LOCAL_DEFAULT_KEYMAP;
+}
+
+class LocalDevice final : public Device {
 public:
-  ~Nokia2780Device() override { shutdown(); }
+  ~LocalDevice() override { shutdown(); }
 
   const DeviceDescriptor &descriptor() const override { return kDescriptor; }
   const ServiceConfiguration &services() const override { return kServices; }
@@ -33,7 +33,6 @@ public:
   CapabilityState capability(Feature feature) const override {
     switch (feature) {
     case Feature::PrimaryDisplay:
-    case Feature::SecondaryDisplay:
     case Feature::KeyInput:
     case Feature::AudioPlayback:
     case Feature::AudioCapture:
@@ -41,6 +40,7 @@ public:
     case Feature::Torch:
     case Feature::Vibration:
     case Feature::Battery:
+    case Feature::Suspend:
     case Feature::RtcWake:
     case Feature::Wifi:
     case Feature::IpConfiguration:
@@ -49,12 +49,10 @@ public:
     case Feature::Modem:
     case Feature::HardwareVideoCodec:
       return CapabilityState::Validated;
-    case Feature::Suspend:
-      return CapabilityState::Implemented;
+    case Feature::SecondaryDisplay:
     case Feature::Location:
     case Feature::Sensors:
     case Feature::FmRadio:
-      return CapabilityState::Planned;
     case Feature::Nfc:
     case Feature::Count:
       return CapabilityState::Unsupported;
@@ -63,37 +61,32 @@ public:
   }
 
   bool initialize(const DeviceInitOptions &options) override {
-    bool display_started = false;
     if (options.primary_display && !display_ready_) {
       if (!display_.initialize()) {
-        error_ = "initialize primary display failed";
+        error_ = "initialize local SDL/OpenGL display failed";
         return false;
       }
       display_ready_ = true;
-      display_started = true;
     }
-    if (options.key_input && !input_) {
-      auto key_input = std::make_unique<input::KeyInput>(input::KeyInputOptions{
-          options.grab_input,
-      });
-      if (!key_input->initialize(kServices.input_directory)) {
-        error_ = "initialize key input failed";
-        if (display_started) {
+    if (options.key_input && !input_ready_) {
+      if (!input_.initialize(keymapPath())) {
+        error_ = input_.lastError();
+        if (display_ready_) {
           display_.shutdown();
           display_ready_ = false;
         }
         return false;
       }
-      input_ = std::move(key_input);
+      input_ready_ = true;
     }
     error_.clear();
     return true;
   }
 
   void shutdown() override {
-    if (input_) {
-      input_->shutdown();
-      input_.reset();
+    if (input_ready_) {
+      input_.shutdown();
+      input_ready_ = false;
     }
     if (display_ready_) {
       display_.shutdown();
@@ -101,26 +94,30 @@ public:
     }
   }
 
-  Display &display() override { return display_; }
+  Display &display() override {
+    assert(display_ready_);
+    return display_;
+  }
 
   input::KeyInputSource &keyInput() override {
-    assert(input_);
-    return *input_;
+    assert(input_ready_);
+    return input_;
   }
 
   const std::string &lastError() const override { return error_; }
 
 private:
-  nokia2780::PrimaryGlesDisplay display_;
-  std::unique_ptr<input::KeyInput> input_;
+  local::LocalDisplay display_;
+  local::LocalKeyInput input_;
   bool display_ready_ = false;
+  bool input_ready_ = false;
   std::string error_;
 };
 
 } // namespace
 
 std::unique_ptr<Device> createDevice() {
-  return std::make_unique<Nokia2780Device>();
+  return std::make_unique<LocalDevice>();
 }
 
 } // namespace oos::device

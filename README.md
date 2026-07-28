@@ -20,6 +20,8 @@ no longer the system Launcher runtime.
   point and event loop.
 - `system/devices/nokia-2780-flip`: Android 10/HWC2 platform implementation.
 - `system/devices/nokia-8110-4g`: Android 6/HWC1 platform implementation.
+- `system/devices/local`: 240x320 SDL/llvmpipe test device with deterministic
+  hardware mocks and configurable host-key mapping.
 - `apps/sdk/wit/oos.wit`: versioned application interface source of truth.
 - `apps/sdk/rust`: generated Rust bindings and reusable framework adapters.
 - `apps/web-launcher`: retained Solid.js/WPE prototype for KaiOS web-app work.
@@ -53,8 +55,9 @@ configuring one target cannot silently replace the other target's sysroot.
 
 Set `WPE_DISTROBOX=oos-debian12` to build WPE/Cerbero inside the Debian 12
 Distrobox. Leave it unset to build in the current environment.
-`WPE_BUILD_JOBS` optionally caps parallel compilation; it defaults to all
-available CPU threads.
+`WPE_BUILD_JOBS` optionally caps parallel compilation. Android uses its
+device-profile default (or the available CPU count); the local build defaults
+to at most six jobs because WebCore unified sources have high peak memory use.
 
 WAMR builds locally by default. Set `OOS_WAMR_DISTROBOX=oos-debian12` when a
 compatible LLVM is provided by that container. WAMR 2.4.4 is currently built
@@ -72,6 +75,28 @@ make system DEVICE=nokia-2780-flip
 make system DEVICE=nokia-8110-4g
 ```
 
+The WPE source archives and Android Cerbero checkout are pinned in
+`third_party/versions.env`. `make fetch-wpe` downloads and verifies them.
+Every platform consumes `system/config/wpe/features.conf`; device patches may
+adapt toolchains, dependencies, or GPU-buffer ABIs but must not change WebKit
+capabilities.
+
+Build and run the local device through its isolated rootfs with:
+
+```sh
+make run-local
+make run-web-local
+```
+
+Both commands first build the pinned WPE sysroot with the native install prefix
+`/opt/oos`, package the WIT and Web launchers, then enter the rootfs through an
+unprivileged bubblewrap user namespace. `proot` is the fallback when
+bubblewrap is unavailable. The namespace uses a synthetic `/dev` and software
+Mesa, so no physical host device nodes are exposed.
+Local rootfs packaging also generates a GStreamer plugin registry for the
+bound host `/usr`. The runner disables registry updates inside the read-only
+namespace, avoiding a blocking plugin rescan on every WPE WebProcess startup.
+
 The outputs are:
 
 - `build/android-nokia-2780-flip/bin/oos`: production executable.
@@ -83,6 +108,7 @@ The outputs are:
 - `build/android-nokia-8110-4g/bin/oos`: Nokia 8110 production executable.
 - `build/wpe-sysroot/nokia-2780-flip`: isolated Android 10 WPE sysroot.
 - `build/wpe-sysroot/nokia-8110-4g`: isolated Android 6 WPE sysroot.
+- `build/wpe-sysroot/local-root`: local rootfs containing `/opt/oos`.
 
 The KaiOS performance profile deliberately retains JavaScriptCore Baseline and
 DFG JIT plus WebAssembly BBQ JIT. FTL/OMG remain disabled because WebKit does
@@ -100,10 +126,12 @@ make system DEVICE=nokia-2780-flip \
 
 ## Display Tests
 
-WPE never owns a display connection. Its isolated producer process transfers
-GPU buffers to the OOS host over the common surface transport. Native/WASM
-applications and received WPE surfaces are composed only by the OOS host;
-only the selected device backend can access HWC, panel power, and backlights.
+WPE never owns the host display connection. On hardware, its isolated producer
+transfers GPU buffers to the OOS host over the common surface transport. On
+`local`, WPEBackend-fdo lends each SHM frame to `WpeSurfaceHost` in the OOS Web
+runner. Native/WASM applications and received WPE surfaces are routed only
+through the OOS compositor; only the selected device backend can access the
+SDL window or hardware HWC, panel power, and backlights.
 Run the shared WPE compositor smoke test with:
 
 ```sh

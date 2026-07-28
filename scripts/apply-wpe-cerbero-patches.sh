@@ -9,11 +9,17 @@ PATCH_FILES=(
   "$ROOT_DIR/system/patches/wpe-android-cerbero-use-installed-ndk.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-buffer.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-tasn1.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-context-menus-off.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-libdrm-off.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-context-menus-link.patch"
 )
 SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-kaios-gio-unix.patch:recipes/wpewebkit/0002-KaiOS-Android-use-GioUnix.patch"
   "$ROOT_DIR/system/patches/wpewebkit-kaios-android-armv7-jit.patch:recipes/wpewebkit/0003-KaiOS-Android-ARMv7-JIT.patch"
   "$ROOT_DIR/system/patches/wpewebkit-kaios-android23-buffer.patch:recipes/wpewebkit/0004-KaiOS-Android23-legacy-buffer.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-build.patch:recipes/wpewebkit/0005-OOS-context-menus-off-build.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-libdrm-off-build.patch:recipes/wpewebkit/0006-OOS-libdrm-off-build.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch:recipes/wpewebkit/0007-OOS-context-menus-off-link-build.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-gralloc0.patch:recipes/wpebackend-android/0001-OOS-RGB565-and-Android23-buffer.patch"
   "$ROOT_DIR/system/patches/libtasn1-android-opaque-file.patch:recipes/libtasn1/0002-Android-opaque-FILE.patch"
 )
@@ -40,17 +46,29 @@ for patch_file in "${PATCH_FILES[@]}"; do
     git -C "$CERBERO_DIR" apply "$patch_file"
     echo "Applied Cerbero patch: $(basename "$patch_file")"
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-kaios-minimal.patch ]] && \
-       rg -q -- '-DENABLE_WPE_LEGACY_API=ON' "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
-    echo "Cerbero patch has the current legacy-backend configuration."
+       rg -q -- "OOS_WPE_FEATURE_OPTIONS" "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero patch has the shared feature-profile bridge."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-kaios-performance.patch ]] && \
-       rg -q -- '-DENABLE_DFG_JIT=ON' "$CERBERO_DIR/recipes/wpewebkit.recipe" && \
-       rg -q -- '-DENABLE_WEBASSEMBLY=ON' "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
-    echo "Cerbero patch has the current JIT/WebAssembly configuration."
+       rg -q -- '0003-KaiOS-Android-ARMv7-JIT.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero patch has the ARMv7 JIT compiler compatibility patch."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-android23-buffer.patch ]] && \
        rg -q -- 'OOS_ANDROID_LEGACY_BUFFER_LIBRARY' \
          "$CERBERO_DIR/recipes/wpewebkit.recipe" \
          "$CERBERO_DIR/recipes/wpebackend-android.recipe"; then
     echo "Cerbero patch has the Android 23 buffer compatibility configuration."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-context-menus-off.patch ]] && \
+       rg -q -- '0005-OOS-context-menus-off-build.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe has the context-menu compile fix."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-libdrm-off.patch ]] && \
+       rg -q -- '0006-OOS-libdrm-off-build.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe has the libdrm-disabled compile fix."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-context-menus-link.patch ]] && \
+       rg -q -- '0007-OOS-context-menus-off-link-build.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe has the context-menu link fix."
   else
     echo "Cerbero checkout does not match $patch_file." >&2
     exit 1
