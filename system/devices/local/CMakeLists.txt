@@ -30,8 +30,7 @@ target_link_libraries(oos_local_platform PUBLIC
 add_library(oos::platform ALIAS oos_local_platform)
 
 target_compile_definitions(oos PRIVATE
-  OOS_DEFAULT_BOOT_SPLASH="${CMAKE_SOURCE_DIR}/assets/boot/nokia-2780-flip/boot-splash.png"
-  OOS_DEFAULT_LAUNCHER_MODULE="${OOS_REPO_ROOT}/build/native-apps/launcher.wasm")
+  OOS_DEFAULT_BOOT_SPLASH="${CMAKE_SOURCE_DIR}/assets/boot/nokia-2780-flip/boot-splash.png")
 target_link_libraries(oos PRIVATE
   oos::platform
   oos_wasm_runtime
@@ -63,9 +62,13 @@ if(OOS_LOCAL_WPE)
   add_library(oos::web ALIAS oos_wpe_surface_host)
 
   add_executable(oos-web-local src/web_runner.cpp)
+  target_sources(oos-web-local PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
   target_include_directories(oos-web-local PRIVATE ${OOS_LOCAL_WPE_INCLUDES})
   target_link_libraries(oos-web-local PRIVATE
     oos::platform oos::compositor oos::web
+    oos_app_model
     ${OOS_LOCAL_WPE_LIBRARIES} PkgConfig::OOS_LOCAL_WPE_HOST)
   target_link_options(oos-web-local PRIVATE
     "-Wl,-rpath-link,${OOS_LOCAL_WPE_SYSROOT}/lib")

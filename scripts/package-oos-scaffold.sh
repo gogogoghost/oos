@@ -70,6 +70,7 @@ install -m 0755 "$TEMPLATE_DIR/activate-res.sh" "$STAGING/activate-res.sh"
 install -m 0755 "$TEMPLATE_DIR/init.sh" "$STAGING/init.sh"
 install -m 0755 "$TEMPLATE_DIR/deinit.sh" "$STAGING/deinit.sh"
 install -m 0755 "$TEMPLATE_DIR/start.sh" "$STAGING/start.sh"
+install -m 0755 "$TEMPLATE_DIR/gc-res.sh" "$STAGING/gc-res.sh"
 
 mkdir -p "$STAGING/rootfs/system" \
   "$STAGING/rootfs/vendor" \
@@ -88,18 +89,26 @@ ln -s /opt/oos \
   "$STAGING/rootfs/home/jax/project/oos/build/wpe-sysroot/$DEVICE"
 
 case "$DEVICE" in
-  nokia-2780-flip) HWC_SERVICE=vendor.hwcomposer-2-1 ;;
-  nokia-8110-4g) HWC_SERVICE= ;;
+  nokia-2780-flip)
+    HWC_SERVICE=vendor.hwcomposer-2-1
+    REMOVABLE_STORAGE=/storage/sdcard1
+    ;;
+  nokia-8110-4g)
+    HWC_SERVICE=
+    REMOVABLE_STORAGE=/storage/sdcard
+    ;;
 esac
 
 printf '%s\n' \
-  "OOS_SCAFFOLD_FORMAT=1" \
+  "OOS_SCAFFOLD_FORMAT=2" \
   "OOS_DEVICE=$DEVICE" \
   "OOS_HWC_SERVICE=$HWC_SERVICE" \
+  "OOS_INTERNAL_STORAGE=/storage/emulated/0" \
+  "OOS_REMOVABLE_STORAGE_CANDIDATES=$REMOVABLE_STORAGE" \
   > "$STAGING/bootstrap.conf"
 
 printf '%s\n' \
-  "format=1" \
+  "format=2" \
   "type=oos-scaffold" \
   "device=$DEVICE" \
   "default_res=$RES_VERSION" \

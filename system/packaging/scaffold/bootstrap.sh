@@ -17,6 +17,10 @@ fi
 
 # bootstrap.conf is part of the trusted, read-only scaffold package.
 . "$OOS_HOME/bootstrap.conf"
+if [ "${OOS_SCAFFOLD_FORMAT:-}" != 2 ]; then
+  echo "unsupported OOS scaffold format: ${OOS_SCAFFOLD_FORMAT:-missing}" >&2
+  exit 1
+fi
 
 is_mounted() {
   grep -q " $1 " /proc/mounts 2>/dev/null
@@ -57,6 +61,13 @@ resolve_res() {
   require_file "$OOS_RES_DIR/SHA256SUMS" || return 1
   require_file "$OOS_RES_DIR/bin/oos" || return 1
   require_file "$OOS_RES_DIR/lib/libc++_shared.so" || return 1
+  require_file \
+    "$OOS_RES_DIR/packages/org.orangeos.launcher/application.zip" || return 1
+  if ! grep -q '^format=2$' "$OOS_RES_DIR/manifest.env" ||
+      ! grep -q '^type=oos-res$' "$OOS_RES_DIR/manifest.env"; then
+    echo "res package has an unsupported manifest format" >&2
+    return 1
+  fi
   expected_complete=$(cat "$OOS_RES_DIR/COMPLETE")
   actual_complete=$(sha256sum "$OOS_RES_DIR/SHA256SUMS" | awk '{print $1}')
   if [ "$expected_complete" != "$actual_complete" ]; then
@@ -71,29 +82,56 @@ resolve_res() {
 
 acquire_bootstrap_lock() {
   mkdir -p "$OOS_STATE_DIR"
-  lock_dir="$OOS_STATE_DIR/$1.lock"
+  lock_dir="$OOS_STATE_DIR/lifecycle.lock"
+  if [ -n "${OOS_LOCK_OWNER:-}" ] &&
+      [ "$(cat "$lock_dir/pid" 2>/dev/null || true)" = "$OOS_LOCK_OWNER" ]; then
+    OOS_LOCK_DIR=
+    return 0
+  fi
   if mkdir "$lock_dir" 2>/dev/null; then
     echo $$ > "$lock_dir/pid"
     OOS_LOCK_DIR="$lock_dir"
+    OOS_LOCK_OWNER=$$
+    export OOS_LOCK_OWNER
     return 0
   fi
 
   lock_pid=$(cat "$lock_dir/pid" 2>/dev/null || true)
   if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
-    echo "$1 is already running with pid $lock_pid" >&2
+    echo "OOS lifecycle operation is already running with pid $lock_pid" >&2
     return 1
   fi
   rm -rf "$lock_dir"
   mkdir "$lock_dir"
   echo $$ > "$lock_dir/pid"
   OOS_LOCK_DIR="$lock_dir"
+  OOS_LOCK_OWNER=$$
+  export OOS_LOCK_OWNER
 }
 
 release_bootstrap_lock() {
   if [ -n "${OOS_LOCK_DIR:-}" ]; then
     rm -rf "$OOS_LOCK_DIR"
     OOS_LOCK_DIR=
+    OOS_LOCK_OWNER=
+    export OOS_LOCK_OWNER
   fi
+}
+
+oos_pid_running() {
+  candidate_pid=$1
+  [ -n "$candidate_pid" ] || return 1
+  kill -0 "$candidate_pid" 2>/dev/null || return 1
+  command_line=$(tr '\000' ' ' < "/proc/$candidate_pid/cmdline" 2>/dev/null || true)
+  case "$command_line" in
+    *"/opt/oos/bin/oos"*|*"/bin/oos"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+path_is_mounted() {
+  awk -v path="$1" '$2 == path { found=1 } END { exit !found }' \
+    /proc/mounts 2>/dev/null
 }
 
 wait_for_service() {

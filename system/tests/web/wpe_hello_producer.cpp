@@ -6,17 +6,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <unistd.h>
 
 #include "oos/compositor/surface.h"
 #include "oos/compositor/surface_transport.h"
+#include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_surface_host.h"
 
 extern "C" {
 typedef struct _WebKitWebViewBackend WebKitWebViewBackend;
 WebKitWebViewBackend *webkit_web_view_backend_new(struct wpe_view_backend *,
                                                   GDestroyNotify, gpointer);
-WebKitWebView *webkit_web_view_new(WebKitWebViewBackend *);
 void webkit_web_view_load_html(WebKitWebView *, const gchar *, const gchar *);
 }
 
@@ -134,7 +135,20 @@ int main() {
 
   auto *wrapped = webkit_web_view_backend_new(
       surface.viewBackend(), keepBackendOwnedByProducer, nullptr);
-  auto *view = webkit_web_view_new(wrapped);
+  const char *data_root = environmentOr("OOS_DATA_ROOT", "/data");
+  const char *app_id =
+      environmentOr("OOS_WEB_APP_ID", "org.orangeos.wpe-smoke");
+  const std::string data_directory =
+      std::string(data_root) + "/users/0/web/" + app_id + "/data";
+  const std::string cache_directory =
+      std::string(data_root) + "/cache/web/" + app_id + "/webkit-2.52";
+  oos::web::WpeAppProfile profile(app_id, data_directory, cache_directory);
+  if (!profile.initialize()) {
+    std::fprintf(stderr, "failed to initialize WPE app profile: %s\n",
+                 profile.lastError().c_str());
+    return 1;
+  }
+  auto *view = profile.createView(wrapped);
   if (!view) {
     std::fprintf(stderr, "failed to create WPE WebKit view\n");
     return 1;

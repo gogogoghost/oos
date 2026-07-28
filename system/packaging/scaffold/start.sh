@@ -10,7 +10,7 @@ trap 'release_bootstrap_lock' 0
 
 if [ -f "$OOS_PID_FILE" ]; then
   existing_pid=$(cat "$OOS_PID_FILE" 2>/dev/null || true)
-  if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+  if oos_pid_running "$existing_pid"; then
     echo "OOS is already running with pid $existing_pid" >&2
     exit 1
   fi
@@ -37,10 +37,10 @@ release_bootstrap_lock
 trap - 0
 
 export OOS_RES_VERSION=$(sed -n 's/^version=//p' "$OOS_RES_DIR/manifest.env")
-export HOME=/data
+export HOME=/data/users/0/system
 export TMPDIR=/data/tmp
-export XDG_CACHE_HOME=/data/cache
-export XDG_DATA_HOME=/data/share
+export XDG_CACHE_HOME=/data/cache/system
+export XDG_DATA_HOME=/data/users/0/system/share
 export LD_LIBRARY_PATH=/opt/oos/lib:/apex/com.android.runtime/lib:/system/lib:/vendor/lib
 export WEBKIT_EXEC_PATH=/opt/oos/libexec/wpe-webkit-2.0
 export WEBKIT_INJECTED_BUNDLE_PATH=/opt/oos/lib/wpe-webkit-2.0/injected-bundle
@@ -50,14 +50,11 @@ export GST_PLUGIN_SYSTEM_PATH=/opt/oos/lib/gstreamer-1.0
 export FONTCONFIG_FILE=/opt/oos/etc/fonts/fonts.conf
 export SSL_CERT_FILE=/opt/oos/etc/ssl/certs/ca-certificates.crt
 
-mkdir -p "$OOS_PERSIST_DIR/tmp" "$OOS_PERSIST_DIR/cache" \
-  "$OOS_PERSIST_DIR/share"
+mkdir -p "$OOS_PERSIST_DIR/tmp" "$OOS_PERSIST_DIR/cache/system" \
+  "$OOS_PERSIST_DIR/users/0/system/share"
 
 chroot "$OOS_ROOTFS" /system/bin/sh -c \
-  'if [ "$#" -eq 0 ] && [ -f /opt/oos/apps/launcher.aot ]; then
-     exec /opt/oos/bin/oos /opt/oos/apps/launcher.aot
-   fi
-   exec /opt/oos/bin/oos "$@"' oos "$@" &
+  'exec /opt/oos/bin/oos "$@"' oos "$@" &
 oos_pid=$!
 echo "$oos_pid" > "$OOS_PID_FILE"
 

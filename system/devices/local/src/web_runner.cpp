@@ -1,7 +1,10 @@
+#include "oos/apps/app_repository.h"
 #include "oos/compositor/compositor.h"
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
+#include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_surface_host.h"
+#include "oos/web/zip_app_source.h"
 
 #include <glib-unix.h>
 #include <glib.h>
@@ -13,12 +16,12 @@
 #include <cstring>
 #include <memory>
 #include <signal.h>
+#include <string>
 
 extern "C" {
 typedef struct _WebKitWebViewBackend WebKitWebViewBackend;
 WebKitWebViewBackend *webkit_web_view_backend_new(wpe_view_backend *,
                                                   GDestroyNotify, gpointer);
-WebKitWebView *webkit_web_view_new(WebKitWebViewBackend *);
 }
 
 namespace {
@@ -107,8 +110,8 @@ char *appUri(const char *path) {
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc > 2) {
-    std::fprintf(stderr, "usage: %s [APP.html|URI]\n", argv[0]);
+  if (argc > 3 || (argc == 3 && std::strcmp(argv[1], "--app") != 0)) {
+    std::fprintf(stderr, "usage: %s [APP.html|URI | --app APP_ID]\n", argv[0]);
     return 2;
   }
   const char *configured = std::getenv("OOS_WEB_APP");
@@ -116,6 +119,28 @@ int main(int argc, char **argv) {
                      : configured && configured[0]
                          ? configured
                          : "/opt/oos/apps/web-launcher/index.html";
+  const char *data_root = std::getenv("OOS_DATA_ROOT");
+  data_root = data_root && data_root[0] ? data_root : "/data";
+  const char *configured_id = std::getenv("OOS_WEB_APP_ID");
+  const char *app_id = argc == 3 ? argv[2]
+                       : configured_id && configured_id[0]
+                           ? configured_id
+                           : "org.orangeos.web-local";
+  oos::apps::AppLaunch registered_app;
+  std::unique_ptr<oos::apps::AppRepository> repository;
+  const bool use_registered_app =
+      argc == 3 || (configured_id && configured_id[0]);
+  if (use_registered_app) {
+    repository = std::make_unique<oos::apps::AppRepository>(data_root);
+    if (!repository->initialize() ||
+        !repository->prepareLaunch(app_id, registered_app) ||
+        registered_app.app.manifest.runtime_kind !=
+            oos::apps::RuntimeKind::Wpe) {
+      std::fprintf(stderr, "failed to prepare WPE application %s: %s\n", app_id,
+                   repository->lastError().c_str());
+      return 1;
+    }
+  }
 
   std::unique_ptr<oos::device::Device> device = oos::device::createDevice();
   if (!device || !device->initialize()) {
@@ -134,7 +159,35 @@ int main(int argc, char **argv) {
 
   WebKitWebViewBackend *wrapped = webkit_web_view_backend_new(
       surface.viewBackend(), keepBackendOwnedByRunner, nullptr);
-  WebKitWebView *view = webkit_web_view_new(wrapped);
+  const std::string data_directory =
+      use_registered_app
+          ? registered_app.data_directory + "/data"
+          : std::string(data_root) + "/users/0/web/" + app_id + "/data";
+  const std::string cache_directory =
+      use_registered_app
+          ? registered_app.cache_directory
+          : std::string(data_root) + "/cache/web/" + app_id + "/webkit-2.52";
+  WebKitWebContext *web_context = webkit_web_context_get_default();
+  std::unique_ptr<oos::web::ZipAppSource> zip_source;
+  std::string registered_uri;
+  if (use_registered_app) {
+    zip_source = std::make_unique<oos::web::ZipAppSource>(
+        app_id, registered_app.app.package_path);
+    if (!zip_source->initialize(web_context)) {
+      std::fprintf(stderr, "failed to open WPE ZIP application: %s\n",
+                   zip_source->lastError().c_str());
+      return 1;
+    }
+    registered_uri = zip_source->uriFor(registered_app.app.manifest.entrypoint);
+    path = registered_uri.c_str();
+  }
+  oos::web::WpeAppProfile profile(app_id, data_directory, cache_directory);
+  if (!profile.initialize()) {
+    std::fprintf(stderr, "failed to initialize WPE app profile: %s\n",
+                 profile.lastError().c_str());
+    return 1;
+  }
+  WebKitWebView *view = profile.createView(wrapped);
   char *uri = appUri(path);
   if (!view || !uri) {
     if (view)

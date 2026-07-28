@@ -6,11 +6,6 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TARGET=wasm32-unknown-unknown
 APPS_TARGET_DIR="$ROOT_DIR/build/cargo"
 
-if ! command -v wasm-tools >/dev/null 2>&1; then
-  echo "wasm-tools is required to build WIT component artifacts." >&2
-  exit 1
-fi
-
 CARGO_TARGET_DIR="$APPS_TARGET_DIR" cargo build \
   --manifest-path "$ROOT_DIR/apps/Cargo.toml" \
   --target "$TARGET" \
@@ -37,7 +32,11 @@ if ! cmp -s "$SMOKE_SOURCE" "$SMOKE_DESTINATION"; then
 fi
 
 COMPONENT_DESTINATION="$ROOT_DIR/build/native-apps/launcher.component.wasm"
-wasm-tools component new "$DESTINATION" -o "$COMPONENT_DESTINATION"
-wasm-tools validate "$COMPONENT_DESTINATION"
-
-echo "Built $DESTINATION, $COMPONENT_DESTINATION, and $SMOKE_DESTINATION"
+if command -v wasm-tools >/dev/null 2>&1; then
+  wasm-tools component new "$DESTINATION" -o "$COMPONENT_DESTINATION"
+  wasm-tools validate "$COMPONENT_DESTINATION"
+  echo "Built $DESTINATION, $COMPONENT_DESTINATION, and $SMOKE_DESTINATION"
+else
+  echo "Built $DESTINATION and $SMOKE_DESTINATION"
+  echo "wasm-tools is unavailable; skipped the optional Component Model artifact" >&2
+fi

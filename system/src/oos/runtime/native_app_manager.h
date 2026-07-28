@@ -14,6 +14,13 @@ namespace oos::runtime {
 
 class GraphicsHost;
 
+struct NativeAppLaunchOptions {
+  const char *module_path = nullptr;
+  const char *data_directory = nullptr;
+  uint32_t stack_size = 128 * 1024;
+  uint32_t heap_size = 4 * 1024 * 1024;
+};
+
 class NativeAppManager {
 public:
   static constexpr size_t kDefaultResidentLimit = 3;
@@ -30,6 +37,7 @@ public:
   NativeAppManager &operator=(const NativeAppManager &) = delete;
 
   bool load(const char *id, const char *module_path);
+  bool load(const char *id, const NativeAppLaunchOptions &options);
   bool activate(const char *id);
   bool remove(const char *id);
   bool dispatchKey(const input::KeyEvent &event, int64_t monotonic_us);

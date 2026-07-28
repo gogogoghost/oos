@@ -36,6 +36,11 @@ if(BUILD_NOKIA_8110_4G)
   # Android 6 libc++ predates the C++17 aligned allocation entry points.
   add_compile_definitions(_LIBCPP_HAS_NO_ALIGNED_ALLOCATION)
 endif()
+if(NOT BUILD_LOCAL)
+  # Device binaries link the stock KaiOS libc++, whose ABI namespace is __1.
+  # Keep generic libraries and device adapters on the same C++ ABI.
+  add_compile_definitions(_LIBCPP_ABI_NAMESPACE=__1)
+endif()
 
 if(NOT BUILD_LOCAL AND (NOT SYSTEM_DIR OR NOT EXISTS "${SYSTEM_DIR}/lib/libc++.so"))
   message(FATAL_ERROR
@@ -72,6 +77,19 @@ target_include_directories(oos_compositor PUBLIC
 target_link_libraries(oos_compositor PUBLIC oos_device_api)
 add_library(oos::compositor ALIAS oos_compositor)
 
+add_library(oos_app_model STATIC
+  src/oos/apps/app_manifest.cpp
+  src/oos/apps/app_repository.cpp
+  src/oos/apps/json.cpp
+  src/oos/apps/zip_archive.cpp
+  src/oos/storage/app_storage.cpp
+  src/oos/storage/filesystem.cpp
+  src/oos/storage/sqlite.cpp)
+target_include_directories(oos_app_model PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(oos_app_model PUBLIC ${CMAKE_DL_LIBS} z)
+add_library(oos::apps ALIAS oos_app_model)
+
 if(NOT BUILD_LOCAL)
   add_library(oos_surface_transport STATIC src/oos/compositor/surface_transport.c)
   target_include_directories(oos_surface_transport PUBLIC
@@ -83,14 +101,14 @@ add_library(oos_wasm_runtime STATIC
   src/oos/runtime/wasm_app.cpp)
 target_include_directories(oos_wasm_runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(oos_wasm_runtime PUBLIC oos_wamr oos_input)
+target_link_libraries(oos_wasm_runtime PUBLIC oos_wamr oos_input oos_app_model)
 
 add_executable(oos src/main.cpp src/runtime.cpp)
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
 if(NOT BUILD_LOCAL)
   target_link_options(oos PRIVATE -nostdlib++)
 endif()
-target_link_libraries(oos PRIVATE oos_device_api oos_compositor)
+target_link_libraries(oos PRIVATE oos_device_api oos_compositor oos_app_model)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

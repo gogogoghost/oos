@@ -76,6 +76,14 @@ policy injects a service provider, those calls return the typed WIT
 `unavailable` error. An implemented device capability alone is not authority
 for an app to use it.
 
+The `storage` interface provides persistent byte-valued KV plus bounded
+prepared SQLite statements. Database handles and statement cursors stay in
+the native host; guests bind/read null, integer, float, text, and blob values
+through validated WIT buffers. Each application receives only its configured
+`/data/users/0/wasm/<app-id>` storage root. Permission enforcement is deferred
+during rooted bring-up, but the app identity is already carried into every
+runtime instance.
+
 ## WAMR And Components
 
 WIT is the interface definition language for the Component Model, but the
@@ -92,12 +100,14 @@ interface model.
 
 ## Execution And Isolation
 
-The res package contains both forms:
+Each native application ZIP can contain both forms:
 
-- `launcher.aot`: ARMv7 AOT output, used in production.
-- `launcher.wasm`: portable core Wasm, retained for WAMR debugging and tests.
-- `launcher.component.wasm`: portable Component Model artifact for compatible
-  runtimes and tooling.
+- `aot/armv7/wamr-2.4.4/app.aot`: used in production.
+- `module/app.wasm`: portable core Wasm fallback and diagnostic form.
+
+The optional `launcher.component.wasm` remains a build/tooling artifact until
+the runtime has a Component Model loader; it is not required in the device
+package.
 
 AOT retains WebAssembly bounds checks and WAMR validation but removes the
 continuous interpreter cost on the Nokia 2780. JIT is deliberately not part

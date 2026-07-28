@@ -77,7 +77,6 @@ package_require_directory "$WPE_SYSROOT/lib"
 package_require_directory "$WPE_SYSROOT/libexec"
 "$ROOT_DIR/scripts/build-native-app-aot.sh"
 package_require_file "$NATIVE_APPS/launcher.wasm"
-package_require_file "$NATIVE_APPS/launcher.component.wasm"
 package_require_file "$NATIVE_APPS/launcher.aot"
 package_require_file "$BOOT_SPLASH"
 package_require_file "$LUCIDE_LICENSE"
@@ -114,13 +113,15 @@ cleanup() {
 trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
-  "$STAGING/apps" "$STAGING/share/oos" "$STAGING/share/licenses/oos" \
+  "$STAGING/packages/org.orangeos.launcher" \
+  "$STAGING/share/oos" "$STAGING/share/licenses/oos" \
   "$STAGING/etc"
 
-install -m 0644 "$NATIVE_APPS/launcher.wasm" "$STAGING/apps/launcher.wasm"
-install -m 0644 "$NATIVE_APPS/launcher.component.wasm" \
-  "$STAGING/apps/launcher.component.wasm"
-install -m 0644 "$NATIVE_APPS/launcher.aot" "$STAGING/apps/launcher.aot"
+"$ROOT_DIR/scripts/package-oos-wasm-app.sh" \
+  --manifest "$ROOT_DIR/apps/launcher/oos-manifest.json" \
+  --wasm "$NATIVE_APPS/launcher.wasm" \
+  --aot "$NATIVE_APPS/launcher.aot" \
+  --output "$STAGING/packages/org.orangeos.launcher/application.zip"
 install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
 install -m 0644 "$LUCIDE_LICENSE" \
   "$STAGING/share/licenses/oos/Lucide.txt"
@@ -217,7 +218,7 @@ done
 echo "Packaged and stripped ${#ELF_QUEUE[@]} runtime ELF files"
 
 printf '%s\n' \
-  "format=1" \
+  "format=2" \
   "type=oos-res" \
   "version=$VERSION" \
   "device=$DEVICE" \
@@ -229,7 +230,7 @@ printf '%s\n' \
   "webassembly_jit=bbq" \
   "native_app_runtime=wamr-2.4.4" \
   "native_app_execution=aot" \
-  "native_app_interface=wit-component-model-0.1.0" \
+  "native_app_interface=oos-wit-0.1.0-core" \
   "launcher_framework=egui-0.35" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \

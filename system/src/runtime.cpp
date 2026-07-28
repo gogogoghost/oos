@@ -4,11 +4,13 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "oos/apps/app_repository.h"
 #include "oos/compositor/compositor.h"
 #include "oos/device/device.h"
 #include "oos/device/display.h"
@@ -23,16 +25,19 @@ using oos::device::Device;
 using oos::device::Display;
 using oos::input::KeyEvent;
 using oos::input::KeyInputSource;
+using oos::runtime::NativeAppLaunchOptions;
 using oos::runtime::NativeAppManager;
 
 #ifndef OOS_DEFAULT_BOOT_SPLASH
 #define OOS_DEFAULT_BOOT_SPLASH "/opt/oos/share/oos/boot-splash.png"
 #endif
-#ifndef OOS_DEFAULT_LAUNCHER_MODULE
-#define OOS_DEFAULT_LAUNCHER_MODULE "/opt/oos/apps/launcher.aot"
+#ifndef OOS_DEFAULT_LAUNCHER_PACKAGE
+#define OOS_DEFAULT_LAUNCHER_PACKAGE                                           \
+  "/opt/oos/packages/org.orangeos.launcher/application.zip"
 #endif
 constexpr const char *kDefaultBootSplash = OOS_DEFAULT_BOOT_SPLASH;
-constexpr const char *kDefaultLauncherModule = OOS_DEFAULT_LAUNCHER_MODULE;
+constexpr const char *kDefaultLauncherPackage = OOS_DEFAULT_LAUNCHER_PACKAGE;
+constexpr const char *kDefaultLauncherId = "org.orangeos.launcher";
 constexpr int kFrameIntervalMs = 33;
 
 volatile std::sig_atomic_t g_stop_requested = 0;
@@ -99,16 +104,119 @@ void dispatchKey(void *data, const KeyEvent &event) {
   }
 }
 
+void printUsage(const char *program) {
+  std::fprintf(stderr,
+               "usage: %s [--app APP_ID | --module APP.wasm|APP.aot]\n"
+               "       %s --install APPLICATION.zip [--id APP_ID]\n"
+               "       %s --list-apps\n",
+               program, program, program);
+}
+
+int runRepositoryCommand(int argc, char **argv,
+                         oos::apps::AppRepository &repository) {
+  if ((argc == 3 || argc == 5) && std::strcmp(argv[1], "--install") == 0) {
+    oos::apps::AppInstallOptions options;
+    if (argc == 5) {
+      if (std::strcmp(argv[3], "--id") != 0) {
+        printUsage(argv[0]);
+        return 2;
+      }
+      options.app_id = argv[4];
+    }
+    oos::apps::AppRecord installed;
+    if (!repository.install(argv[2], options, &installed)) {
+      std::fprintf(stderr, "install failed: %s\n",
+                   repository.lastError().c_str());
+      return 1;
+    }
+    std::printf("%s\t%s\t%s\n", installed.manifest.id.c_str(),
+                installed.manifest.version.c_str(),
+                oos::apps::runtimeKindName(installed.manifest.runtime_kind));
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--list-apps") == 0) {
+    std::vector<oos::apps::AppRecord> records;
+    if (!repository.list(records)) {
+      std::fprintf(stderr, "list applications failed: %s\n",
+                   repository.lastError().c_str());
+      return 1;
+    }
+    for (const auto &record : records) {
+      std::printf("%s\t%s\t%s\t%s\n", record.manifest.id.c_str(),
+                  record.manifest.version.c_str(),
+                  oos::apps::runtimeKindName(record.manifest.runtime_kind),
+                  record.enabled ? "enabled" : "disabled");
+    }
+    return 0;
+  }
+  return -1;
+}
+
 } // namespace
 
 int run(int argc, char **argv) {
-  if (argc > 2) {
-    std::fprintf(stderr, "usage: %s [APP.wasm|APP.aot]\n", argv[0]);
+  if (argc > 5) {
+    printUsage(argv[0]);
     return 2;
   }
-  const char *module_path =
-      argc == 2 ? argv[1]
-                : environmentOr("OOS_LAUNCHER_MODULE", kDefaultLauncherModule);
+
+  const char *data_root = environmentOr("OOS_DATA_ROOT", "/data");
+  oos::apps::AppRepository repository(data_root);
+  if (!repository.initialize()) {
+    std::fprintf(stderr, "initialize application repository failed: %s\n",
+                 repository.lastError().c_str());
+    return 1;
+  }
+  const int repository_result = runRepositoryCommand(argc, argv, repository);
+  if (repository_result >= 0)
+    return repository_result;
+
+  const char *raw_module = nullptr;
+  const char *app_id = environmentOr("OOS_LAUNCHER_APP", kDefaultLauncherId);
+  if (argc == 2) {
+    // Keep the original positional module form for existing device diagnostics.
+    raw_module = argv[1];
+  } else if (argc == 3 && std::strcmp(argv[1], "--module") == 0) {
+    raw_module = argv[2];
+  } else if (argc == 3 && std::strcmp(argv[1], "--app") == 0) {
+    app_id = argv[2];
+  } else if (argc != 1) {
+    printUsage(argv[0]);
+    return 2;
+  }
+
+  oos::apps::AppLaunch app_launch;
+  NativeAppLaunchOptions native_launch;
+  if (raw_module) {
+    native_launch.module_path = raw_module;
+  } else {
+    if (!repository.resolve(app_id, app_launch.app) &&
+        std::strcmp(app_id, kDefaultLauncherId) == 0) {
+      const char *bundled =
+          environmentOr("OOS_LAUNCHER_PACKAGE", kDefaultLauncherPackage);
+      if (!repository.install(bundled)) {
+        std::fprintf(stderr, "import bundled Launcher failed: %s\n",
+                     repository.lastError().c_str());
+        return 1;
+      }
+    }
+    if (!repository.prepareLaunch(app_id, app_launch)) {
+      std::fprintf(stderr, "prepare application %s failed: %s\n", app_id,
+                   repository.lastError().c_str());
+      return 1;
+    }
+    if (app_launch.app.manifest.runtime_kind != oos::apps::RuntimeKind::Wamr) {
+      std::fprintf(stderr,
+                   "application %s requires the WPE runner, which is not yet "
+                   "selectable as the system foreground runtime\n",
+                   app_id);
+      return 1;
+    }
+    native_launch.module_path = app_launch.executable_path.c_str();
+    native_launch.data_directory = app_launch.data_directory.c_str();
+    native_launch.stack_size = app_launch.app.manifest.stack_bytes;
+    native_launch.heap_size = app_launch.app.manifest.heap_bytes;
+  }
 
   std::unique_ptr<Device> platform_device = device::createDevice();
   if (!platform_device || !platform_device->initialize()) {
@@ -134,14 +242,15 @@ int run(int argc, char **argv) {
 
   Compositor compositor(display);
   NativeAppManager apps(compositor, *platform_device);
-  if (!apps.load("launcher", module_path) || !apps.activate("launcher")) {
-    std::fprintf(stderr, "failed to start native app %s: %s\n", module_path,
-                 apps.lastError());
+  const char *runtime_id = raw_module ? "diagnostic" : app_id;
+  if (!apps.load(runtime_id, native_launch) || !apps.activate(runtime_id)) {
+    std::fprintf(stderr, "failed to start native app %s: %s\n",
+                 native_launch.module_path, apps.lastError());
     platform_device->shutdown();
     return 1;
   }
   std::fprintf(stderr, "OOS native app started on %s: %s\n", descriptor.id,
-               module_path);
+               native_launch.module_path);
   std::fflush(stderr);
 
   std::signal(SIGINT, stopRuntime);

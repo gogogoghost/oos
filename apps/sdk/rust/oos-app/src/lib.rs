@@ -27,7 +27,7 @@ pub use bindings::oos::platform::graphics::{
 };
 pub use bindings::oos::platform::types::ErrorCode;
 
-use bindings::oos::platform::{gles, graphics, runtime};
+use bindings::oos::platform::{gles, graphics, runtime, storage};
 
 pub fn abi_version() -> u32 {
     runtime::abi_version()
@@ -58,6 +58,103 @@ pub fn log(level: u32, message: &str) {
         _ => runtime::LogLevel::Info,
     };
     runtime::log(level, message)
+}
+
+pub fn kv_get(key: &str) -> Result<Option<Vec<u8>>, ErrorCode> {
+    storage::kv_get(key)
+}
+
+pub fn kv_set(key: &str, value: &[u8]) -> Result<(), ErrorCode> {
+    storage::kv_set(key, value)
+}
+
+pub fn kv_delete(key: &str) -> Result<(), ErrorCode> {
+    storage::kv_delete(key)
+}
+
+pub fn kv_clear() -> Result<(), ErrorCode> {
+    storage::kv_clear()
+}
+
+pub use bindings::oos::platform::storage::{RowState as SqlRowState, ValueKind as SqlValueKind};
+
+pub mod sqlite {
+    use super::{storage, ErrorCode, SqlRowState, SqlValueKind};
+
+    pub fn execute(database: &str, sql: &str) -> Result<u32, ErrorCode> {
+        storage::database_execute(database, sql)
+    }
+
+    pub struct Statement {
+        handle: u32,
+    }
+
+    impl Statement {
+        pub fn prepare(database: &str, sql: &str) -> Result<Self, ErrorCode> {
+            storage::database_prepare(database, sql).map(|handle| Self { handle })
+        }
+
+        pub fn step(&self) -> Result<SqlRowState, ErrorCode> {
+            storage::statement_step(self.handle)
+        }
+
+        pub fn bind_null(&self, index: u32) -> Result<(), ErrorCode> {
+            storage::statement_bind_null(self.handle, index)
+        }
+
+        pub fn bind_integer(&self, index: u32, value: i64) -> Result<(), ErrorCode> {
+            storage::statement_bind_integer(self.handle, index, value)
+        }
+
+        pub fn bind_float(&self, index: u32, value: f64) -> Result<(), ErrorCode> {
+            storage::statement_bind_float(self.handle, index, value)
+        }
+
+        pub fn bind_text(&self, index: u32, value: &str) -> Result<(), ErrorCode> {
+            storage::statement_bind_text(self.handle, index, value)
+        }
+
+        pub fn bind_blob(&self, index: u32, value: &[u8]) -> Result<(), ErrorCode> {
+            storage::statement_bind_blob(self.handle, index, value)
+        }
+
+        pub fn column_count(&self) -> Result<u32, ErrorCode> {
+            storage::statement_column_count(self.handle)
+        }
+
+        pub fn column_kind(&self, column: u32) -> Result<SqlValueKind, ErrorCode> {
+            storage::statement_column_kind(self.handle, column)
+        }
+
+        pub fn integer(&self, column: u32) -> Result<i64, ErrorCode> {
+            storage::statement_column_integer(self.handle, column)
+        }
+
+        pub fn float(&self, column: u32) -> Result<f64, ErrorCode> {
+            storage::statement_column_float(self.handle, column)
+        }
+
+        pub fn text(&self, column: u32) -> Result<String, ErrorCode> {
+            storage::statement_column_text(self.handle, column)
+        }
+
+        pub fn blob(&self, column: u32) -> Result<Vec<u8>, ErrorCode> {
+            storage::statement_column_blob(self.handle, column)
+        }
+
+        pub fn finish(mut self) -> Result<(), ErrorCode> {
+            let handle = core::mem::take(&mut self.handle);
+            storage::statement_finish(handle)
+        }
+    }
+
+    impl Drop for Statement {
+        fn drop(&mut self) {
+            if self.handle != 0 {
+                let _ = storage::statement_finish(self.handle);
+            }
+        }
+    }
 }
 
 pub fn texture_set(

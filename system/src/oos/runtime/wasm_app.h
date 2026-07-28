@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include "oos/input/key_input.h"
 
@@ -16,6 +17,8 @@ class GraphicsHost;
 struct WasmAppOptions {
   uint32_t stack_size = 128 * 1024;
   uint32_t heap_size = 4 * 1024 * 1024;
+  std::string app_id;
+  std::string data_directory;
 };
 
 class WasmApp {

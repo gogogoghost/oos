@@ -25,7 +25,7 @@ stop_oos() {
     return 0
   fi
   oos_pid=$(cat "$OOS_PID_FILE" 2>/dev/null || true)
-  if [ -n "$oos_pid" ] && kill -0 "$oos_pid" 2>/dev/null; then
+  if oos_pid_running "$oos_pid"; then
     kill -TERM "$oos_pid" 2>/dev/null || true
     attempt=0
     while kill -0 "$oos_pid" 2>/dev/null; do
@@ -49,6 +49,8 @@ echo 0 > /sys/class/leds/sublcd-backlight/brightness 2>/dev/null || true
 echo 4 > /sys/class/graphics/fb1/blank 2>/dev/null || true
 
 status=0
+unmount_if_mounted "$OOS_ROOTFS/data/media/removable" || status=1
+unmount_if_mounted "$OOS_ROOTFS/data/media/internal" || status=1
 unmount_if_mounted "$OOS_ROOTFS/opt/oos" || status=1
 unmount_if_mounted "$OOS_ROOTFS/data" || status=1
 unmount_if_mounted "$OOS_ROOTFS/apex/com.android.runtime" || status=1
@@ -59,7 +61,7 @@ unmount_if_mounted "$OOS_ROOTFS/dev" || status=1
 unmount_if_mounted "$OOS_ROOTFS/system" || status=1
 
 if [ "$status" -eq 0 ]; then
-  rm -f "$OOS_ACTIVE_RES_FILE"
+  rm -f "$OOS_ACTIVE_RES_FILE" "$OOS_STATE_DIR/removable-source"
   echo "OOS rootfs deinitialized"
 fi
 exit "$status"

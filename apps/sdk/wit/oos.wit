@@ -683,6 +683,46 @@ interface codec {
   last-error: func() -> string;
 }
 
+/// Per-application persistent storage. The host selects the backing directory
+/// from the application registry; guests never receive a filesystem path.
+interface storage {
+  use types.{error-code};
+
+  enum row-state {
+    row,
+    done,
+  }
+
+  enum value-kind {
+    integer,
+    float,
+    text,
+    blob,
+    null,
+  }
+
+  kv-get: func(key: string) -> result<option<list<u8>>, error-code>;
+  kv-set: func(key: string, value: list<u8>) -> result<_, error-code>;
+  kv-delete: func(key: string) -> result<_, error-code>;
+  kv-clear: func() -> result<_, error-code>;
+
+  database-execute: func(database: string, sql: string) -> result<u32, error-code>;
+  database-prepare: func(database: string, sql: string) -> result<u32, error-code>;
+  statement-bind-null: func(statement: u32, index: u32) -> result<_, error-code>;
+  statement-bind-integer: func(statement: u32, index: u32, value: s64) -> result<_, error-code>;
+  statement-bind-float: func(statement: u32, index: u32, value: f64) -> result<_, error-code>;
+  statement-bind-text: func(statement: u32, index: u32, value: string) -> result<_, error-code>;
+  statement-bind-blob: func(statement: u32, index: u32, value: list<u8>) -> result<_, error-code>;
+  statement-step: func(statement: u32) -> result<row-state, error-code>;
+  statement-column-count: func(statement: u32) -> result<u32, error-code>;
+  statement-column-kind: func(statement: u32, column: u32) -> result<value-kind, error-code>;
+  statement-column-integer: func(statement: u32, column: u32) -> result<s64, error-code>;
+  statement-column-float: func(statement: u32, column: u32) -> result<f64, error-code>;
+  statement-column-text: func(statement: u32, column: u32) -> result<string, error-code>;
+  statement-column-blob: func(statement: u32, column: u32) -> result<list<u8>, error-code>;
+  statement-finish: func(statement: u32) -> result<_, error-code>;
+}
+
 /// Lifecycle exported by every OOS application.
 interface lifecycle {
   use types.{error-code};
@@ -719,6 +759,7 @@ world app {
   import bluetooth;
   import modem;
   import codec;
+  import storage;
 
   export lifecycle;
 }

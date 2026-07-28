@@ -4,25 +4,30 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ROOTFS=${OOS_LOCAL_ROOTFS:-"$ROOT_DIR/build/wpe-sysroot/local-root"}
+LOCAL_DATA=${OOS_LOCAL_DATA:-"$ROOT_DIR/build/local-data"}
 MODE=${1:-native}
 [[ $# -eq 0 ]] || shift
 
 case "$MODE" in
   native)
     PROGRAM=/opt/oos/bin/oos
-    DEFAULT_ARGUMENT=/opt/oos/apps/launcher.wasm
+    DEFAULT_ARGUMENTS=()
     ;;
   web)
     PROGRAM=/opt/oos/bin/oos-web-local
-    DEFAULT_ARGUMENT=/opt/oos/apps/web-launcher/index.html
+    DEFAULT_ARGUMENTS=(/opt/oos/apps/web-launcher/index.html)
     ;;
   *)
-    echo "usage: $0 [native|web] [APP]" >&2
+    echo "usage: $0 [native|web] [PROGRAM_ARGUMENT ...]" >&2
     exit 2
     ;;
 esac
-[[ $# -le 1 ]] || { echo "usage: $0 [native|web] [APP]" >&2; exit 2; }
-ARGUMENT=${1:-$DEFAULT_ARGUMENT}
+if [[ $# -gt 0 ]]; then
+  PROGRAM_ARGUMENTS=("$@")
+else
+  PROGRAM_ARGUMENTS=("${DEFAULT_ARGUMENTS[@]}")
+fi
+mkdir -p "$LOCAL_DATA"
 
 [[ -x "$ROOTFS$PROGRAM" ]] || {
   echo "Local rootfs is not packaged: $ROOTFS" >&2
@@ -31,9 +36,9 @@ ARGUMENT=${1:-$DEFAULT_ARGUMENT}
 
 common_env=(
   --setenv HOME /tmp
+  --setenv OOS_DATA_ROOT /data
   --setenv LD_LIBRARY_PATH /opt/oos/lib
   --setenv OOS_BOOT_SPLASH /opt/oos/share/oos/boot-splash.png
-  --setenv OOS_LAUNCHER_MODULE /opt/oos/apps/launcher.wasm
   --setenv OOS_LOCAL_KEYMAP /opt/oos/etc/local-keymap.conf
   --setenv GST_REGISTRY /opt/oos/share/gstreamer-1.0/registry.bin
   --setenv GST_REGISTRY_UPDATE no
@@ -54,6 +59,7 @@ if command -v bwrap >/dev/null 2>&1; then
     --ro-bind "$ROOTFS" /
     --ro-bind /usr /usr
     --ro-bind /etc /etc
+    --bind "$LOCAL_DATA" /data
     --proc /proc
     --dev /dev
     --tmpfs /run
@@ -73,14 +79,14 @@ if command -v bwrap >/dev/null 2>&1; then
     common_env+=(--setenv XAUTHORITY "$XAUTHORITY")
   fi
   exec bwrap "${namespace_args[@]}" "${common_env[@]}" -- \
-    "$PROGRAM" "$ARGUMENT"
+    "$PROGRAM" "${PROGRAM_ARGUMENTS[@]}"
 fi
 
 if command -v proot >/dev/null 2>&1; then
   export HOME=/tmp
+  export OOS_DATA_ROOT=/data
   export LD_LIBRARY_PATH=/opt/oos/lib
   export OOS_BOOT_SPLASH=/opt/oos/share/oos/boot-splash.png
-  export OOS_LAUNCHER_MODULE=/opt/oos/apps/launcher.wasm
   export OOS_LOCAL_KEYMAP=/opt/oos/etc/local-keymap.conf
   export GST_REGISTRY=/opt/oos/share/gstreamer-1.0/registry.bin
   export GST_REGISTRY_UPDATE=no
@@ -90,7 +96,7 @@ if command -v proot >/dev/null 2>&1; then
   export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
   export __GLX_VENDOR_LIBRARY_NAME=mesa
   exec proot -0 -r "$ROOTFS" -b /usr -b /etc -b /proc \
-    "$PROGRAM" "$ARGUMENT"
+    -b "$LOCAL_DATA:/data" "$PROGRAM" "${PROGRAM_ARGUMENTS[@]}"
 fi
 
 echo "Neither bubblewrap nor proot is installed." >&2

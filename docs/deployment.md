@@ -20,24 +20,28 @@ oos/
 ├── bootstrap.sh
 ├── init.sh
 ├── deinit.sh
+├── gc-res.sh
 ├── start.sh
 ├── rootfs/
 ├── res -> res-1.0.0
 ├── res-1.0.0/
-│   ├── apps/launcher.aot
-│   ├── apps/launcher.component.wasm
-│   ├── apps/launcher.wasm
+│   ├── packages/org.orangeos.launcher/application.zip
 │   ├── bin/oos
 │   └── ...
 └── res-1.0.1/
 ```
 
 `/data/oos` is created with mode `0700` and bind-mounted at `rootfs/data` for
-persistent state. The selected version is bind-mounted at `rootfs/opt/oos`.
+persistent state. It contains the application registry, canonical package
+ZIPs, per-app WAMR/WebKit data, runtime caches, staging, temporary data, and
+internal/removable media views. The selected version is bind-mounted at
+`rootfs/opt/oos`.
 The rootfs also receives `/system`, `/dev`, `/proc`, and `/sys`, plus `/vendor`
 and Runtime APEX when those trees exist on the selected Android release.
 
-`start.sh` always invokes `init.sh` itself so mount setup and chroot execution
+All lifecycle scripts share one lock, so activation, initialization, start,
+deinitialization, and res garbage collection cannot race. `start.sh` always
+invokes `init.sh` itself so mount setup and chroot execution
 occur in the same mount namespace. It runs as a foreground supervisor,
 forwards termination signals, records the child PID, removes the PID file on
 normal exit, and returns the real `oos` exit status. `deinit.sh` terminates a
@@ -108,15 +112,11 @@ adb shell "su -c '/data/local/tmp/oos/start.sh'"
 
 `start.sh` performs idempotent initialization, so invoking `init.sh` manually
 is not required. The production entry presents the 240x320 boot splash,
-loads `/opt/oos/apps/launcher.aot` in WAMR, and forwards physical navigation
-keys to it. If no AOT file is present, `oos` can still be invoked explicitly
-with `/opt/oos/apps/launcher.wasm` for interpreter diagnostics. WPE libraries
-remain in the res package for the future single-foreground KaiOS application
-runner.
-
-`launcher.component.wasm` carries the same versioned WIT world as a standard
-Component Model artifact. It is packaged for compatible tooling and future
-runtimes; WAMR 2.4.4 continues to load the core-Wasm/AOT forms.
+imports `/opt/oos/packages/org.orangeos.launcher/application.zip` into the
+application registry on first boot, selects its AOT entry for WAMR, and
+forwards physical navigation keys to it. The portable Wasm fallback stays in
+the same ZIP. WPE libraries support registered KaiOS ZIPs with per-app WebKit
+data and cache directories.
 
 ## Upgrade
 
@@ -136,6 +136,9 @@ seconds. When production `/system` is read-only, adding a res directory and
 updating the link
 must be performed by the firmware/OTA installation environment or after an
 explicit writable remount; the runtime scripts do not remount `/system`.
+
+`gc-res.sh` is dry-run by default and retains the active and previously active
+versions. Run `gc-res.sh --apply` only after reviewing its list.
 
 The local WPE build uses `/opt/oos` as its native install prefix and stages it
 with `DESTDIR`, so user-namespace tests exercise the final paths directly.

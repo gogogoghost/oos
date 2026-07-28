@@ -26,11 +26,19 @@ case "$res_name" in
     ;;
 esac
 
+acquire_bootstrap_lock activate
+trap 'release_bootstrap_lock' 0
+
 res_dir="$OOS_HOME/$res_name"
 require_directory "$res_dir"
 require_file "$res_dir/manifest.env"
 require_file "$res_dir/SHA256SUMS"
 require_file "$res_dir/COMPLETE"
+if ! grep -q '^format=2$' "$res_dir/manifest.env" ||
+    ! grep -q '^type=oos-res$' "$res_dir/manifest.env"; then
+  echo "$res_name has an unsupported manifest format" >&2
+  exit 1
+fi
 if ! grep -q "^device=$OOS_DEVICE$" "$res_dir/manifest.env"; then
   echo "$res_name does not target $OOS_DEVICE" >&2
   exit 1
@@ -38,7 +46,7 @@ fi
 
 if [ -f "$OOS_PID_FILE" ]; then
   oos_pid=$(cat "$OOS_PID_FILE" 2>/dev/null || true)
-  if [ -n "$oos_pid" ] && kill -0 "$oos_pid" 2>/dev/null; then
+  if oos_pid_running "$oos_pid"; then
     echo "stop OOS before activating another res version" >&2
     exit 1
   fi
@@ -59,9 +67,13 @@ fi
   sha256sum -c SHA256SUMS
 ) >/dev/null
 
+old_res=$(readlink "$OOS_HOME/res" 2>/dev/null || true)
 ln -sfn "$res_name" "$OOS_HOME/res"
 if [ "$(readlink "$OOS_HOME/res")" != "$res_name" ]; then
   echo "failed to activate $res_name" >&2
   exit 1
+fi
+if [ -n "$old_res" ] && [ "$old_res" != "$res_name" ]; then
+  echo "$old_res" > "$OOS_STATE_DIR/previous-res"
 fi
 echo "Activated $res_name"

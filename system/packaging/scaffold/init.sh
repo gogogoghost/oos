@@ -31,6 +31,26 @@ mount_bind_optional() {
   mount_bind "$source_path" "$target_path"
 }
 
+mount_storage_optional() {
+  source_path=$1
+  target_path=$2
+  [ -d "$source_path" ] || return 0
+  mkdir -p "$target_path"
+  mount_bind "$source_path" "$target_path"
+}
+
+mount_first_removable() {
+  target_path=$1
+  for source_path in ${OOS_REMOVABLE_STORAGE_CANDIDATES:-}; do
+    if [ -d "$source_path" ] && path_is_mounted "$source_path"; then
+      mount_storage_optional "$source_path" "$target_path"
+      echo "$source_path" > "$OOS_STATE_DIR/removable-source"
+      return 0
+    fi
+  done
+  rm -f "$OOS_STATE_DIR/removable-source"
+}
+
 mount_filesystem() {
   filesystem=$1
   source_name=$2
@@ -56,6 +76,12 @@ resolve_res
 require_directory "$OOS_ROOTFS"
 mkdir -p "$OOS_PERSIST_DIR"
 chmod 0700 "$OOS_PERSIST_DIR"
+mkdir -p "$OOS_PERSIST_DIR/system" "$OOS_PERSIST_DIR/runtime" \
+  "$OOS_PERSIST_DIR/packages" "$OOS_PERSIST_DIR/users/0/wasm" \
+  "$OOS_PERSIST_DIR/users/0/web" "$OOS_PERSIST_DIR/cache/aot" \
+  "$OOS_PERSIST_DIR/cache/web" "$OOS_PERSIST_DIR/staging" \
+  "$OOS_PERSIST_DIR/tmp" "$OOS_PERSIST_DIR/media/internal" \
+  "$OOS_PERSIST_DIR/media/removable"
 
 if is_mounted "$OOS_ROOTFS/opt/oos" &&
     [ -f "$OOS_ACTIVE_RES_FILE" ] &&
@@ -73,6 +99,9 @@ mount_bind_optional /apex/com.android.runtime \
   "$OOS_ROOTFS/apex/com.android.runtime"
 mount_bind "$OOS_PERSIST_DIR" "$OOS_ROOTFS/data"
 mount_bind "$OOS_RES_DIR" "$OOS_ROOTFS/opt/oos"
+mount_storage_optional "${OOS_INTERNAL_STORAGE:-/storage/emulated/0}" \
+  "$OOS_ROOTFS/data/media/internal"
+mount_first_removable "$OOS_ROOTFS/data/media/removable"
 
 echo "$OOS_RES_DIR" > "$OOS_ACTIVE_RES_FILE"
 ADDED_MOUNTS=

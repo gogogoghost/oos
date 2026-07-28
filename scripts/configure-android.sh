@@ -59,7 +59,16 @@ fi
 if [[ $GENERATE_HIDL -eq 1 ]]; then
   "$ROOT_DIR/scripts/generate-hidl-headers.sh"
 fi
-cmake -S "$ROOT_DIR/system" -B "$ROOT_DIR/build/android-$DEVICE" \
+BUILD_DIR="$ROOT_DIR/build/android-$DEVICE"
+CMAKE_FRESH=()
+if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+  CACHED_SOURCE=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' \
+    "$BUILD_DIR/CMakeCache.txt")
+  if [[ "$CACHED_SOURCE" != "$ROOT_DIR/system" ]]; then
+    CMAKE_FRESH=(--fresh)
+  fi
+fi
+cmake "${CMAKE_FRESH[@]}" -S "$ROOT_DIR/system" -B "$BUILD_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=armeabi-v7a \
   -DANDROID_PLATFORM="$ANDROID_PLATFORM" \

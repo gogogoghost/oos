@@ -20,6 +20,7 @@
 
 #include "oos/device/device.h"
 #include "oos/runtime/graphics_host.h"
+#include "oos/storage/app_storage.h"
 
 namespace oos::runtime {
 namespace {
@@ -40,6 +41,7 @@ constexpr const char *kIpInterface = "oos:platform/ip@0.1.0";
 constexpr const char *kBluetoothInterface = "oos:platform/bluetooth@0.1.0";
 constexpr const char *kModemInterface = "oos:platform/modem@0.1.0";
 constexpr const char *kCodecInterface = "oos:platform/codec@0.1.0";
+constexpr const char *kStorageInterface = "oos:platform/storage@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
 constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.1.0#event";
 constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.1.0#frame";
@@ -97,6 +99,7 @@ T *appMutableArray(wasm_exec_env_t environment, uint32_t offset, uint32_t count,
 struct AppHostContext {
   GraphicsHost *graphics = nullptr;
   device::Device *device = nullptr;
+  storage::AppStorage *storage = nullptr;
 };
 
 AppHostContext *hostFor(wasm_exec_env_t environment) {
@@ -107,6 +110,11 @@ AppHostContext *hostFor(wasm_exec_env_t environment) {
 GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
   return host ? host->graphics : nullptr;
+}
+
+storage::AppStorage *storageFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->storage : nullptr;
 }
 
 void trapInvalidReturnArea(wasm_exec_env_t environment) {
@@ -513,6 +521,375 @@ bool lowerStringAt(wasm_exec_env_t environment, const char *value,
   storeCanonical(record, offset, pointer);
   storeCanonical(record, offset + 4, length);
   return true;
+}
+
+bool guestString(wasm_exec_env_t environment, uint32_t offset, uint32_t length,
+                 std::string &value, uint32_t maximum = 256) {
+  const char *bytes = appArray<char>(environment, offset, length, maximum);
+  if (!bytes)
+    return false;
+  value.assign(length ? bytes : "", length);
+  return true;
+}
+
+void nativeKvGet(wasm_exec_env_t environment, uint32_t key_offset,
+                 uint32_t key_length, uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 16, 16);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 16);
+  std::string key;
+  storage::AppStorage *app_storage = storageFor(environment);
+  if (!app_storage) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Unavailable);
+    return;
+  }
+  if (!guestString(environment, key_offset, key_length, key)) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::InvalidArgument);
+    return;
+  }
+  std::vector<uint8_t> value;
+  bool found = false;
+  if (!app_storage->get(key, value, found)) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Io);
+    return;
+  }
+  result[0] = 0;
+  result[4] = found ? 1 : 0;
+  if (!found)
+    return;
+  const uint32_t pointer =
+      value.empty() ? 1
+                    : guestRealloc(environment, 0, 0, 1,
+                                   static_cast<uint32_t>(value.size()));
+  uint8_t *destination =
+      value.empty()
+          ? reinterpret_cast<uint8_t *>(1)
+          : appMutableArray<uint8_t>(environment, pointer,
+                                     static_cast<uint32_t>(value.size()),
+                                     4 * 1024 * 1024);
+  if (!pointer || !destination) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower KV value");
+    return;
+  }
+  if (!value.empty())
+    std::memcpy(destination, value.data(), value.size());
+  storeCanonical(result, 8, pointer);
+  storeCanonical(result, 12, static_cast<uint32_t>(value.size()));
+}
+
+void nativeKvSet(wasm_exec_env_t environment, uint32_t key_offset,
+                 uint32_t key_length, uint32_t value_offset,
+                 uint32_t value_length, uint32_t result_offset) {
+  std::string key;
+  const uint8_t *value = appArray<uint8_t>(environment, value_offset,
+                                           value_length, 4 * 1024 * 1024);
+  storage::AppStorage *app_storage = storageFor(environment);
+  if (!app_storage) {
+    writeResult(environment, result_offset, false, WitError::Unavailable);
+    return;
+  }
+  if (!value || !guestString(environment, key_offset, key_length, key)) {
+    writeResult(environment, result_offset, false, WitError::InvalidArgument);
+    return;
+  }
+  writeResult(
+      environment, result_offset,
+      app_storage->set(key, value_length ? value : nullptr, value_length),
+      WitError::Io);
+}
+
+void nativeKvDelete(wasm_exec_env_t environment, uint32_t key_offset,
+                    uint32_t key_length, uint32_t result_offset) {
+  std::string key;
+  storage::AppStorage *app_storage = storageFor(environment);
+  if (!app_storage) {
+    writeResult(environment, result_offset, false, WitError::Unavailable);
+    return;
+  }
+  bool removed = false;
+  writeResult(environment, result_offset,
+              guestString(environment, key_offset, key_length, key) &&
+                  app_storage->remove(key, removed),
+              WitError::Io);
+}
+
+void nativeKvClear(wasm_exec_env_t environment, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  writeResult(environment, result_offset, app_storage && app_storage->clear(),
+              app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void writeU32Result(wasm_exec_env_t environment, uint32_t result_offset,
+                    bool success, uint32_t value,
+                    WitError error = WitError::Io) {
+  uint8_t *result = appMutableArray<uint8_t>(environment, result_offset, 8, 8);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 8);
+  result[0] = success ? 0 : 1;
+  storeCanonical(result, 4, success ? value : static_cast<uint32_t>(error));
+}
+
+void writeEnumResult(wasm_exec_env_t environment, uint32_t result_offset,
+                     bool success, uint8_t value,
+                     WitError error = WitError::Io) {
+  uint8_t *result = appMutableArray<uint8_t>(environment, result_offset, 2, 2);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[0] = success ? 0 : 1;
+  result[1] = success ? value : static_cast<uint8_t>(error);
+}
+
+template <typename T>
+void writeWideResult(wasm_exec_env_t environment, uint32_t result_offset,
+                     bool success, T value, WitError error = WitError::Io) {
+  static_assert(sizeof(T) == 8);
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 16, 16);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 16);
+  result[0] = success ? 0 : 1;
+  if (success)
+    storeCanonical(result, 8, value);
+  else
+    result[8] = static_cast<uint8_t>(error);
+}
+
+bool writeBytesResult(wasm_exec_env_t environment, uint32_t result_offset,
+                      const uint8_t *bytes, uint32_t size, bool success,
+                      WitError error = WitError::Io) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return false;
+  }
+  std::memset(result, 0, 12);
+  result[0] = success ? 0 : 1;
+  if (!success) {
+    result[4] = static_cast<uint8_t>(error);
+    return true;
+  }
+  const uint32_t pointer =
+      size == 0 ? 1 : guestRealloc(environment, 0, 0, 1, size);
+  uint8_t *destination = size == 0
+                             ? reinterpret_cast<uint8_t *>(1)
+                             : appMutableArray<uint8_t>(environment, pointer,
+                                                        size, 4 * 1024 * 1024);
+  if (!pointer || !destination) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower SQLite value");
+    return false;
+  }
+  if (size)
+    std::memcpy(destination, bytes, size);
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, size);
+  return true;
+}
+
+bool databaseArguments(wasm_exec_env_t environment, uint32_t database_offset,
+                       uint32_t database_length, uint32_t sql_offset,
+                       uint32_t sql_length, std::string &database,
+                       std::string &sql) {
+  return guestString(environment, database_offset, database_length, database,
+                     64) &&
+         guestString(environment, sql_offset, sql_length, sql, 64 * 1024);
+}
+
+void nativeDatabaseExecute(wasm_exec_env_t environment,
+                           uint32_t database_offset, uint32_t database_length,
+                           uint32_t sql_offset, uint32_t sql_length,
+                           uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  std::string database;
+  std::string sql;
+  uint32_t changes = 0;
+  const bool arguments =
+      databaseArguments(environment, database_offset, database_length,
+                        sql_offset, sql_length, database, sql);
+  const bool success = app_storage && arguments &&
+                       app_storage->databaseExecute(database, sql, changes);
+  writeU32Result(environment, result_offset, success, changes,
+                 app_storage
+                     ? (arguments ? WitError::Io : WitError::InvalidArgument)
+                     : WitError::Unavailable);
+}
+
+void nativeDatabasePrepare(wasm_exec_env_t environment,
+                           uint32_t database_offset, uint32_t database_length,
+                           uint32_t sql_offset, uint32_t sql_length,
+                           uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  std::string database;
+  std::string sql;
+  uint32_t statement = 0;
+  const bool arguments =
+      databaseArguments(environment, database_offset, database_length,
+                        sql_offset, sql_length, database, sql);
+  const bool success = app_storage && arguments &&
+                       app_storage->databasePrepare(database, sql, statement);
+  writeU32Result(environment, result_offset, success, statement,
+                 app_storage
+                     ? (arguments ? WitError::Io : WitError::InvalidArgument)
+                     : WitError::Unavailable);
+}
+
+void nativeStatementStep(wasm_exec_env_t environment, uint32_t statement,
+                         uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  storage::SqlRowState state = storage::SqlRowState::Done;
+  const bool success =
+      app_storage && app_storage->statementStep(statement, state);
+  writeEnumResult(environment, result_offset, success,
+                  static_cast<uint8_t>(state),
+                  app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementBindNull(wasm_exec_env_t environment, uint32_t statement,
+                             uint32_t index, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  writeResult(environment, result_offset,
+              app_storage && app_storage->statementBindNull(statement, index),
+              app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementBindInteger(wasm_exec_env_t environment, uint32_t statement,
+                                uint32_t index, int64_t value,
+                                uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  writeResult(environment, result_offset,
+              app_storage &&
+                  app_storage->statementBindInteger(statement, index, value),
+              app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementBindFloat(wasm_exec_env_t environment, uint32_t statement,
+                              uint32_t index, double value,
+                              uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  writeResult(environment, result_offset,
+              app_storage &&
+                  app_storage->statementBindFloat(statement, index, value),
+              app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementBindText(wasm_exec_env_t environment, uint32_t statement,
+                             uint32_t index, uint32_t value_offset,
+                             uint32_t value_length, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  std::string value;
+  const bool arguments = guestString(environment, value_offset, value_length,
+                                     value, 4 * 1024 * 1024);
+  writeResult(environment, result_offset,
+              app_storage && arguments &&
+                  app_storage->statementBindText(statement, index, value),
+              app_storage
+                  ? (arguments ? WitError::Io : WitError::InvalidArgument)
+                  : WitError::Unavailable);
+}
+
+void nativeStatementBindBlob(wasm_exec_env_t environment, uint32_t statement,
+                             uint32_t index, uint32_t value_offset,
+                             uint32_t value_length, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  const uint8_t *value = appArray<uint8_t>(environment, value_offset,
+                                           value_length, 4 * 1024 * 1024);
+  writeResult(environment, result_offset,
+              app_storage && value &&
+                  app_storage->statementBindBlob(statement, index,
+                                                 value_length ? value : nullptr,
+                                                 value_length),
+              app_storage ? (value ? WitError::Io : WitError::InvalidArgument)
+                          : WitError::Unavailable);
+}
+
+void nativeStatementColumnCount(wasm_exec_env_t environment, uint32_t statement,
+                                uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  uint32_t count = 0;
+  const bool success =
+      app_storage && app_storage->statementColumnCount(statement, count);
+  writeU32Result(environment, result_offset, success, count,
+                 app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementColumnKind(wasm_exec_env_t environment, uint32_t statement,
+                               uint32_t column, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  storage::SqlValueKind kind = storage::SqlValueKind::Null;
+  const bool success =
+      app_storage && app_storage->statementColumnKind(statement, column, kind);
+  writeEnumResult(environment, result_offset, success,
+                  static_cast<uint8_t>(kind),
+                  app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementColumnInteger(wasm_exec_env_t environment,
+                                  uint32_t statement, uint32_t column,
+                                  uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  int64_t value = 0;
+  const bool success = app_storage && app_storage->statementColumnInt64(
+                                          statement, column, value);
+  writeWideResult(environment, result_offset, success, value,
+                  app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementColumnFloat(wasm_exec_env_t environment, uint32_t statement,
+                                uint32_t column, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  double value = 0;
+  const bool success = app_storage && app_storage->statementColumnDouble(
+                                          statement, column, value);
+  writeWideResult(environment, result_offset, success, value,
+                  app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementColumnText(wasm_exec_env_t environment, uint32_t statement,
+                               uint32_t column, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  std::string value;
+  const bool success =
+      app_storage && app_storage->statementColumnText(statement, column, value);
+  writeBytesResult(environment, result_offset,
+                   reinterpret_cast<const uint8_t *>(value.data()),
+                   static_cast<uint32_t>(value.size()), success,
+                   app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementColumnBlob(wasm_exec_env_t environment, uint32_t statement,
+                               uint32_t column, uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  std::vector<uint8_t> value;
+  const bool success =
+      app_storage && app_storage->statementColumnBlob(statement, column, value);
+  writeBytesResult(environment, result_offset, value.data(),
+                   static_cast<uint32_t>(value.size()), success,
+                   app_storage ? WitError::Io : WitError::Unavailable);
+}
+
+void nativeStatementFinish(wasm_exec_env_t environment, uint32_t statement,
+                           uint32_t result_offset) {
+  storage::AppStorage *app_storage = storageFor(environment);
+  writeResult(environment, result_offset,
+              app_storage && app_storage->statementFinish(statement),
+              app_storage ? WitError::Io : WitError::Unavailable);
 }
 
 template <typename... Args>
@@ -1029,6 +1406,43 @@ NativeSymbol kCodecSymbols[] = {
      nullptr},
 };
 
+NativeSymbol kStorageSymbols[] = {
+    {"kv-get", reinterpret_cast<void *>(nativeKvGet), "(iii)", nullptr},
+    {"kv-set", reinterpret_cast<void *>(nativeKvSet), "(iiiii)", nullptr},
+    {"kv-delete", reinterpret_cast<void *>(nativeKvDelete), "(iii)", nullptr},
+    {"kv-clear", reinterpret_cast<void *>(nativeKvClear), "(i)", nullptr},
+    {"database-execute", reinterpret_cast<void *>(nativeDatabaseExecute),
+     "(iiiii)", nullptr},
+    {"database-prepare", reinterpret_cast<void *>(nativeDatabasePrepare),
+     "(iiiii)", nullptr},
+    {"statement-bind-null", reinterpret_cast<void *>(nativeStatementBindNull),
+     "(iii)", nullptr},
+    {"statement-bind-integer",
+     reinterpret_cast<void *>(nativeStatementBindInteger), "(iiIi)", nullptr},
+    {"statement-bind-float", reinterpret_cast<void *>(nativeStatementBindFloat),
+     "(iiFi)", nullptr},
+    {"statement-bind-text", reinterpret_cast<void *>(nativeStatementBindText),
+     "(iiiii)", nullptr},
+    {"statement-bind-blob", reinterpret_cast<void *>(nativeStatementBindBlob),
+     "(iiiii)", nullptr},
+    {"statement-step", reinterpret_cast<void *>(nativeStatementStep), "(ii)",
+     nullptr},
+    {"statement-column-count",
+     reinterpret_cast<void *>(nativeStatementColumnCount), "(ii)", nullptr},
+    {"statement-column-kind",
+     reinterpret_cast<void *>(nativeStatementColumnKind), "(iii)", nullptr},
+    {"statement-column-integer",
+     reinterpret_cast<void *>(nativeStatementColumnInteger), "(iii)", nullptr},
+    {"statement-column-float",
+     reinterpret_cast<void *>(nativeStatementColumnFloat), "(iii)", nullptr},
+    {"statement-column-text",
+     reinterpret_cast<void *>(nativeStatementColumnText), "(iii)", nullptr},
+    {"statement-column-blob",
+     reinterpret_cast<void *>(nativeStatementColumnBlob), "(iii)", nullptr},
+    {"statement-finish", reinterpret_cast<void *>(nativeStatementFinish),
+     "(ii)", nullptr},
+};
+
 struct WitNativeInterface {
   const char *name;
   NativeSymbol *symbols;
@@ -1053,6 +1467,8 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kModemSymbols))},
     {kCodecInterface, kCodecSymbols,
      static_cast<uint32_t>(std::size(kCodecSymbols))},
+    {kStorageInterface, kStorageSymbols,
+     static_cast<uint32_t>(std::size(kStorageSymbols))},
 };
 
 uint32_t gRuntimeReferences = 0;
@@ -1416,7 +1832,13 @@ private:
 class WasmApp::Impl {
 public:
   Impl(GraphicsHost &graphics, device::Device *device, WasmAppOptions options)
-      : graphics(graphics), host{&this->graphics, device}, options(options) {}
+      : graphics(graphics), options(std::move(options)) {
+    if (!this->options.data_directory.empty()) {
+      app_storage =
+          std::make_unique<storage::AppStorage>(this->options.data_directory);
+    }
+    host = {&this->graphics, device, app_storage.get()};
+  }
 
   ~Impl() { shutdown(); }
 
@@ -1489,6 +1911,7 @@ public:
   }
 
   NamespacedGraphicsHost graphics;
+  std::unique_ptr<storage::AppStorage> app_storage;
   AppHostContext host;
   WasmAppOptions options;
   MappedModule module_bytes;
@@ -1514,6 +1937,10 @@ bool WasmApp::load(const char *path) {
   impl_->error.clear();
   if (!path || path[0] == '\0') {
     impl_->error = "WASM app path is empty";
+    return false;
+  }
+  if (impl_->app_storage && !impl_->app_storage->initialize()) {
+    impl_->error = "initialize app storage: " + impl_->app_storage->lastError();
     return false;
   }
   if (!impl_->initializeRuntime() ||

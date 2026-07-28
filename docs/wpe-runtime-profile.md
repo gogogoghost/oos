@@ -52,6 +52,17 @@ accepts one opaque full-screen surface; surface placement, z-order, opacity,
 and multi-surface transactions remain OOS policy and can be expanded without
 changing WPE or device HAL ownership.
 
+Registered web applications keep their original package as
+`/data/packages/<id>/<version>/<content-key>/application.zip`. The WPE runner
+serves one requested ZIP entry at a time through the local, secure
+`oos-app://` scheme,
+so installing or launching does not expand a complete application tree. Each
+app receives a persistent `WebKitNetworkSession` rooted at
+`/data/users/0/web/<id>` and a content-versioned cache below
+`/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3` for
+the future privileged API bridge; compiling WPE alone does not implement that
+bridge.
+
 ## Profile Model
 
 Android version alone is not a sufficient compatibility key. A WPE engine

@@ -24,10 +24,11 @@ for path in "${required[@]}"; do
 done
 
 mkdir -p "$OOS_PREFIX/bin" "$OOS_PREFIX/apps/web-launcher" \
+  "$OOS_PREFIX/packages/org.orangeos.launcher" \
   "$OOS_PREFIX/etc" "$OOS_PREFIX/share/oos" \
   "$(dirname "$GSTREAMER_REGISTRY")" \
   "$ROOTFS/dev" "$ROOTFS/etc" "$ROOTFS/proc" "$ROOTFS/run" \
-  "$ROOTFS/tmp" "$ROOTFS/usr"
+  "$ROOTFS/tmp" "$ROOTFS/usr" "$ROOTFS/data"
 for link in bin lib lib64 sbin; do
   if [[ ! -e "$ROOTFS/$link" && ! -L "$ROOTFS/$link" ]]; then
     ln -s "usr/$link" "$ROOTFS/$link"
@@ -36,8 +37,10 @@ done
 install -m 0755 "$ROOT_DIR/build/local/bin/oos" "$OOS_PREFIX/bin/oos"
 install -m 0755 "$ROOT_DIR/build/local/bin/oos-web-local" \
   "$OOS_PREFIX/bin/oos-web-local"
-install -m 0644 "$ROOT_DIR/build/native-apps/launcher.wasm" \
-  "$OOS_PREFIX/apps/launcher.wasm"
+"$ROOT_DIR/scripts/package-oos-wasm-app.sh" \
+  --manifest "$ROOT_DIR/apps/launcher/oos-manifest.json" \
+  --wasm "$ROOT_DIR/build/native-apps/launcher.wasm" \
+  --output "$OOS_PREFIX/packages/org.orangeos.launcher/application.zip"
 install -m 0644 "$ROOT_DIR/apps/web-launcher/dist/index.html" \
   "$OOS_PREFIX/apps/web-launcher/index.html"
 install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
@@ -62,7 +65,7 @@ GST_REGISTRY_UPDATE=yes \
 chmod 0644 "$GSTREAMER_REGISTRY"
 
 printf '%s\n' \
-  "format=1" \
+  "format=2" \
   "device=local" \
   "prefix=/opt/oos" \
   "gstreamer=$(gst-inspect-1.0 --version | sed -n '1s/.*version //p')" \

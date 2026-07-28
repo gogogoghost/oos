@@ -23,6 +23,10 @@ no longer the system Launcher runtime.
 - `system/devices/local`: 240x320 SDL/llvmpipe test device with deterministic
   hardware mocks and configurable host-key mapping.
 - `apps/sdk/wit/oos.wit`: versioned application interface source of truth.
+- `system/src/oos/apps`: ZIP manifests, the SQLite registry, and WAMR/WPE
+  launch-context preparation.
+- `system/src/oos/storage`: atomic filesystem helpers plus per-app KV and
+  SQLite storage.
 - `apps/sdk/rust`: generated Rust bindings and reusable framework adapters.
 - `apps/web-launcher`: retained Solid.js/WPE prototype for KaiOS web-app work.
 - `Makefile`: repository-level entry points; language manifests stay inside
@@ -200,8 +204,8 @@ Web System UI integration contract.
 
 OOS deployment separates the stable chroot bootstrap from versioned `res`
 runtime packages. Here `res` contains the native `oos` executable, WPE WebKit,
-its shared libraries, and helper processes. Generate both directory and tgz
-outputs with:
+its shared libraries, helper processes, and versioned application ZIPs.
+Generate both directory and tgz outputs with:
 
 ```sh
 ./scripts/package-oos-scaffold.sh --res-version 1.0.0 --tgz
@@ -211,6 +215,9 @@ outputs with:
 See [docs/deployment.md](docs/deployment.md) for the production
 `/system/oos`, trial `/data/local/tmp/oos`, persistent `/data/oos`, upgrade,
 mount, and lifecycle contract.
+
+See [docs/applications.md](docs/applications.md) for OOS/KaiOS ZIP formats,
+runtime dispatch, the application registry, and persistent storage layout.
 
 See [docs/wasm-runtime.md](docs/wasm-runtime.md) for the WIT lifecycle and
 device interfaces, WAMR/Component Model boundary, isolation model, egui

@@ -154,6 +154,54 @@ impl AppLifecycle for App {
         graphics_smoke();
         let descriptor = device::get_descriptor();
         if descriptor.id == "local" {
+            oos_app::kv_set("smoke", b"persistent").unwrap();
+            assert_eq!(oos_app::kv_get("smoke").unwrap(), Some(b"persistent".to_vec()));
+            oos_app::kv_delete("smoke").unwrap();
+            assert_eq!(oos_app::kv_get("smoke").unwrap(), None);
+            runtime::log(runtime::LogLevel::Info, "storage kv passed");
+            oos_app::sqlite::execute(
+                "smoke",
+                "CREATE TABLE IF NOT EXISTS sample(id INTEGER, name TEXT, payload BLOB, ratio REAL, absent_value TEXT)",
+            )
+            .unwrap();
+            runtime::log(runtime::LogLevel::Info, "storage sqlite create passed");
+            oos_app::sqlite::execute("smoke", "DELETE FROM sample").unwrap();
+            let insert = oos_app::sqlite::Statement::prepare(
+                "smoke",
+                "INSERT INTO sample VALUES(?, ?, ?, ?, ?)",
+            )
+            .unwrap();
+            insert.bind_integer(1, 7).unwrap();
+            insert.bind_text(2, "orange").unwrap();
+            insert.bind_blob(3, &[1, 2, 255]).unwrap();
+            insert.bind_float(4, 1.5).unwrap();
+            insert.bind_null(5).unwrap();
+            assert!(matches!(insert.step().unwrap(), oos_app::SqlRowState::Done));
+            insert.finish().unwrap();
+            runtime::log(runtime::LogLevel::Info, "storage sqlite insert passed");
+            let statement = oos_app::sqlite::Statement::prepare(
+                "smoke",
+                "SELECT id, name, payload, ratio, absent_value FROM sample",
+            )
+            .unwrap();
+            runtime::log(runtime::LogLevel::Info, "storage sqlite prepare passed");
+            assert!(matches!(statement.step().unwrap(), oos_app::SqlRowState::Row));
+            runtime::log(runtime::LogLevel::Info, "storage sqlite row passed");
+            assert_eq!(statement.column_count().unwrap(), 5);
+            runtime::log(runtime::LogLevel::Info, "storage sqlite count passed");
+            assert_eq!(statement.integer(0).unwrap(), 7);
+            runtime::log(runtime::LogLevel::Info, "storage sqlite integer passed");
+            assert_eq!(statement.text(1).unwrap(), "orange");
+            runtime::log(runtime::LogLevel::Info, "storage sqlite text passed");
+            assert_eq!(statement.blob(2).unwrap(), [1, 2, 255]);
+            runtime::log(runtime::LogLevel::Info, "storage sqlite blob passed");
+            assert_eq!(statement.float(3).unwrap(), 1.5);
+            assert!(matches!(
+                statement.column_kind(4).unwrap(),
+                oos_app::SqlValueKind::Null
+            ));
+            assert!(matches!(statement.step().unwrap(), oos_app::SqlRowState::Done));
+            statement.finish().unwrap();
             assert_eq!(
                 (descriptor.primary_width, descriptor.primary_height),
                 (240, 320)

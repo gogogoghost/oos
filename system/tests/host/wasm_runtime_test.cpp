@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -255,13 +256,23 @@ int main(int argc, char **argv) {
               graphics.gles_frames);
   MockDevice mock_device;
   oos::runtime::NativeAppManager mock_smoke(graphics, mock_device, 1);
-  if (!mock_smoke.load("local-mock", argv[2]) ||
+  char storage_template[] = "/tmp/oos-wasm-storage.XXXXXX";
+  const char *storage_root = mkdtemp(storage_template);
+  if (!storage_root) {
+    std::perror("mkdtemp");
+    return 1;
+  }
+  oos::runtime::NativeAppLaunchOptions mock_launch;
+  mock_launch.module_path = argv[2];
+  mock_launch.data_directory = storage_root;
+  if (!mock_smoke.load("local-mock", mock_launch) ||
       !mock_smoke.activate("local-mock") || !mock_smoke.render(1'600'000)) {
     std::fprintf(stderr, "WIT local mock API smoke failed: %s\n",
                  mock_smoke.lastError());
     return 1;
   }
   mock_smoke.shutdown();
+  std::filesystem::remove_all(storage_root);
   std::printf("WAMR WIT local mock API imports passed\n");
   return graphics.frames == 5 && resident_textures == 3 &&
                  graphics.textures.empty() && graphics.texture_updates > 0 &&

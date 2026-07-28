@@ -36,7 +36,23 @@ target_link_libraries(oos_wamr_host PUBLIC dl m pthread)
 add_executable(oos_wasm_runtime_test
   wasm_runtime_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/native_app_manager.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/runtime/wasm_app.cpp")
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/wasm_app.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp")
 target_include_directories(oos_wasm_runtime_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
-target_link_libraries(oos_wasm_runtime_test PRIVATE oos_wamr_host)
+target_link_libraries(oos_wasm_runtime_test PRIVATE oos_wamr_host ${CMAKE_DL_LIBS})
+
+add_executable(oos_app_repository_test
+  app_repository_test.cpp
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp")
+target_include_directories(oos_app_repository_test PRIVATE
+  "${OOS_SYSTEM_ROOT}/src")
+target_link_libraries(oos_app_repository_test PRIVATE ${CMAKE_DL_LIBS} z)

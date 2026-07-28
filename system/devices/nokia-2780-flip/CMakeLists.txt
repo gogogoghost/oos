@@ -239,12 +239,15 @@ if(OOS_BUILD_DEVICE_TESTS)
     oos_nokia_2780_display)
 
   add_executable(oos_test_nokia_2780_wpe_producer
-    "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp")
+    "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
   target_include_directories(oos_test_nokia_2780_wpe_producer PRIVATE
     ${NOKIA_2780_WPE_INCLUDES})
   target_link_libraries(oos_test_nokia_2780_wpe_producer PRIVATE
     oos_wpe_surface_host
     oos_surface_transport
+    oos_app_model
     "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
     "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
     "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
