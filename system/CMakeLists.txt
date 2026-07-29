@@ -96,12 +96,19 @@ target_include_directories(oos_device_storage PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_device_storage PUBLIC oos_app_model)
 
+add_library(oos_web_device_api STATIC
+  src/oos/web/device_api_service.cpp
+  src/oos/web/device_api_transport.c)
+target_include_directories(oos_web_device_api PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(oos_web_device_api PUBLIC oos_device_storage)
+
 if(NOT BUILD_LOCAL)
   add_library(oos_surface_transport STATIC
-    src/oos/compositor/surface_transport.c
-    src/oos/web/device_api_transport.c)
+    src/oos/compositor/surface_transport.c)
   target_include_directories(oos_surface_transport PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(oos_surface_transport PUBLIC oos_web_device_api)
 endif()
 
 add_library(oos_wasm_runtime STATIC
@@ -109,7 +116,8 @@ add_library(oos_wasm_runtime STATIC
   src/oos/runtime/wasm_app.cpp)
 target_include_directories(oos_wasm_runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(oos_wasm_runtime PUBLIC oos_wamr oos_input oos_app_model)
+target_link_libraries(oos_wasm_runtime PUBLIC
+  oos_wamr oos_input oos_app_model oos_device_storage)
 
 add_executable(oos src/main.cpp src/runtime.cpp)
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)

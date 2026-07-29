@@ -289,8 +289,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   oos::web::LocalAppServer app_server(options.app_id, options.package_path,
-                                      options.entrypoint,
-                                      bridge.scriptSource());
+                                      options.entrypoint);
   if (!app_server.start()) {
     std::fprintf(stderr, "initialize KaiOS app HTTP origin failed: %s\n",
                  app_server.lastError().c_str());

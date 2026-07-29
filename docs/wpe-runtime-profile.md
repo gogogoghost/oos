@@ -55,14 +55,14 @@ changing WPE or device HAL ownership.
 Registered web applications keep their original package as
 `/data/packages/<id>/<version>/<content-key>/application.zip`. The WPE runner
 serves one requested ZIP entry at a time from the loopback-only
-`http://<id>.localhost` origin,
+`http://<id>.localhost:8080` origin,
 so installing or launching does not expand a complete application tree. Each
 app receives a persistent `WebKitNetworkSession` rooted at
 `/data/users/0/web/<id>` and a content-versioned cache below
 `/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3`.
 The HTTP listener serves only package resources. Privileged KaiOS calls use an
 injected WebKit message handler and a separate inherited control socket to the
-OOS host. DeviceStorage enumeration and reads already use this path; future
+OOS host. DeviceStorage file operations and space queries use this path; future
 capabilities must follow the same pattern instead of adding HTTP endpoints.
 The native service contract is also represented in WIT so WPE adapters and
 WAMR imports converge on the same host implementation.

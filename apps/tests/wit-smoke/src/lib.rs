@@ -155,7 +155,10 @@ impl AppLifecycle for App {
         let descriptor = device::get_descriptor();
         if descriptor.id == "local" {
             oos_app::kv_set("smoke", b"persistent").unwrap();
-            assert_eq!(oos_app::kv_get("smoke").unwrap(), Some(b"persistent".to_vec()));
+            assert_eq!(
+                oos_app::kv_get("smoke").unwrap(),
+                Some(b"persistent".to_vec())
+            );
             oos_app::kv_delete("smoke").unwrap();
             assert_eq!(oos_app::kv_get("smoke").unwrap(), None);
             runtime::log(runtime::LogLevel::Info, "storage kv passed");
@@ -185,7 +188,10 @@ impl AppLifecycle for App {
             )
             .unwrap();
             runtime::log(runtime::LogLevel::Info, "storage sqlite prepare passed");
-            assert!(matches!(statement.step().unwrap(), oos_app::SqlRowState::Row));
+            assert!(matches!(
+                statement.step().unwrap(),
+                oos_app::SqlRowState::Row
+            ));
             runtime::log(runtime::LogLevel::Info, "storage sqlite row passed");
             assert_eq!(statement.column_count().unwrap(), 5);
             runtime::log(runtime::LogLevel::Info, "storage sqlite count passed");
@@ -200,8 +206,40 @@ impl AppLifecycle for App {
                 statement.column_kind(4).unwrap(),
                 oos_app::SqlValueKind::Null
             ));
-            assert!(matches!(statement.step().unwrap(), oos_app::SqlRowState::Done));
+            assert!(matches!(
+                statement.step().unwrap(),
+                oos_app::SqlRowState::Done
+            ));
             statement.finish().unwrap();
+            let volume = oos_app::DeviceStorageVolume::Internal;
+            let path = "wit-smoke/device-storage.bin";
+            oos_app::device_storage::write(
+                volume,
+                path,
+                oos_app::DeviceStorageWriteMode::Replace,
+                b"device",
+            )
+            .unwrap();
+            oos_app::device_storage::write(
+                volume,
+                path,
+                oos_app::DeviceStorageWriteMode::Append,
+                b"-storage",
+            )
+            .unwrap();
+            assert_eq!(
+                oos_app::device_storage::read(volume, path).unwrap(),
+                b"device-storage"
+            );
+            assert!(oos_app::device_storage::enumerate(volume)
+                .unwrap()
+                .iter()
+                .any(|entry| entry.path == path));
+            assert!(oos_app::device_storage::free_space(volume).unwrap() > 0);
+            assert!(oos_app::device_storage::used_space(volume).unwrap() > 0);
+            assert!(oos_app::device_storage::delete(volume, path).unwrap());
+            assert!(!oos_app::device_storage::delete(volume, path).unwrap());
+            runtime::log(runtime::LogLevel::Info, "device storage passed");
             assert_eq!(
                 (descriptor.primary_width, descriptor.primary_height),
                 (240, 320)

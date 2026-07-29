@@ -17,6 +17,9 @@ pub mod bindings {
 }
 
 pub use bindings::exports::oos::platform::lifecycle::{Guest as App, KeyAction, KeyEvent};
+pub use bindings::oos::platform::device_storage::{
+    Entry as DeviceStorageEntry, Volume as DeviceStorageVolume, WriteMode as DeviceStorageWriteMode,
+};
 pub use bindings::oos::platform::gles::{
     BlendEquation, BlendFactor, BufferUsage, Capabilities as GlesCapabilities,
     Command as GlesCommand, CommandOpcode, CompareFunction, CullFace, FrontFace, Primitive,
@@ -74,6 +77,41 @@ pub fn kv_delete(key: &str) -> Result<(), ErrorCode> {
 
 pub fn kv_clear() -> Result<(), ErrorCode> {
     storage::kv_clear()
+}
+
+pub mod device_storage {
+    use super::{
+        bindings, DeviceStorageEntry, DeviceStorageVolume, DeviceStorageWriteMode, ErrorCode,
+    };
+
+    pub fn enumerate(volume: DeviceStorageVolume) -> Result<Vec<DeviceStorageEntry>, ErrorCode> {
+        bindings::oos::platform::device_storage::enumerate_files(volume)
+    }
+
+    pub fn read(volume: DeviceStorageVolume, path: &str) -> Result<Vec<u8>, ErrorCode> {
+        bindings::oos::platform::device_storage::read_file(volume, path)
+    }
+
+    pub fn write(
+        volume: DeviceStorageVolume,
+        path: &str,
+        mode: DeviceStorageWriteMode,
+        bytes: &[u8],
+    ) -> Result<(), ErrorCode> {
+        bindings::oos::platform::device_storage::write_file(volume, path, mode, bytes)
+    }
+
+    pub fn delete(volume: DeviceStorageVolume, path: &str) -> Result<bool, ErrorCode> {
+        bindings::oos::platform::device_storage::delete_file(volume, path)
+    }
+
+    pub fn free_space(volume: DeviceStorageVolume) -> Result<u64, ErrorCode> {
+        bindings::oos::platform::device_storage::free_space(volume)
+    }
+
+    pub fn used_space(volume: DeviceStorageVolume) -> Result<u64, ErrorCode> {
+        bindings::oos::platform::device_storage::used_space(volume)
+    }
 }
 
 pub use bindings::oos::platform::storage::{RowState as SqlRowState, ValueKind as SqlValueKind};

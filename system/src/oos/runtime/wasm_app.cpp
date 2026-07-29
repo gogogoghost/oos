@@ -18,9 +18,11 @@
 #include <utility>
 #include <vector>
 
+#include "oos/apps/zip_archive.h"
 #include "oos/device/device.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/storage/app_storage.h"
+#include "oos/storage/device_storage.h"
 
 namespace oos::runtime {
 namespace {
@@ -42,6 +44,8 @@ constexpr const char *kBluetoothInterface = "oos:platform/bluetooth@0.1.0";
 constexpr const char *kModemInterface = "oos:platform/modem@0.1.0";
 constexpr const char *kCodecInterface = "oos:platform/codec@0.1.0";
 constexpr const char *kStorageInterface = "oos:platform/storage@0.1.0";
+constexpr const char *kDeviceStorageInterface =
+    "oos:platform/device-storage@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
 constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.1.0#event";
 constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.1.0#frame";
@@ -100,6 +104,7 @@ struct AppHostContext {
   GraphicsHost *graphics = nullptr;
   device::Device *device = nullptr;
   storage::AppStorage *storage = nullptr;
+  storage::DeviceStorageService *device_storage = nullptr;
 };
 
 AppHostContext *hostFor(wasm_exec_env_t environment) {
@@ -115,6 +120,11 @@ GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
 storage::AppStorage *storageFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
   return host ? host->storage : nullptr;
+}
+
+storage::DeviceStorageService *deviceStorageFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->device_storage : nullptr;
 }
 
 void trapInvalidReturnArea(wasm_exec_env_t environment) {
@@ -530,6 +540,218 @@ bool guestString(wasm_exec_env_t environment, uint32_t offset, uint32_t length,
     return false;
   value.assign(length ? bytes : "", length);
   return true;
+}
+
+constexpr uint32_t kMaxDeviceStorageEntries = 8192;
+constexpr uint32_t kDeviceStorageEntrySize = 24;
+constexpr uint32_t kMaxDeviceStorageBytes = 64 * 1024 * 1024;
+
+bool deviceStorageArguments(wasm_exec_env_t environment, uint32_t volume,
+                            uint32_t path_offset, uint32_t path_length,
+                            std::string &path) {
+  return volume <=
+             static_cast<uint32_t>(storage::DeviceStorageVolume::Removable) &&
+         guestString(environment, path_offset, path_length, path, 4096) &&
+         apps::validPackagePath(path) && path.back() != '/';
+}
+
+void nativeDeviceStorageEnumerate(wasm_exec_env_t environment, uint32_t volume,
+                                  uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 12);
+  storage::DeviceStorageService *service = deviceStorageFor(environment);
+  if (!service) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Unavailable);
+    return;
+  }
+  if (volume > static_cast<uint32_t>(storage::DeviceStorageVolume::Removable)) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::InvalidArgument);
+    return;
+  }
+  std::vector<storage::DeviceStorageEntry> entries;
+  if (!service->list(static_cast<storage::DeviceStorageVolume>(volume),
+                     entries) ||
+      entries.size() > kMaxDeviceStorageEntries) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Io);
+    return;
+  }
+  const uint32_t count = static_cast<uint32_t>(entries.size());
+  const uint32_t bytes = count * kDeviceStorageEntrySize;
+  const uint32_t pointer =
+      count ? guestRealloc(environment, 0, 0, 8, bytes) : 8;
+  uint8_t *records = count
+                         ? appMutableArray<uint8_t>(environment, pointer, bytes,
+                                                    kMaxDeviceStorageEntries *
+                                                        kDeviceStorageEntrySize)
+                         : reinterpret_cast<uint8_t *>(1);
+  if (!pointer || !records) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower device storage entries");
+    return;
+  }
+  if (count)
+    std::memset(records, 0, bytes);
+  for (uint32_t index = 0; index < count; ++index) {
+    uint32_t path_pointer = 0;
+    uint32_t path_length = 0;
+    if (!lowerString(environment, entries[index].path.c_str(), path_pointer,
+                     path_length)) {
+      wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                                 "failed to lower device storage path");
+      return;
+    }
+    uint8_t *record = records + index * kDeviceStorageEntrySize;
+    storeCanonical(record, 0, path_pointer);
+    storeCanonical(record, 4, path_length);
+    storeCanonical(record, 8, entries[index].size);
+    storeCanonical(record, 16, entries[index].last_modified_ms);
+  }
+  result[0] = 0;
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, count);
+}
+
+void nativeDeviceStorageRead(wasm_exec_env_t environment, uint32_t volume,
+                             uint32_t path_offset, uint32_t path_length,
+                             uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 12);
+  storage::DeviceStorageService *service = deviceStorageFor(environment);
+  std::string path;
+  const bool arguments = deviceStorageArguments(environment, volume,
+                                                path_offset, path_length, path);
+  if (!service || !arguments) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(service ? WitError::InvalidArgument
+                                             : WitError::Unavailable);
+    return;
+  }
+  uint64_t native_size = 0;
+  if (!service->fileSize(static_cast<storage::DeviceStorageVolume>(volume),
+                         path, native_size) ||
+      native_size > kMaxDeviceStorageBytes) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Io);
+    return;
+  }
+  const uint32_t size = static_cast<uint32_t>(native_size);
+  const uint32_t pointer = size ? guestRealloc(environment, 0, 0, 1, size) : 1;
+  uint8_t *destination =
+      size ? appMutableArray<uint8_t>(environment, pointer, size,
+                                      kMaxDeviceStorageBytes)
+           : reinterpret_cast<uint8_t *>(1);
+  if (!pointer || !destination) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to allocate device storage result");
+    return;
+  }
+  size_t bytes_read = 0;
+  if (!service->readInto(static_cast<storage::DeviceStorageVolume>(volume),
+                         path, size ? destination : nullptr, size,
+                         bytes_read) ||
+      bytes_read != size) {
+    if (size)
+      guestRealloc(environment, pointer, size, 1, 0);
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Io);
+    return;
+  }
+  result[0] = 0;
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, size);
+}
+
+void nativeDeviceStorageWrite(wasm_exec_env_t environment, uint32_t volume,
+                              uint32_t path_offset, uint32_t path_length,
+                              uint32_t mode, uint32_t bytes_offset,
+                              uint32_t bytes_length, uint32_t result_offset) {
+  storage::DeviceStorageService *service = deviceStorageFor(environment);
+  std::string path;
+  const bool path_valid = deviceStorageArguments(
+      environment, volume, path_offset, path_length, path);
+  const uint8_t *bytes = appArray<uint8_t>(
+      environment, bytes_offset, bytes_length, kMaxDeviceStorageBytes);
+  const bool arguments =
+      path_valid && bytes &&
+      mode <= static_cast<uint32_t>(storage::DeviceStorageWriteMode::Append);
+  writeResult(environment, result_offset,
+              service && arguments &&
+                  service->write(
+                      static_cast<storage::DeviceStorageVolume>(volume), path,
+                      static_cast<storage::DeviceStorageWriteMode>(mode),
+                      bytes_length ? bytes : nullptr, bytes_length),
+              service ? (arguments ? WitError::Io : WitError::InvalidArgument)
+                      : WitError::Unavailable);
+}
+
+void nativeDeviceStorageDelete(wasm_exec_env_t environment, uint32_t volume,
+                               uint32_t path_offset, uint32_t path_length,
+                               uint32_t result_offset) {
+  uint8_t *result = appMutableArray<uint8_t>(environment, result_offset, 2, 2);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storage::DeviceStorageService *service = deviceStorageFor(environment);
+  std::string path;
+  const bool arguments = deviceStorageArguments(environment, volume,
+                                                path_offset, path_length, path);
+  bool removed = false;
+  const bool success =
+      service && arguments &&
+      service->remove(static_cast<storage::DeviceStorageVolume>(volume), path,
+                      removed);
+  result[0] = success ? 0 : 1;
+  result[1] =
+      success
+          ? static_cast<uint8_t>(removed)
+          : static_cast<uint8_t>(
+                service ? (arguments ? WitError::Io : WitError::InvalidArgument)
+                        : WitError::Unavailable);
+}
+
+void nativeDeviceStorageSpace(wasm_exec_env_t environment, uint32_t volume,
+                              uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 16, 16);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 16);
+  const bool free = reinterpret_cast<uintptr_t>(
+                        wasm_runtime_get_function_attachment(environment)) == 0;
+  storage::DeviceStorageService *service = deviceStorageFor(environment);
+  uint64_t bytes = 0;
+  const bool arguments =
+      volume <= static_cast<uint32_t>(storage::DeviceStorageVolume::Removable);
+  const bool success =
+      service && arguments &&
+      (free ? service->freeSpace(
+                  static_cast<storage::DeviceStorageVolume>(volume), bytes)
+            : service->usedSpace(
+                  static_cast<storage::DeviceStorageVolume>(volume), bytes));
+  result[0] = success ? 0 : 1;
+  if (success) {
+    storeCanonical(result, 8, bytes);
+  } else {
+    result[8] = static_cast<uint8_t>(
+        service ? (arguments ? WitError::Io : WitError::InvalidArgument)
+                : WitError::Unavailable);
+  }
 }
 
 void nativeKvGet(wasm_exec_env_t environment, uint32_t key_offset,
@@ -1443,6 +1665,21 @@ NativeSymbol kStorageSymbols[] = {
      "(ii)", nullptr},
 };
 
+NativeSymbol kDeviceStorageSymbols[] = {
+    {"enumerate-files", reinterpret_cast<void *>(nativeDeviceStorageEnumerate),
+     "(ii)", nullptr},
+    {"read-file", reinterpret_cast<void *>(nativeDeviceStorageRead), "(iiii)",
+     nullptr},
+    {"write-file", reinterpret_cast<void *>(nativeDeviceStorageWrite),
+     "(iiiiiii)", nullptr},
+    {"delete-file", reinterpret_cast<void *>(nativeDeviceStorageDelete),
+     "(iiii)", nullptr},
+    {"free-space", reinterpret_cast<void *>(nativeDeviceStorageSpace), "(ii)",
+     reinterpret_cast<void *>(0)},
+    {"used-space", reinterpret_cast<void *>(nativeDeviceStorageSpace), "(ii)",
+     reinterpret_cast<void *>(1)},
+};
+
 struct WitNativeInterface {
   const char *name;
   NativeSymbol *symbols;
@@ -1469,6 +1706,8 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kCodecSymbols))},
     {kStorageInterface, kStorageSymbols,
      static_cast<uint32_t>(std::size(kStorageSymbols))},
+    {kDeviceStorageInterface, kDeviceStorageSymbols,
+     static_cast<uint32_t>(std::size(kDeviceStorageSymbols))},
 };
 
 uint32_t gRuntimeReferences = 0;
@@ -1837,7 +2076,13 @@ public:
       app_storage =
           std::make_unique<storage::AppStorage>(this->options.data_directory);
     }
-    host = {&this->graphics, device, app_storage.get()};
+    if (!this->options.internal_media_directory.empty() &&
+        !this->options.removable_media_directory.empty()) {
+      device_storage = std::make_unique<storage::DeviceStorageService>(
+          this->options.internal_media_directory,
+          this->options.removable_media_directory);
+    }
+    host = {&this->graphics, device, app_storage.get(), device_storage.get()};
   }
 
   ~Impl() { shutdown(); }
@@ -1912,6 +2157,7 @@ public:
 
   NamespacedGraphicsHost graphics;
   std::unique_ptr<storage::AppStorage> app_storage;
+  std::unique_ptr<storage::DeviceStorageService> device_storage;
   AppHostContext host;
   WasmAppOptions options;
   MappedModule module_bytes;

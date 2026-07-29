@@ -49,7 +49,8 @@ if rg -q '\(import "oos" "oos_' "$TEMP_DIR/launcher.wat"; then
 fi
 
 for interface in \
-  runtime graphics device audio camera power vibrator wifi ip bluetooth modem codec; do
+  runtime graphics device audio camera power vibrator wifi ip bluetooth modem codec \
+  storage device-storage; do
   rg -Fq "(import \"oos:platform/$interface@0.1.0\"" \
     "$TEMP_DIR/smoke.wat"
 done

@@ -17,6 +17,8 @@ class GraphicsHost;
 struct NativeAppLaunchOptions {
   const char *module_path = nullptr;
   const char *data_directory = nullptr;
+  const char *internal_media_directory = "/data/media/internal";
+  const char *removable_media_directory = "/data/media/removable";
   uint32_t stack_size = 128 * 1024;
   uint32_t heap_size = 4 * 1024 * 1024;
 };

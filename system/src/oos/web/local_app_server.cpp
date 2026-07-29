@@ -17,10 +17,8 @@
 namespace oos::web {
 namespace {
 
-constexpr uint16_t kHttpPort = 80;
+constexpr uint16_t kHttpPort = 8080;
 constexpr size_t kMaximumRequestBytes = 16 * 1024;
-constexpr char kApiPath[] = "__oos/kaios-api.js";
-constexpr char kApiElement[] = "<script src=\"/__oos/kaios-api.js\"></script>";
 
 bool sendAll(int socket, const void *data, size_t size) {
   const auto *bytes = static_cast<const uint8_t *>(data);
@@ -151,39 +149,6 @@ bool decodePath(const std::string &target, std::string &path) {
   return true;
 }
 
-bool htmlPath(const std::string &path) {
-  const std::string type = contentType(path);
-  return type.rfind("text/html", 0) == 0;
-}
-
-void injectApi(std::vector<uint8_t> &bytes) {
-  const std::string html(bytes.begin(), bytes.end());
-  const std::string folded = lower(html);
-  size_t insertion = std::string::npos;
-  const size_t head = folded.find("<head");
-  if (head != std::string::npos) {
-    const size_t close = folded.find('>', head);
-    if (close != std::string::npos)
-      insertion = close + 1;
-  }
-  if (insertion == std::string::npos) {
-    const size_t html_tag = folded.find("<html");
-    if (html_tag != std::string::npos) {
-      const size_t close = folded.find('>', html_tag);
-      if (close != std::string::npos)
-        insertion = close + 1;
-    }
-  }
-  if (insertion == std::string::npos)
-    insertion = 0;
-  std::string result;
-  result.reserve(html.size() + sizeof(kApiElement));
-  result.append(html, 0, insertion);
-  result += kApiElement;
-  result.append(html, insertion, std::string::npos);
-  bytes.assign(result.begin(), result.end());
-}
-
 void sendError(int client, int status, const char *reason) {
   char body[128];
   const int body_size =
@@ -216,9 +181,9 @@ bool sendHeader(int client, const char *type, uint64_t size) {
 } // namespace
 
 LocalAppServer::LocalAppServer(std::string app_id, std::string package_path,
-                               std::string entrypoint, std::string api_script)
+                               std::string entrypoint)
     : app_id_(std::move(app_id)), package_path_(std::move(package_path)),
-      entrypoint_(std::move(entrypoint)), api_script_(std::move(api_script)) {}
+      entrypoint_(std::move(entrypoint)) {}
 
 LocalAppServer::~LocalAppServer() { stop(); }
 
@@ -230,7 +195,7 @@ bool LocalAppServer::start() {
     error_ = "application id cannot form a .localhost origin";
     return false;
   }
-  origin_ = "http://" + host_;
+  origin_ = "http://" + host_ + ":" + std::to_string(kHttpPort);
   if (!archive_.open(package_path_.c_str())) {
     error_ = archive_.lastError();
     return false;
@@ -377,19 +342,11 @@ void LocalAppServer::handleClient(int client) {
   if (path.empty())
     path = entrypoint_;
   std::vector<uint8_t> bytes;
-  const char *type = nullptr;
-  if (path == kApiPath) {
-    bytes.assign(api_script_.begin(), api_script_.end());
-    type = "text/javascript; charset=utf-8";
-  } else {
-    if (!apps::validPackagePath(path) || !archive_.read(path.c_str(), bytes)) {
-      sendError(client, 404, "Not Found");
-      return;
-    }
-    type = contentType(path);
-    if (htmlPath(path))
-      injectApi(bytes);
+  if (!apps::validPackagePath(path) || !archive_.read(path.c_str(), bytes)) {
+    sendError(client, 404, "Not Found");
+    return;
   }
+  const char *type = contentType(path);
   if (!sendHeader(client, type, bytes.size()) || head)
     return;
   sendAll(client, bytes.data(), bytes.size());

@@ -177,10 +177,11 @@ const eventTarget = target => {
 };
 const failedRequest = name => domRequest(null, notSupported(name));
 const deviceHandler = globalThis.webkit?.messageHandlers?.oosDeviceApi;
-const deviceCall = (operation, volume, path = '') => {
+const deviceCall = (operation, volume, path = '', data = '', mode = '') => {
   if (!deviceHandler)
     return Promise.reject(notSupported('OOS device API bridge'));
-  return deviceHandler.postMessage(JSON.stringify({ operation, volume, path }));
+  return deviceHandler.postMessage(JSON.stringify({ operation, volume, path,
+    data, mode }));
 };
 const decodeBase64 = encoded => {
   const binary = globalThis.atob(encoded);
@@ -188,6 +189,12 @@ const decodeBase64 = encoded => {
   for (let index = 0; index < binary.length; ++index)
     bytes[index] = binary.charCodeAt(index);
   return bytes;
+};
+const encodeBase64 = bytes => {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x4000)
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x4000));
+  return btoa(binary);
 };
 const deviceFileMetadata = Symbol('OOS DeviceStorage file');
 const makeDeviceFile = (volume, entry, bytes = null) => {
@@ -212,9 +219,18 @@ const listDeviceFiles = async volume => {
 };
 const readDeviceFile = async metadata =>
   decodeBase64(await deviceCall('read', metadata.volume, metadata.path));
+const writeDeviceFile = async (volume, blob, path, mode) => {
+  if (!(blob instanceof Blob)) throw new TypeError('DeviceStorage expects a Blob');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (bytes.length > 64 * 1024 * 1024)
+    throw new DOMException('DeviceStorage file exceeds 64 MiB', 'QuotaExceededError');
+  await deviceCall('write', volume, path, encodeBase64(bytes), mode);
+  return path;
+};
 const makeDeviceCursor = (volume, prefix = '') => {
   const files = listDeviceFiles(volume).then(entries => prefix
-    ? entries.filter(file => file.name.startsWith(prefix)) : entries);
+    ? entries.filter(file => file[deviceFileMetadata].path.startsWith(prefix))
+    : entries);
   let cursorIndex = 0;
   let pending = false;
   const cursor = { result: null, error: null, done: false, onsuccess: null,
@@ -316,29 +332,48 @@ OosFileReader.DONE = OosFileReader.prototype.DONE = 2;
 try { Object.defineProperty(globalThis, 'FileReader', {
   value: OosFileReader, writable: true, configurable: true
 }); } catch (_) {}
-const storage = (storageName, volume, isRemovable, isDefault) => eventTarget({
-  storageName, storagePath: storageName, isRemovable, default: isDefault,
-  canBeMounted: false, canBeFormatted: false, lowDiskSpace: false,
-  onchange: null,
-  add: () => failedRequest('DeviceStorage.add'),
-  addNamed: () => failedRequest('DeviceStorage.addNamed'),
-  appendNamed: () => failedRequest('DeviceStorage.appendNamed'),
-  delete: () => failedRequest('DeviceStorage.delete'),
-  get: path => promiseRequest(readDeviceFile({ volume, path }).then(bytes =>
-    makeDeviceFile(volume, { path, size: bytes.length,
-      lastModified: Date.now() }, bytes))),
-  getEditable: () => failedRequest('DeviceStorage.getEditable'),
-  getRoot: () => failedRequest('DeviceStorage.getRoot'),
-  enumerate: prefix => makeDeviceCursor(volume, prefix || ''),
-  enumerateEditable: prefix => makeDeviceCursor(volume, prefix || ''),
-  available: () => domRequest('available'),
-  storageStatus: () => domRequest('available'),
-  freeSpace: () => domRequest(0),
-  usedSpace: () => domRequest(0),
-  format: () => failedRequest('DeviceStorage.format'),
-  mount: () => failedRequest('DeviceStorage.mount'),
-  unmount: () => failedRequest('DeviceStorage.unmount')
-});
+let generatedDeviceFile = 0;
+const storage = (storageName, volume, isRemovable, isDefault) => {
+  let target;
+  const notify = (reason, path) => {
+    target.dispatchEvent({ type: 'change', target, reason,
+      path: `${storageName}/${path}` });
+  };
+  const store = (blob, path, mode, reason) => promiseRequest(
+    writeDeviceFile(volume, blob, path, mode).then(result => {
+      notify(reason, path); return result;
+    }));
+  target = eventTarget({
+    storageName, storagePath: storageName, isRemovable, default: isDefault,
+    canBeMounted: false, canBeFormatted: false, lowDiskSpace: false,
+    onchange: null,
+    add: blob => {
+      const name = blob instanceof File && blob.name
+        ? blob.name : `oos-${Date.now()}-${++generatedDeviceFile}`;
+      return store(blob, name, 'create', 'created');
+    },
+    addNamed: (blob, path) => store(blob, path, 'create', 'created'),
+    appendNamed: (blob, path) => store(blob, path, 'append', 'modified'),
+    delete: path => promiseRequest(deviceCall('delete', volume, path).then(() => {
+      notify('deleted', path); return path;
+    })),
+    get: path => promiseRequest(readDeviceFile({ volume, path }).then(bytes =>
+      makeDeviceFile(volume, { path, size: bytes.length,
+        lastModified: Date.now() }, bytes))),
+    getEditable: () => failedRequest('DeviceStorage.getEditable'),
+    getRoot: () => failedRequest('DeviceStorage.getRoot'),
+    enumerate: prefix => makeDeviceCursor(volume, prefix || ''),
+    enumerateEditable: prefix => makeDeviceCursor(volume, prefix || ''),
+    available: () => domRequest('available'),
+    storageStatus: () => domRequest('available'),
+    freeSpace: () => promiseRequest(deviceCall('free-space', volume).then(Number)),
+    usedSpace: () => promiseRequest(deviceCall('used-space', volume).then(Number)),
+    format: () => failedRequest('DeviceStorage.format'),
+    mount: () => failedRequest('DeviceStorage.mount'),
+    unmount: () => failedRequest('DeviceStorage.unmount')
+  });
+  return target;
+};
 const internalStorage = storage('sdcard', 0, false, true);
 const removableStorage = storage('sdcard1', 1, true, false);
 const getDeviceStorages = name => name === 'sdcard'
@@ -371,7 +406,8 @@ define(nav, 'vibrate', () => false);
 const appRecord = Object.freeze({
   manifestURL: `${globalThis.location.origin}/manifest.webmanifest`,
   origin: globalThis.location.origin,
-  installOrigin: 'http://system.localhost'
+  installOrigin: `${globalThis.location.protocol}//system.localhost${
+    globalThis.location.port ? `:${globalThis.location.port}` : ''}`
 });
 define(nav, 'mozApps', makeManager({ getSelf: () => domRequest(appRecord),
   getInstalled: () => domRequest([appRecord]), mgmt: makeManager() }));
@@ -431,6 +467,15 @@ if (runtime.apiProfile === 'kaios-v3') {
 }
 })();
 )JS";
+  WebKitUserScript *user_script = webkit_user_script_new(
+      script_.c_str(), WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+      WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
+  if (!user_script) {
+    error_ = "cannot create KaiOS document-start script";
+    return false;
+  }
+  webkit_user_content_manager_add_script(manager_, user_script);
+  webkit_user_script_unref(user_script);
   return true;
 }
 
@@ -475,6 +520,8 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
   const oos::apps::JsonValue *operation = request.get("operation");
   const oos::apps::JsonValue *volume = request.get("volume");
   const oos::apps::JsonValue *path = request.get("path");
+  const oos::apps::JsonValue *data_value = request.get("data");
+  const oos::apps::JsonValue *mode = request.get("mode");
   if (!operation || !operation->isString() || !volume || !volume->isNumber() ||
       volume->integerValue() < 0 ||
       volume->integerValue() > OOS_DEVICE_API_REMOVABLE) {
@@ -487,13 +534,23 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
     request_operation = OOS_DEVICE_API_LIST_FILES;
   else if (operation->stringValue() == "read")
     request_operation = OOS_DEVICE_API_READ_FILE;
+  else if (operation->stringValue() == "write")
+    request_operation = OOS_DEVICE_API_WRITE_FILE;
+  else if (operation->stringValue() == "delete")
+    request_operation = OOS_DEVICE_API_DELETE_FILE;
+  else if (operation->stringValue() == "free-space")
+    request_operation = OOS_DEVICE_API_FREE_SPACE;
+  else if (operation->stringValue() == "used-space")
+    request_operation = OOS_DEVICE_API_USED_SPACE;
   else {
     webkit_script_message_reply_return_error_message(
         reply, "unknown OOS API operation");
     return TRUE;
   }
   const char *request_path = "";
-  if (request_operation == OOS_DEVICE_API_READ_FILE) {
+  if (request_operation == OOS_DEVICE_API_READ_FILE ||
+      request_operation == OOS_DEVICE_API_WRITE_FILE ||
+      request_operation == OOS_DEVICE_API_DELETE_FILE) {
     if (!path || !path->isString() || path->stringValue().empty()) {
       webkit_script_message_reply_return_error_message(
           reply, "device storage path is required");
@@ -502,12 +559,45 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
     request_path = path->stringValue().c_str();
   }
 
+  uint16_t request_flags = 0;
+  gsize request_payload_size = 0;
+  guchar *request_payload = nullptr;
+  if (request_operation == OOS_DEVICE_API_WRITE_FILE) {
+    if (!data_value || !data_value->isString() || !mode || !mode->isString()) {
+      webkit_script_message_reply_return_error_message(
+          reply, "device storage write data and mode are required");
+      return TRUE;
+    }
+    if (mode->stringValue() == "create")
+      request_flags = OOS_DEVICE_API_WRITE_CREATE;
+    else if (mode->stringValue() == "replace")
+      request_flags = OOS_DEVICE_API_WRITE_REPLACE;
+    else if (mode->stringValue() == "append")
+      request_flags = OOS_DEVICE_API_WRITE_APPEND;
+    else {
+      webkit_script_message_reply_return_error_message(
+          reply, "invalid device storage write mode");
+      return TRUE;
+    }
+    request_payload = g_base64_decode(data_value->stringValue().c_str(),
+                                      &request_payload_size);
+    if (request_payload_size > 64u * 1024u * 1024u) {
+      g_free(request_payload);
+      webkit_script_message_reply_return_error_message(
+          reply, "device storage write exceeds 64 MiB");
+      return TRUE;
+    }
+  }
+
   void *payload = nullptr;
   uint32_t payload_size = 0;
-  const int result =
-      oos_device_api_request(bridge->api_fd_, request_operation,
-                             static_cast<uint16_t>(volume->integerValue()),
-                             request_path, &payload, &payload_size, 30000);
+  const int result = oos_device_api_request_with_payload(
+      bridge->api_fd_, request_operation,
+      static_cast<uint16_t>(volume->integerValue()), request_flags,
+      request_path, request_payload,
+      static_cast<uint32_t>(request_payload_size), &payload, &payload_size,
+      30000);
+  g_free(request_payload);
   if (result != 0) {
     webkit_script_message_reply_return_error_message(
         reply, result < 0 ? std::strerror(-result) : "OOS device API failed");
@@ -520,9 +610,18 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
     if (payload_size)
       std::memcpy(response, payload, payload_size);
     response[payload_size] = '\0';
-  } else {
+  } else if (request_operation == OOS_DEVICE_API_READ_FILE) {
     response = reinterpret_cast<char *>(
         g_base64_encode(static_cast<const guchar *>(payload), payload_size));
+  } else if (request_operation == OOS_DEVICE_API_FREE_SPACE ||
+             request_operation == OOS_DEVICE_API_USED_SPACE) {
+    if (payload_size == sizeof(uint64_t)) {
+      uint64_t bytes = 0;
+      std::memcpy(&bytes, payload, sizeof(bytes));
+      response = g_strdup(std::to_string(bytes).c_str());
+    }
+  } else {
+    response = g_strdup("");
   }
   oos_device_api_free(payload);
   if (!response) {

@@ -13,7 +13,7 @@ namespace oos::web {
 class LocalAppServer {
 public:
   LocalAppServer(std::string app_id, std::string package_path,
-                 std::string entrypoint, std::string api_script);
+                 std::string entrypoint);
   ~LocalAppServer();
 
   LocalAppServer(const LocalAppServer &) = delete;
@@ -34,7 +34,6 @@ private:
   std::string app_id_;
   std::string package_path_;
   std::string entrypoint_;
-  std::string api_script_;
   std::string host_;
   std::string origin_;
   apps::ZipArchive archive_;

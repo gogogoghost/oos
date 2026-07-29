@@ -19,6 +19,8 @@ struct WasmAppOptions {
   uint32_t heap_size = 4 * 1024 * 1024;
   std::string app_id;
   std::string data_directory;
+  std::string internal_media_directory = "/data/media/internal";
+  std::string removable_media_directory = "/data/media/removable";
 };
 
 class WasmApp {

@@ -2,21 +2,29 @@
 #include "oos/compositor/compositor.h"
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
+#include "oos/storage/device_storage.h"
+#include "oos/web/device_api_service.h"
+#include "oos/web/device_api_transport.h"
+#include "oos/web/kaios_api_bridge.h"
+#include "oos/web/local_app_server.h"
 #include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_surface_host.h"
-#include "oos/web/zip_app_source.h"
 
 #include <glib-unix.h>
 #include <glib.h>
 #include <wpe/webkit.h>
 #include <wpe/wpe.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <signal.h>
 #include <string>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
 
 extern "C" {
 typedef struct _WebKitWebViewBackend WebKitWebViewBackend;
@@ -89,6 +97,10 @@ gboolean pumpLocalEvents(gpointer data) {
 gboolean stopRunner(gpointer data) {
   g_main_loop_quit(static_cast<GMainLoop *>(data));
   return G_SOURCE_REMOVE;
+}
+
+void closeFromWeb(void *data) {
+  g_main_loop_quit(static_cast<GMainLoop *>(data));
 }
 
 void keepBackendOwnedByRunner(gpointer) {}
@@ -167,18 +179,18 @@ int main(int argc, char **argv) {
       use_registered_app
           ? registered_app.cache_directory
           : std::string(data_root) + "/cache/web/" + app_id + "/webkit-2.52";
-  WebKitWebContext *web_context = webkit_web_context_get_default();
-  std::unique_ptr<oos::web::ZipAppSource> zip_source;
+  std::unique_ptr<oos::web::LocalAppServer> app_server;
   std::string registered_uri;
   if (use_registered_app) {
-    zip_source = std::make_unique<oos::web::ZipAppSource>(
-        app_id, registered_app.app.package_path);
-    if (!zip_source->initialize(web_context)) {
-      std::fprintf(stderr, "failed to open WPE ZIP application: %s\n",
-                   zip_source->lastError().c_str());
+    app_server = std::make_unique<oos::web::LocalAppServer>(
+        app_id, registered_app.app.package_path,
+        registered_app.app.manifest.entrypoint);
+    if (!app_server->start()) {
+      std::fprintf(stderr, "failed to serve WPE ZIP application: %s\n",
+                   app_server->lastError().c_str());
       return 1;
     }
-    registered_uri = zip_source->uriFor(registered_app.app.manifest.entrypoint);
+    registered_uri = app_server->urlFor(registered_app.app.manifest.entrypoint);
     path = registered_uri.c_str();
   }
   oos::web::WpeAppProfile profile(app_id, data_directory, cache_directory);
@@ -187,27 +199,83 @@ int main(int argc, char **argv) {
                  profile.lastError().c_str());
     return 1;
   }
-  WebKitWebView *view = profile.createView(wrapped);
+  GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
+  int api_sockets[2] = {-1, -1};
+  std::unique_ptr<oos::web::KaiOsApiBridge> bridge;
+  std::atomic<bool> stop_api{false};
+  bool api_connected = false;
+  std::string api_error;
+  std::thread api_thread;
+  if (use_registered_app) {
+    const int socket_result = oos_device_api_socket_pair(api_sockets);
+    if (socket_result != 0) {
+      std::fprintf(stderr, "failed to create local WPE device API socket: %s\n",
+                   std::strerror(-socket_result));
+      g_main_loop_unref(loop);
+      return 1;
+    }
+    bridge = std::make_unique<oos::web::KaiOsApiBridge>(
+        app_id, registered_app.app.manifest.api_profile, api_sockets[1]);
+    api_sockets[1] = -1;
+    if (!bridge->initialize(closeFromWeb, loop)) {
+      std::fprintf(stderr, "failed to initialize local KaiOS API bridge: %s\n",
+                   bridge->lastError().c_str());
+      close(api_sockets[0]);
+      g_main_loop_unref(loop);
+      return 1;
+    }
+    api_connected = true;
+    const std::string internal_media =
+        std::string(data_root) + "/media/internal";
+    const std::string removable_media =
+        std::string(data_root) + "/media/removable";
+    api_thread = std::thread([&, internal_media, removable_media] {
+      oos::storage::DeviceStorageService storage(internal_media,
+                                                 removable_media);
+      while (!stop_api && api_connected) {
+        if (!oos::web::serviceDeviceApi(api_sockets[0], storage, api_connected,
+                                        api_error, 50)) {
+          g_main_loop_quit(loop);
+          break;
+        }
+      }
+    });
+  }
+  WebKitWebView *view =
+      profile.createView(wrapped, bridge ? bridge->contentManager() : nullptr);
   char *uri = appUri(path);
   if (!view || !uri) {
     if (view)
       g_object_unref(view);
     g_free(uri);
+    stop_api = true;
+    if (api_thread.joinable())
+      api_thread.join();
+    if (api_sockets[0] >= 0)
+      close(api_sockets[0]);
+    g_main_loop_unref(loop);
     return 1;
   }
   webkit_web_view_load_uri(view, uri);
   std::fprintf(stderr, "OOS local WPE app started: %s\n", uri);
   g_free(uri);
 
-  GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
   RunnerState state{loop, &device->keyInput(), surface.viewBackend()};
   g_timeout_add(8, pumpLocalEvents, &state);
   g_unix_signal_add(SIGINT, stopRunner, loop);
   g_unix_signal_add(SIGTERM, stopRunner, loop);
   g_main_loop_run(loop);
+  stop_api = true;
+  if (api_thread.joinable())
+    api_thread.join();
+  if (api_sockets[0] >= 0)
+    close(api_sockets[0]);
+  if (!api_error.empty())
+    std::fprintf(stderr, "local WPE device API failed: %s\n",
+                 api_error.c_str());
   std::fprintf(stderr, "OOS local WPE presented %llu software frames\n",
                static_cast<unsigned long long>(surface.presentedFrames()));
   g_main_loop_unref(loop);
   g_object_unref(view);
-  return surface.presentedFrames() > 0 ? 0 : 1;
+  return surface.presentedFrames() > 0 && api_error.empty() ? 0 : 1;
 }

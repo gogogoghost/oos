@@ -51,8 +51,9 @@ large per-app heap is not acceptable on this device.
 
 `apps/sdk/wit/oos.wit` is the single source of truth. It describes runtime/logging,
 graphics, device identity and capabilities, audio, camera, power, vibration,
-Wi-Fi/IP, Bluetooth, modem, codec, and lifecycle interfaces with WIT records,
-enums, flags, lists, strings, and results. The host registers matching
+Wi-Fi/IP, Bluetooth, modem, codec, application-private storage, user-visible
+device storage, and lifecycle interfaces with WIT records, enums, flags, lists,
+strings, and results. The host registers matching
 versioned WAMR modules and implements the Canonical ABI lowering.
 
 The portable graphics interface provides surface dimensions and format,
@@ -83,6 +84,11 @@ through validated WIT buffers. Each application receives only its configured
 `/data/users/0/wasm/<app-id>` storage root. Permission enforcement is deferred
 during rooted bring-up, but the app identity is already carried into every
 runtime instance.
+
+The separate `device-storage` interface reads and writes user-visible internal
+or removable media. WAMR writes directly from validated guest linear memory;
+reads allocate the Canonical ABI result in guest memory and read file bytes into
+that allocation without an intermediate host byte vector.
 
 ## WAMR And Components
 

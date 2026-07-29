@@ -79,6 +79,11 @@ bool NativeAppManager::load(const char *id,
   wasm_options.app_id = id;
   wasm_options.data_directory =
       options.data_directory ? options.data_directory : "";
+  wasm_options.internal_media_directory =
+      options.internal_media_directory ? options.internal_media_directory : "";
+  wasm_options.removable_media_directory =
+      options.removable_media_directory ? options.removable_media_directory
+                                        : "";
   auto app = impl_->device
                  ? std::make_unique<WasmApp>(impl_->graphics, *impl_->device,
                                              wasm_options)

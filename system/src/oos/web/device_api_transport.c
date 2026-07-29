@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #define OOS_DEVICE_API_MAGIC 0x4f4f5341u
-#define OOS_DEVICE_API_VERSION 1u
+#define OOS_DEVICE_API_VERSION 2u
 #define OOS_DEVICE_API_MAX_PATH 4096u
 #define OOS_DEVICE_API_MAX_PAYLOAD (64u * 1024u * 1024u)
 
@@ -17,8 +17,9 @@ typedef struct RequestHeader {
   uint16_t version;
   uint16_t operation;
   uint16_t volume;
-  uint16_t reserved;
+  uint16_t flags;
   uint32_t path_size;
+  uint32_t payload_size;
 } RequestHeader;
 
 typedef struct ResponseHeader {
@@ -90,33 +91,51 @@ int oos_device_api_socket_pair(int sockets[2]) {
   return 0;
 }
 
-int oos_device_api_request(int socket_fd, uint16_t operation, uint16_t volume,
-                           const char *path, void **payload,
-                           uint32_t *payload_size, int timeout_ms) {
-  if (socket_fd < 0 || !payload || !payload_size ||
-      (operation != OOS_DEVICE_API_LIST_FILES &&
-       operation != OOS_DEVICE_API_READ_FILE) ||
-      volume > OOS_DEVICE_API_REMOVABLE)
+static int valid_operation(uint16_t operation) {
+  return operation >= OOS_DEVICE_API_LIST_FILES &&
+         operation <= OOS_DEVICE_API_USED_SPACE;
+}
+
+int oos_device_api_request_with_payload(
+    int socket_fd, uint16_t operation, uint16_t volume, uint16_t flags,
+    const char *path, const void *request_payload,
+    uint32_t request_payload_size, void **response_payload,
+    uint32_t *response_payload_size, int timeout_ms) {
+  if (socket_fd < 0 || !response_payload || !response_payload_size ||
+      !valid_operation(operation) || volume > OOS_DEVICE_API_REMOVABLE ||
+      request_payload_size > OOS_DEVICE_API_MAX_PAYLOAD ||
+      (request_payload_size && !request_payload) ||
+      (operation != OOS_DEVICE_API_WRITE_FILE && request_payload_size) ||
+      (operation == OOS_DEVICE_API_WRITE_FILE &&
+       flags > OOS_DEVICE_API_WRITE_APPEND) ||
+      (operation != OOS_DEVICE_API_WRITE_FILE && flags))
     return -EINVAL;
-  *payload = NULL;
-  *payload_size = 0;
+  *response_payload = NULL;
+  *response_payload_size = 0;
   if (!path)
     path = "";
   const size_t path_size = strlen(path);
   if (path_size > OOS_DEVICE_API_MAX_PATH ||
-      (operation == OOS_DEVICE_API_READ_FILE && path_size == 0))
+      ((operation == OOS_DEVICE_API_READ_FILE ||
+        operation == OOS_DEVICE_API_WRITE_FILE ||
+        operation == OOS_DEVICE_API_DELETE_FILE) &&
+       path_size == 0))
     return -EINVAL;
   const RequestHeader request = {
       .magic = OOS_DEVICE_API_MAGIC,
       .version = OOS_DEVICE_API_VERSION,
       .operation = operation,
       .volume = volume,
-      .reserved = 0,
+      .flags = flags,
       .path_size = (uint32_t)path_size,
+      .payload_size = request_payload_size,
   };
   int result = send_exact(socket_fd, &request, sizeof(request), timeout_ms);
   if (!result && path_size)
     result = send_exact(socket_fd, path, path_size, timeout_ms);
+  if (!result && request_payload_size)
+    result = send_exact(socket_fd, request_payload, request_payload_size,
+                        timeout_ms);
   if (result)
     return result;
 
@@ -143,9 +162,17 @@ int oos_device_api_request(int socket_fd, uint16_t operation, uint16_t volume,
     free(bytes);
     return response.status < 0 ? response.status : -EIO;
   }
-  *payload = bytes;
-  *payload_size = response.payload_size;
+  *response_payload = bytes;
+  *response_payload_size = response.payload_size;
   return 0;
+}
+
+int oos_device_api_request(int socket_fd, uint16_t operation, uint16_t volume,
+                           const char *path, void **payload,
+                           uint32_t *payload_size, int timeout_ms) {
+  return oos_device_api_request_with_payload(socket_fd, operation, volume, 0,
+                                             path, NULL, 0, payload,
+                                             payload_size, timeout_ms);
 }
 
 int oos_device_api_receive(int socket_fd, OosDeviceApiRequest *request,
@@ -158,15 +185,23 @@ int oos_device_api_receive(int socket_fd, OosDeviceApiRequest *request,
     return result;
   if (header.magic != OOS_DEVICE_API_MAGIC ||
       header.version != OOS_DEVICE_API_VERSION ||
-      (header.operation != OOS_DEVICE_API_LIST_FILES &&
-       header.operation != OOS_DEVICE_API_READ_FILE) ||
+      !valid_operation(header.operation) ||
       header.volume > OOS_DEVICE_API_REMOVABLE ||
       header.path_size > OOS_DEVICE_API_MAX_PATH ||
-      (header.operation == OOS_DEVICE_API_READ_FILE && !header.path_size))
+      header.payload_size > OOS_DEVICE_API_MAX_PAYLOAD ||
+      (header.operation != OOS_DEVICE_API_WRITE_FILE && header.payload_size) ||
+      (header.operation == OOS_DEVICE_API_WRITE_FILE &&
+       header.flags > OOS_DEVICE_API_WRITE_APPEND) ||
+      (header.operation != OOS_DEVICE_API_WRITE_FILE && header.flags) ||
+      ((header.operation == OOS_DEVICE_API_READ_FILE ||
+        header.operation == OOS_DEVICE_API_WRITE_FILE ||
+        header.operation == OOS_DEVICE_API_DELETE_FILE) &&
+       !header.path_size))
     return -EPROTO;
   memset(request, 0, sizeof(*request));
   request->operation = header.operation;
   request->volume = header.volume;
+  request->flags = header.flags;
   if (header.path_size) {
     result =
         receive_exact(socket_fd, request->path, header.path_size, timeout_ms);
@@ -174,7 +209,27 @@ int oos_device_api_receive(int socket_fd, OosDeviceApiRequest *request,
       return result == 0 ? -EPIPE : result;
   }
   request->path[header.path_size] = '\0';
+  if (header.payload_size) {
+    request->payload = malloc(header.payload_size);
+    if (!request->payload)
+      return -ENOMEM;
+    result = receive_exact(socket_fd, request->payload, header.payload_size,
+                           timeout_ms);
+    if (result <= 0) {
+      oos_device_api_request_clear(request);
+      return result == 0 ? -EPIPE : result;
+    }
+    request->payload_size = header.payload_size;
+  }
   return 1;
+}
+
+void oos_device_api_request_clear(OosDeviceApiRequest *request) {
+  if (!request)
+    return;
+  free(request->payload);
+  request->payload = NULL;
+  request->payload_size = 0;
 }
 
 int oos_device_api_reply(int socket_fd, int32_t status, const void *payload,

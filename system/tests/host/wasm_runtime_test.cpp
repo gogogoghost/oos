@@ -265,6 +265,15 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppLaunchOptions mock_launch;
   mock_launch.module_path = argv[2];
   mock_launch.data_directory = storage_root;
+  const std::string internal_media = std::string(storage_root) + "/internal";
+  const std::string removable_media = std::string(storage_root) + "/removable";
+  if (!std::filesystem::create_directories(internal_media) ||
+      !std::filesystem::create_directories(removable_media)) {
+    std::fprintf(stderr, "cannot create WIT media test roots\n");
+    return 1;
+  }
+  mock_launch.internal_media_directory = internal_media.c_str();
+  mock_launch.removable_media_directory = removable_media.c_str();
   if (!mock_smoke.load("local-mock", mock_launch) ||
       !mock_smoke.activate("local-mock") || !mock_smoke.render(1'600'000)) {
     std::fprintf(stderr, "WIT local mock API smoke failed: %s\n",

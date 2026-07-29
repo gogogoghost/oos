@@ -5,6 +5,7 @@
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
 #include "oos/storage/device_storage.h"
+#include "oos/web/device_api_service.h"
 #include "oos/web/device_api_transport.h"
 
 #include <android/hardware_buffer.h>
@@ -33,7 +34,6 @@ constexpr int kAcceptTimeoutMs = 10000;
 constexpr int kFramePollMs = 16;
 constexpr int kChildStopSlices = 50;
 constexpr useconds_t kChildStopSliceUs = 20000;
-constexpr int kDeviceApiTimeoutMs = 30000;
 
 const char *environmentOr(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
@@ -85,109 +85,6 @@ void sendKey(void *data, const input::KeyEvent &event) {
   }
   if (result != 0)
     context->success = false;
-}
-
-void appendJsonString(std::string &output, const std::string &value) {
-  static const char hex[] = "0123456789abcdef";
-  output.push_back('"');
-  for (const unsigned char character : value) {
-    switch (character) {
-    case '"':
-      output += "\\\"";
-      break;
-    case '\\':
-      output += "\\\\";
-      break;
-    case '\b':
-      output += "\\b";
-      break;
-    case '\f':
-      output += "\\f";
-      break;
-    case '\n':
-      output += "\\n";
-      break;
-    case '\r':
-      output += "\\r";
-      break;
-    case '\t':
-      output += "\\t";
-      break;
-    default:
-      if (character < 0x20) {
-        output += "\\u00";
-        output.push_back(hex[character >> 4]);
-        output.push_back(hex[character & 0x0f]);
-      } else {
-        output.push_back(static_cast<char>(character));
-      }
-    }
-  }
-  output.push_back('"');
-}
-
-std::string
-serializeEntries(const std::vector<storage::DeviceStorageEntry> &entries) {
-  std::string output = "[";
-  for (size_t index = 0; index < entries.size(); ++index) {
-    if (index)
-      output.push_back(',');
-    output += "{\"path\":";
-    appendJsonString(output, entries[index].path);
-    output += ",\"size\":" + std::to_string(entries[index].size);
-    output +=
-        ",\"lastModified\":" + std::to_string(entries[index].last_modified_ms) +
-        "}";
-  }
-  output.push_back(']');
-  return output;
-}
-
-bool serviceDeviceApi(int socket_fd, storage::DeviceStorageService &service,
-                      bool &connected, std::string &error) {
-  if (!connected)
-    return true;
-  OosDeviceApiRequest request = {};
-  const int received = oos_device_api_receive(socket_fd, &request, 0);
-  if (received == -ETIMEDOUT)
-    return true;
-  if (received == 0) {
-    connected = false;
-    return true;
-  }
-  if (received < 0) {
-    error = errorText("receive WPE device API request", received);
-    return false;
-  }
-
-  const auto volume = static_cast<storage::DeviceStorageVolume>(request.volume);
-  int status = 0;
-  const void *payload = nullptr;
-  uint32_t payload_size = 0;
-  std::string serialized;
-  std::vector<uint8_t> bytes;
-  if (request.operation == OOS_DEVICE_API_LIST_FILES) {
-    std::vector<storage::DeviceStorageEntry> entries;
-    if (!service.list(volume, entries)) {
-      status = -ENOENT;
-    } else {
-      serialized = serializeEntries(entries);
-      payload = serialized.data();
-      payload_size = static_cast<uint32_t>(serialized.size());
-    }
-  } else if (!service.read(volume, request.path, bytes)) {
-    status = -ENOENT;
-  } else {
-    payload = bytes.data();
-    payload_size = static_cast<uint32_t>(bytes.size());
-  }
-  const int replied = oos_device_api_reply(socket_fd, status, payload,
-                                           payload_size, kDeviceApiTimeoutMs);
-  if (replied != 0) {
-    error = errorText("reply to WPE device API request", replied);
-    return false;
-  }
-  return true;
 }
 
 pid_t startRunner(const apps::AppLaunch &launch,

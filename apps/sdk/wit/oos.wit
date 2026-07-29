@@ -734,6 +734,15 @@ interface device-storage {
     removable,
   }
 
+  enum write-mode {
+    /// Create a new file and fail if the path already exists.
+    create,
+    /// Atomically replace the complete file contents.
+    replace,
+    /// Append to an existing file, creating it when absent.
+    append,
+  }
+
   record entry {
     path: string,
     size: u64,
@@ -742,6 +751,16 @@ interface device-storage {
 
   enumerate-files: func(volume: volume) -> result<list<entry>, error-code>;
   read-file: func(volume: volume, path: string) -> result<list<u8>, error-code>;
+  write-file: func(
+    volume: volume,
+    path: string,
+    mode: write-mode,
+    bytes: list<u8>,
+  ) -> result<_, error-code>;
+  /// Returns true when a file was removed and false when it did not exist.
+  delete-file: func(volume: volume, path: string) -> result<bool, error-code>;
+  free-space: func(volume: volume) -> result<u64, error-code>;
+  used-space: func(volume: volume) -> result<u64, error-code>;
 }
 
 /// Lifecycle exported by every OOS application.

@@ -38,11 +38,14 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/native_app_manager.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/wasm_app.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/device_storage.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp")
 target_include_directories(oos_wasm_runtime_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
-target_link_libraries(oos_wasm_runtime_test PRIVATE oos_wamr_host ${CMAKE_DL_LIBS})
+target_link_libraries(oos_wasm_runtime_test PRIVATE
+  oos_wamr_host ${CMAKE_DL_LIBS} z)
 
 add_executable(oos_app_repository_test
   app_repository_test.cpp
@@ -66,4 +69,5 @@ add_executable(oos_device_storage_test
   "${OOS_SYSTEM_ROOT}/src/oos/web/device_api_transport.c")
 target_include_directories(oos_device_storage_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
+target_compile_options(oos_device_storage_test PRIVATE -UNDEBUG)
 target_link_libraries(oos_device_storage_test PRIVATE Threads::Threads z)

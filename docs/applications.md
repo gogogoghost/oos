@@ -53,9 +53,9 @@ resolves this record, then prepares one of two contexts:
 - WAMR extracts only the selected AOT/Wasm entry to
   `/data/cache/aot/<content-key>/app.*` and maps it from there.
 - WPE keeps the package zipped and serves requested HTML, CSS, JavaScript,
-  image, font, and Wasm entries from `http://<app-id>.localhost`. The embedded
-  loopback HTTP server is static-package transport only; it never exposes
-  device files or privileged operations as HTTP routes.
+  image, font, and Wasm entries from `http://<app-id>.localhost:8080`. The
+  embedded loopback HTTP server is static-package transport only; it never
+  exposes device files or privileged operations as HTTP routes.
 
 WPE API shims must be selected from `api_profile`; a KaiOS 2.5 application
 must not receive the KaiOS 3 bridge by accident. On Android, `oos` starts one
@@ -70,11 +70,17 @@ WebKit message handler and a private OOS control socket. The OOS host performs
 the operation; HTTP remains unaware of it. Unimplemented compatibility APIs
 are explicit empty or `NotSupportedError` adapters selected by `api_profile`.
 
-DeviceStorage is the first end-to-end adapter. Enumeration returns metadata
-from `/data/media/internal` and `/data/media/removable`; file bytes are fetched
-only when `FileReader` reads the selected file. The same host service is
-described by WIT `device-storage`, so WPE and WAMR do not grow separate
-filesystem implementations.
+DeviceStorage is the first shared adapter. Enumeration returns metadata from
+`/data/media/internal` and `/data/media/removable`; file bytes are fetched only
+when `FileReader` reads the selected file. Creation, replacement, append,
+deletion, and volume space queries use the same service. WIT `device-storage`
+exposes that service to WAMR, so WPE and WAMR do not grow separate filesystem
+implementations. The remaining compatibility matrix is tracked in
+[kaios-api-coverage.md](kaios-api-coverage.md).
+
+Packaged Web applications use `http://<app-id>.localhost:8080`. The unprivileged
+port is identical in local and device builds, and the KaiOS bridge is injected
+at document start by WebKit rather than by rewriting application HTML.
 
 ## Persistent Storage
 
