@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use egui::{Color32, Context, FontId, Key, Pos2, RawInput, Rect, RichText, Vec2};
+use egui::{Color32, Context, FontId, Pos2, Rect, RichText, Vec2};
 
 const LINUX_KEY_UP: u32 = 103;
 const LINUX_KEY_LEFT: u32 = 105;
@@ -10,8 +10,6 @@ const LINUX_KEY_SOFT_LEFT: u32 = 139;
 const LINUX_KEY_BACK: u32 = 158;
 const LINUX_KEY_OK: u32 = 352;
 const LINUX_KEY_SOFT_RIGHT: u32 = 357;
-
-const ACTION_PRESSED: u32 = 1;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
@@ -65,45 +63,32 @@ struct Launcher {
     selected: usize,
     notice_until_us: u64,
     notice: Option<&'static str>,
-    pending_events: Vec<egui::Event>,
+    input: oos_egui::Input,
 }
 
 impl Launcher {
-    fn new() -> Self {
+    fn new() -> Result<Self, oos_egui::Error> {
         let context = Context::default();
+        oos_egui::install_system_fonts(&context)?;
         context.set_visuals(egui::Visuals::dark());
-        Self {
+        Ok(Self {
             context,
             renderer: oos_egui::Renderer::new(),
             view: View::Home,
             selected: 0,
             notice_until_us: 0,
             notice: None,
-            pending_events: Vec::new(),
-        }
+            input: oos_egui::Input::new(),
+        })
     }
 
-    fn key(&mut self, code: u32, action: u32, now_us: u64) {
-        if action != ACTION_PRESSED {
+    fn key(&mut self, event: oos_app::KeyEvent) {
+        let code = event.code;
+        let now_us = event.monotonic_time_us;
+        let pressed = matches!(event.action, oos_app::KeyAction::Pressed);
+        self.input.push_key(event);
+        if !pressed {
             return;
-        }
-        let egui_key = match code {
-            LINUX_KEY_UP => Some(Key::ArrowUp),
-            LINUX_KEY_DOWN => Some(Key::ArrowDown),
-            LINUX_KEY_LEFT => Some(Key::ArrowLeft),
-            LINUX_KEY_RIGHT => Some(Key::ArrowRight),
-            LINUX_KEY_OK => Some(Key::Enter),
-            LINUX_KEY_BACK => Some(Key::Escape),
-            _ => None,
-        };
-        if let Some(key) = egui_key {
-            self.pending_events.push(egui::Event::Key {
-                key,
-                physical_key: Some(key),
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            });
         }
 
         match (self.view, code) {
@@ -144,16 +129,7 @@ impl Launcher {
         if self.notice.is_some() && now_us >= self.notice_until_us {
             self.notice = None;
         }
-        let [width, height] = oos_app::surface_size();
-        let input = RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                Pos2::ZERO,
-                Vec2::new(width as f32, height as f32),
-            )),
-            time: Some(now_us as f64 / 1_000_000.0),
-            events: std::mem::take(&mut self.pending_events),
-            ..Default::default()
-        };
+        let input = self.input.take(now_us);
 
         let view = self.view;
         let selected = self.selected;
@@ -161,9 +137,19 @@ impl Launcher {
         let output = self.context.run_ui(input, |ui| {
             render_launcher(ui, view, selected, notice);
         });
-        self.renderer
+        let backend_output = self
+            .renderer
             .submit(&self.context, output, [16, 18, 22, 255])
-            .map_err(|error| error.message())
+            .map_err(|error| error.message())?;
+        if !backend_output.platform_output.commands.is_empty()
+            || backend_output
+                .viewport_output
+                .iter()
+                .any(|(id, output)| *id != egui::ViewportId::ROOT || !output.commands.is_empty())
+        {
+            return Err("launcher requested an unsupported OOS platform action");
+        }
+        Ok(())
     }
 }
 
@@ -364,20 +350,19 @@ impl oos_app::App for App {
         if oos_app::abi_version() != oos_app::ABI_VERSION {
             return Err(oos_app::ErrorCode::Failed);
         }
-        LAUNCHER.with(|launcher| *launcher.borrow_mut() = Some(Launcher::new()));
+        let launcher = Launcher::new().map_err(|error| {
+            oos_app::log(3, error.message());
+            oos_app::ErrorCode::Unavailable
+        })?;
+        LAUNCHER.with(|slot| *slot.borrow_mut() = Some(launcher));
         oos_app::log(1, "egui launcher initialized");
         Ok(())
     }
 
     fn event(event: oos_app::KeyEvent) {
-        let action = match event.action {
-            oos_app::KeyAction::Released => 0,
-            oos_app::KeyAction::Pressed => 1,
-            oos_app::KeyAction::Repeated => 2,
-        };
         LAUNCHER.with(|launcher| {
             if let Some(launcher) = launcher.borrow_mut().as_mut() {
-                launcher.key(event.code, action, event.monotonic_time_us);
+                launcher.key(event);
             }
         });
     }

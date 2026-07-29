@@ -5,7 +5,8 @@ versioned `res` runtime. In this context, `res` is the complete OOS runtime,
 not web application content. It contains the `oos` executable, WPE WebKit,
 shared libraries, WebKit helper processes, runtime data, and certificates.
 It also contains WAMR native applications and the device boot splash; all are
-upgraded atomically with the native runtime.
+upgraded atomically with the native runtime. Shared native-app fonts are
+installed under `share/fonts` with their licenses under `share/licenses/oos`.
 
 ## Installed Layout
 

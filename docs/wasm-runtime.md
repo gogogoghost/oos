@@ -50,16 +50,18 @@ large per-app heap is not acceptable on this device.
 ## WIT Interface Package
 
 `apps/sdk/wit/oos.wit` is the single source of truth. It describes runtime/logging,
-graphics, device identity and capabilities, audio, camera, power, vibration,
-Wi-Fi/IP, Bluetooth, modem, codec, application-private storage, user-visible
-device storage, and lifecycle interfaces with WIT records, enums, flags, lists,
-strings, and results. The host registers matching
+graphics, read-only system fonts, device identity and capabilities, device
+services, application-private storage, user-visible device storage, and
+lifecycle interfaces with WIT records, enums, flags, lists, strings, and
+results. The host registers matching
 versioned WAMR modules and implements the Canonical ABI lowering.
 
 The portable graphics interface provides surface dimensions and format,
 bounded A8/RGB565/RGBA4444/RGBA8888 texture updates, and indexed triangle
-batches with clip rectangles. Vertices contain logical pixel position, UV, and
-premultiplied RGBA color. The validated GLES2 interface adds shaders, programs,
+physical-pixel batches with clip rectangles. `pixels-per-point` lets GUI
+adapters convert their logical coordinates once before submission. Vertices
+contain physical pixel position, UV, and premultiplied RGBA color. The
+validated GLES2 interface adds shaders, programs,
 buffers, depth/stencil state, and one fixed-record command batch per frame for
 game-engine backends. Both paths present the host's retained target, so the
 guest never maps a framebuffer or receives a native GPU handle. See
@@ -98,6 +100,12 @@ or removable media. WAMR writes directly from validated guest linear memory;
 reads allocate the Canonical ABI result in guest memory and read file bytes into
 that allocation without an intermediate host byte vector. It is exposed only
 when a granted permission starts with `device-storage:`.
+
+The separate unprivileged `font-assets` interface maps semantic roles to fixed
+files below `/opt/oos/share/fonts`; it never accepts a path from the Guest.
+Loading allocates the Canonical ABI result once and reads directly into Guest
+linear memory. The packaged `ui-proportional.otf` is shared by applications,
+so framework apps do not need to embed the same font in every ZIP.
 
 The `system-services` interface is a trusted JSON policy broker for SystemUI.
 It is registered only for applications granted `system`; ordinary WAMR apps do
@@ -152,7 +160,10 @@ to phone GPU. `oos-egui::Renderer` retains its frame buffers and handles
 texture deltas, tessellation, index rebasing, clip rectangles, and WIT
 submissions, leaving Launcher with application UI logic only. Its
 `CanvasTexture` accepts direct RGB565 and other supported formats for emulator
-or software-rendered content embedded in a UI.
+or software-rendered content embedded in a UI. `oos-egui::Input` preserves key
+press, repeat, and release state and builds correctly scaled `RawInput` values.
+The renderer returns non-painting egui output for the application/SystemUI
+integration to handle explicitly.
 
 iced is next: its custom renderer/backend can target the same WIT texture and
 mesh interface. The adapter must live in the SDK and avoid depending on wgpu
@@ -209,5 +220,5 @@ pages, so 60 MiB PSS is a best case rather than a universal promise.
 
 These are steady-state `top`, `smaps_rollup`, and `/proc/meminfo` samples, not
 a formal benchmark. System capacity decisions must use PSS and `MemAvailable`,
-not `MemFree` or a sum of per-process RSS. Static-screen invalidation and a
-host font service remain future memory and power optimizations.
+not `MemFree` or a sum of per-process RSS. Static-screen invalidation remains a
+future memory and power optimization.

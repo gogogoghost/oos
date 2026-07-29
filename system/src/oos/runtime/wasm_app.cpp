@@ -22,6 +22,7 @@
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
 #include "oos/runtime/graphics_host.h"
+#include "oos/resources/font_assets.h"
 #include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
@@ -50,6 +51,8 @@ constexpr const char *kCodecInterface = "oos:platform/codec@0.1.0";
 constexpr const char *kStorageInterface = "oos:platform/storage@0.1.0";
 constexpr const char *kDeviceStorageInterface =
     "oos:platform/device-storage@0.1.0";
+constexpr const char *kFontAssetsInterface =
+    "oos:platform/font-assets@0.1.0";
 constexpr const char *kSystemServicesInterface =
     "oos:platform/system-services@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
@@ -112,6 +115,7 @@ struct AppHostContext {
   std::unique_ptr<device::ServiceProvider> *services = nullptr;
   storage::AppStorage *storage = nullptr;
   storage::DeviceStorageService *device_storage = nullptr;
+  resources::FontAssetService *font_assets = nullptr;
   services::SystemServiceHub *system_services = nullptr;
   const std::string *app_id = nullptr;
   uint32_t service_permission_mask = 0;
@@ -187,6 +191,11 @@ storage::DeviceStorageService *deviceStorageFor(wasm_exec_env_t environment) {
              : nullptr;
 }
 
+resources::FontAssetService *fontAssetsFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->font_assets : nullptr;
+}
+
 device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
   if (!host || !host->device || !host->services ||
@@ -234,6 +243,12 @@ void nativeSurfaceSize(wasm_exec_env_t environment, uint32_t result_offset) {
   }
   result[0] = graphics ? graphics->width() : 0;
   result[1] = graphics ? graphics->height() : 0;
+}
+
+float nativePixelsPerPoint(wasm_exec_env_t environment) {
+  GraphicsHost *graphics = graphicsFor(environment);
+  const float scale = graphics ? graphics->pixelsPerPoint() : 1.0f;
+  return scale > 0.0f ? scale : 1.0f;
 }
 
 uint32_t nativeSurfaceFormat(wasm_exec_env_t environment) {
@@ -758,6 +773,82 @@ void nativeDeviceStorageRead(wasm_exec_env_t environment, uint32_t volume,
       guestRealloc(environment, pointer, size, 1, 0);
     result[0] = 1;
     result[4] = static_cast<uint8_t>(WitError::Io);
+    return;
+  }
+  result[0] = 0;
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, size);
+}
+
+WitError fontAssetError(resources::FontAssetStatus status) {
+  switch (status) {
+  case resources::FontAssetStatus::Unavailable:
+    return WitError::Unavailable;
+  case resources::FontAssetStatus::InvalidArgument:
+    return WitError::InvalidArgument;
+  case resources::FontAssetStatus::LimitExceeded:
+    return WitError::LimitExceeded;
+  case resources::FontAssetStatus::Io:
+    return WitError::Io;
+  case resources::FontAssetStatus::Ok:
+    break;
+  }
+  return WitError::Failed;
+}
+
+void nativeFontLoad(wasm_exec_env_t environment, uint32_t role,
+                    uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 12);
+  resources::FontAssetService *service = fontAssetsFor(environment);
+  if (!service) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Unavailable);
+    return;
+  }
+  uint64_t native_size = 0;
+  const auto font_role = static_cast<resources::FontRole>(role);
+  const resources::FontAssetStatus sized =
+      service->fileSize(font_role, native_size);
+  if (sized != resources::FontAssetStatus::Ok) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(fontAssetError(sized));
+    return;
+  }
+  const uint32_t size = static_cast<uint32_t>(native_size);
+  const uint32_t pointer = guestRealloc(environment, 0, 0, 1, size);
+  uint8_t *destination = appMutableArray<uint8_t>(
+      environment, pointer, size,
+      static_cast<uint32_t>(resources::FontAssetService::kMaximumFontBytes));
+  if (!pointer || !destination) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to allocate font asset result");
+    return;
+  }
+  size_t bytes_read = 0;
+  const resources::FontAssetStatus loaded =
+      service->readInto(font_role, destination, size, bytes_read);
+  if (loaded != resources::FontAssetStatus::Ok || bytes_read != size) {
+    guestRealloc(environment, pointer, size, 1, 0);
+    result = appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+    if (!result) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(
+        loaded == resources::FontAssetStatus::Ok ? WitError::Io
+                                                 : fontAssetError(loaded));
+    return;
+  }
+  result = appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
     return;
   }
   result[0] = 0;
@@ -2109,6 +2200,8 @@ NativeSymbol kRuntimeSymbols[] = {
 NativeSymbol kGraphicsSymbols[] = {
     {"surface-size", reinterpret_cast<void *>(nativeSurfaceSize), "(i)",
      nullptr},
+    {"pixels-per-point", reinterpret_cast<void *>(nativePixelsPerPoint), "()f",
+     nullptr},
     {"surface-format", reinterpret_cast<void *>(nativeSurfaceFormat), "()i",
      nullptr},
     {"supported-texture-formats",
@@ -2351,6 +2444,10 @@ NativeSymbol kDeviceStorageSymbols[] = {
      reinterpret_cast<void *>(1)},
 };
 
+NativeSymbol kFontAssetsSymbols[] = {
+    {"load", reinterpret_cast<void *>(nativeFontLoad), "(ii)", nullptr},
+};
+
 NativeSymbol kSystemServicesSymbols[] = {
     {"request", reinterpret_cast<void *>(nativeSystemRequest), "(iiiiiii)",
      serviceAttachment(4, WasmServicePermission::System)},
@@ -2384,6 +2481,8 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kStorageSymbols))},
     {kDeviceStorageInterface, kDeviceStorageSymbols,
      static_cast<uint32_t>(std::size(kDeviceStorageSymbols))},
+    {kFontAssetsInterface, kFontAssetsSymbols,
+     static_cast<uint32_t>(std::size(kFontAssetsSymbols))},
     {kSystemServicesInterface, kSystemServicesSymbols,
      static_cast<uint32_t>(std::size(kSystemServicesSymbols))},
 };
@@ -2440,6 +2539,7 @@ public:
 
   uint32_t width() const override { return host_.width(); }
   uint32_t height() const override { return host_.height(); }
+  float pixelsPerPoint() const override { return host_.pixelsPerPoint(); }
   uint32_t surfaceFormat() const override { return host_.surfaceFormat(); }
   uint32_t supportedTextureFormats() const override {
     return host_.supportedTextureFormats();
@@ -2760,6 +2860,10 @@ public:
           this->options.internal_media_directory,
           this->options.removable_media_directory);
     }
+    if (!this->options.font_directory.empty()) {
+      font_assets = std::make_unique<resources::FontAssetService>(
+          this->options.font_directory);
+    }
     if (!this->options.system_data_root.empty() &&
         apps::hasDeviceServicePermission(
             this->options.service_permission_mask,
@@ -2772,6 +2876,7 @@ public:
             &services,
             app_storage.get(),
             device_storage.get(),
+            font_assets.get(),
             system_services.get(),
             &this->options.app_id,
             this->options.service_permission_mask,
@@ -2852,6 +2957,7 @@ public:
   std::unique_ptr<device::ServiceProvider> services;
   std::unique_ptr<storage::AppStorage> app_storage;
   std::unique_ptr<storage::DeviceStorageService> device_storage;
+  std::unique_ptr<resources::FontAssetService> font_assets;
   std::unique_ptr<services::SystemServiceHub> system_services;
   AppHostContext host;
   WasmAppOptions options;

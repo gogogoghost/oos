@@ -51,11 +51,15 @@ interface graphics {
   }
 
   flags texture-flags {
-    linear,
+    linear-minification,
+    linear-magnification,
     replace,
     repeat-x,
     repeat-y,
+    mirrored-repeat-x,
+    mirrored-repeat-y,
     mipmaps,
+    linear-mipmaps,
   }
 
   record limits {
@@ -90,6 +94,9 @@ interface graphics {
   }
 
   surface-size: func() -> size;
+  /// Logical-to-physical scale for GUI coordinates. Draw vertices and clip
+  /// rectangles submitted to this interface use physical surface pixels.
+  pixels-per-point: func() -> f32;
   surface-format: func() -> texture-format;
   /// Bit N reports support for texture-format discriminant N.
   supported-texture-formats: func() -> u32;
@@ -763,6 +770,21 @@ interface device-storage {
   used-space: func(volume: volume) -> result<u64, error-code>;
 }
 
+/// Read-only fonts installed by OOS. The returned byte vector owns its Guest
+/// allocation and can be moved directly into a GUI framework's font database.
+/// Applications may bundle additional fonts when an optional role is absent.
+interface font-assets {
+  use types.{error-code};
+
+  enum font-role {
+    ui-proportional,
+    ui-monospace,
+    emoji,
+  }
+
+  load: func(role: font-role) -> result<list<u8>, error-code>;
+}
+
 // Trusted policy and state broker for SystemUI. Payloads use JSON because the
 // managed KaiOS services contain open dictionaries and versioned vendor data.
 // Device access is deliberately excluded from this interface.
@@ -814,6 +836,7 @@ world app {
   import codec;
   import storage;
   import device-storage;
+  import font-assets;
   import system-services;
 
   export lifecycle;

@@ -27,8 +27,12 @@ display port, J2ME emulator, video decoder, or software game can instead keep
 a host texture and update only dirty rectangles before drawing one quad.
 
 `oos-egui::Renderer` implements egui texture deltas and mesh submission. It
-retains its conversion and frame vectors across frames. `CanvasTexture` maps a
-user texture into egui and supports direct strided updates, including RGB565.
+retains its frame vectors across frames, maps egui sampler options without
+discarding them, and scales logical egui points to physical surface pixels.
+`CanvasTexture` maps a user texture into egui and supports direct strided
+updates, including RGB565. The renderer returns platform and viewport output
+to the application integration instead of silently swallowing clipboard, URL,
+IME, accessibility, or viewport requests.
 An egui `PaintCallback` is rejected explicitly because callback objects are
 backend-specific; custom GPU work must be implemented against the OOS GLES2
 interface and scheduled by an adapter rather than silently discarded.
@@ -102,9 +106,9 @@ surface format separately and supports these upload formats:
 Alpha-bearing formats and vertex colors are premultiplied. Packed 16-bit
 pixels use little-endian byte order. Applications query
 `supported-texture-formats` rather than assuming a format. Texture flags select
-nearest/linear filtering, independent repeat axes, mipmap generation, and full
-replacement. Row stride is explicit, so a padded RGB565 framebuffer can be
-uploaded without repacking.
+independent minification/magnification and mipmap filters, repeat or mirrored
+repeat per axis, mipmap generation, and full replacement. Row stride is
+explicit, so a padded RGB565 framebuffer can be uploaded without repacking.
 
 The conversion from an RGBA texture sample to the RGB565 phone target happens
 in the GPU render/composition path. There is no reason to expand an RGB565
@@ -122,6 +126,8 @@ ARM. The only per-frame host copy is the bounded command-record translation
 that replaces guest-local resource handles with process-global host handles;
 its vector capacity is retained between frames.
 
-Guest adapters should likewise retain their vectors, upload only dirty texture
+The egui adapter casts its `Color32` atlas slice directly to canonical RGBA
+bytes; it does not flatten the atlas into a second vector. Guest adapters
+should likewise retain their vectors, upload only dirty texture
 regions, prefer A8 for font masks and RGB565 for opaque software canvases, and
 avoid recreating shaders, programs, and buffers in the frame callback.

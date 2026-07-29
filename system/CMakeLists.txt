@@ -96,6 +96,11 @@ target_include_directories(oos_device_storage PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_device_storage PUBLIC oos_app_model)
 
+add_library(oos_font_assets STATIC
+  src/oos/resources/font_assets.cpp)
+target_include_directories(oos_font_assets PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 add_library(oos_system_services STATIC
   src/oos/services/system_service.cpp)
 target_include_directories(oos_system_services PUBLIC
@@ -124,7 +129,8 @@ add_library(oos_wasm_runtime STATIC
 target_include_directories(oos_wasm_runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_wasm_runtime PUBLIC
-  oos_wamr oos_input oos_app_model oos_device_storage oos_system_services)
+  oos_wamr oos_input oos_app_model oos_device_storage oos_font_assets
+  oos_system_services)
 
 add_executable(oos src/main.cpp src/runtime.cpp)
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)

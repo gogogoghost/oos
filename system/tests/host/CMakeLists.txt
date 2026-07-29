@@ -40,6 +40,7 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/native_app_manager.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/wasm_app.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/resources/font_assets.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/services/system_service.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/device_storage.cpp"
@@ -85,6 +86,13 @@ target_include_directories(oos_device_storage_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
 target_compile_options(oos_device_storage_test PRIVATE -UNDEBUG)
 target_link_libraries(oos_device_storage_test PRIVATE Threads::Threads z)
+
+add_executable(oos_font_assets_test
+  font_assets_test.cpp
+  "${OOS_SYSTEM_ROOT}/src/oos/resources/font_assets.cpp")
+target_include_directories(oos_font_assets_test PRIVATE
+  "${OOS_SYSTEM_ROOT}/src")
+target_compile_options(oos_font_assets_test PRIVATE -UNDEBUG)
 
 add_executable(oos_system_service_test
   system_service_test.cpp

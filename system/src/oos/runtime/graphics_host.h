@@ -13,6 +13,7 @@ public:
 
   virtual uint32_t width() const = 0;
   virtual uint32_t height() const = 0;
+  virtual float pixelsPerPoint() const { return 1.0f; }
   virtual uint32_t surfaceFormat() const = 0;
   virtual uint32_t supportedTextureFormats() const = 0;
 

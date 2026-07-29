@@ -35,7 +35,7 @@ wasm-tools print "$LAUNCHER_CORE" >"$TEMP_DIR/launcher.wat"
 wasm-tools print "$SMOKE_CORE" >"$TEMP_DIR/smoke.wat"
 wasm-tools component wit "$LAUNCHER_COMPONENT" >"$TEMP_DIR/component.wit"
 
-for import in runtime graphics; do
+for import in runtime graphics font-assets; do
   rg -Fq "(import \"oos:platform/$import@0.1.0\"" \
     "$TEMP_DIR/launcher.wat"
 done
@@ -50,7 +50,7 @@ fi
 
 for interface in \
   runtime graphics device audio camera power vibrator wifi ip bluetooth modem codec \
-  storage device-storage system-services; do
+  storage device-storage font-assets system-services; do
   rg -Fq "(import \"oos:platform/$interface@0.1.0\"" \
     "$TEMP_DIR/smoke.wat"
 done

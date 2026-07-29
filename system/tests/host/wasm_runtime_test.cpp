@@ -208,23 +208,28 @@ private:
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    std::fprintf(stderr, "usage: %s launcher.wasm wit-smoke.wasm\n", argv[0]);
+  if (argc != 4) {
+    std::fprintf(stderr,
+                 "usage: %s launcher.wasm wit-smoke.wasm font-directory\n",
+                 argv[0]);
     return 2;
   }
   FakeGraphics graphics;
   oos::runtime::NativeAppManager apps(graphics);
+  oos::runtime::NativeAppLaunchOptions launcher_launch;
+  launcher_launch.module_path = argv[1];
+  launcher_launch.font_directory = argv[3];
   for (size_t index = 0; index < 3; ++index) {
     char id[16] = {};
     std::snprintf(id, sizeof(id), "app-%zu", index);
-    if (!apps.load(id, argv[1]) || !apps.activate(id) ||
+    if (!apps.load(id, launcher_launch) || !apps.activate(id) ||
         !apps.render(1'000'000 + index * 10'000)) {
       std::fprintf(stderr, "app %zu initial frame failed: %s\n", index,
                    apps.lastError());
       return 1;
     }
   }
-  if (apps.load("app-over-limit", argv[1]) || !apps.activate("app-0"))
+  if (apps.load("app-over-limit", launcher_launch) || !apps.activate("app-0"))
     return 1;
   oos::input::KeyEvent ok;
   ok.code = 352;
@@ -248,7 +253,10 @@ int main(int argc, char **argv) {
               graphics.last_indices, graphics.last_commands);
   apps.shutdown();
   oos::runtime::NativeAppManager wit_smoke(graphics, 1);
-  if (!wit_smoke.load("wit-smoke", argv[2]) ||
+  oos::runtime::NativeAppLaunchOptions smoke_launch;
+  smoke_launch.module_path = argv[2];
+  smoke_launch.font_directory = argv[3];
+  if (!wit_smoke.load("wit-smoke", smoke_launch) ||
       !wit_smoke.activate("wit-smoke") || !wit_smoke.render(1'500'000)) {
     std::fprintf(stderr, "WIT device API smoke failed: %s\n",
                  wit_smoke.lastError());
@@ -269,6 +277,7 @@ int main(int argc, char **argv) {
   mock_launch.module_path = argv[2];
   mock_launch.data_directory = storage_root;
   mock_launch.system_data_root = storage_root;
+  mock_launch.font_directory = argv[3];
   const std::string internal_media = std::string(storage_root) + "/internal";
   const std::string removable_media = std::string(storage_root) + "/removable";
   if (!std::filesystem::create_directories(internal_media) ||

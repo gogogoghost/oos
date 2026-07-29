@@ -8,6 +8,6 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-egui = { version = "0.35.0", default-features = false, features = ["default_fonts"] }
+egui = { version = "0.35.0", default-features = false }
 oos-app = { path = "../sdk/rust/oos-app" }
 oos-egui = { path = "../sdk/rust/oos-egui" }

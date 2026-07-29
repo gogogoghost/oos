@@ -1,4 +1,4 @@
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 pub const MAX_TEXTURE_SIZE: usize = 2_048;
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_VERTICES: usize = 65_535;
@@ -20,6 +20,7 @@ pub use bindings::exports::oos::platform::lifecycle::{Guest as App, KeyAction, K
 pub use bindings::oos::platform::device_storage::{
     Entry as DeviceStorageEntry, Volume as DeviceStorageVolume, WriteMode as DeviceStorageWriteMode,
 };
+pub use bindings::oos::platform::font_assets::FontRole;
 pub use bindings::oos::platform::gles::{
     BlendEquation, BlendFactor, BufferUsage, Capabilities as GlesCapabilities,
     Command as GlesCommand, CommandOpcode, CompareFunction, CullFace, FrontFace, Primitive,
@@ -39,6 +40,10 @@ pub fn abi_version() -> u32 {
 pub fn surface_size() -> [u32; 2] {
     let size = graphics::surface_size();
     [size.width, size.height]
+}
+
+pub fn pixels_per_point() -> f32 {
+    bindings::oos::platform::graphics::pixels_per_point()
 }
 
 pub fn surface_format() -> TextureFormat {
@@ -119,6 +124,14 @@ pub mod device_storage {
 
     pub fn used_space(volume: DeviceStorageVolume) -> Result<u64, ErrorCode> {
         bindings::oos::platform::device_storage::used_space(volume)
+    }
+}
+
+pub mod font_assets {
+    use super::{bindings, ErrorCode, FontRole};
+
+    pub fn load(role: FontRole) -> Result<Vec<u8>, ErrorCode> {
+        bindings::oos::platform::font_assets::load(role)
     }
 }
 
@@ -227,12 +240,19 @@ pub fn texture_set(
             None
         }
     });
+    let invalid_options = (options.contains(TextureFlags::REPEAT_X)
+        && options.contains(TextureFlags::MIRRORED_REPEAT_X))
+        || (options.contains(TextureFlags::REPEAT_Y)
+            && options.contains(TextureFlags::MIRRORED_REPEAT_Y))
+        || (options.contains(TextureFlags::LINEAR_MIPMAPS)
+            && !options.contains(TextureFlags::MIPMAPS));
     if texture == 0
         || size[0] == 0
         || size[1] == 0
         || size[0] as usize > MAX_TEXTURE_SIZE
         || size[1] as usize > MAX_TEXTURE_SIZE
         || pixels.len() > MAX_TEXTURE_BYTES
+        || invalid_options
         || required_bytes != Some(pixels.len())
     {
         return Err(ErrorCode::InvalidArgument);

@@ -14,6 +14,8 @@ required=(
   "$ROOT_DIR/apps/web-launcher/dist/index.html"
   "$ROOT_DIR/system/devices/local/config/keymap.conf"
   "$ROOT_DIR/system/assets/boot/nokia-2780-flip/boot-splash.png"
+  "$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
+  "$ROOT_DIR/system/assets/fonts/LICENSE.txt"
   "$OOS_PREFIX/lib/libWPEWebKit-2.0.so"
   "$OOS_PREFIX/libexec/wpe-webkit-2.0/WPEWebProcess")
 for path in "${required[@]}"; do
@@ -26,6 +28,7 @@ done
 mkdir -p "$OOS_PREFIX/bin" "$OOS_PREFIX/apps/web-launcher" \
   "$OOS_PREFIX/packages/org.orangeos.launcher" \
   "$OOS_PREFIX/etc" "$OOS_PREFIX/share/oos" \
+  "$OOS_PREFIX/share/fonts" "$OOS_PREFIX/share/licenses/oos" \
   "$(dirname "$GSTREAMER_REGISTRY")" \
   "$ROOTFS/dev" "$ROOTFS/etc" "$ROOTFS/proc" "$ROOTFS/run" \
   "$ROOTFS/tmp" "$ROOTFS/usr" "$ROOTFS/data"
@@ -48,6 +51,10 @@ install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
 install -m 0644 \
   "$ROOT_DIR/system/assets/boot/nokia-2780-flip/boot-splash.png" \
   "$OOS_PREFIX/share/oos/boot-splash.png"
+install -m 0644 "$ROOT_DIR/system/assets/fonts/ui-proportional.otf" \
+  "$OOS_PREFIX/share/fonts/ui-proportional.otf"
+install -m 0644 "$ROOT_DIR/system/assets/fonts/LICENSE.txt" \
+  "$OOS_PREFIX/share/licenses/oos/RedHatFonts.txt"
 
 command -v gst-inspect-1.0 >/dev/null || {
   echo "gst-inspect-1.0 is required to package the local rootfs" >&2
@@ -68,6 +75,7 @@ printf '%s\n' \
   "format=2" \
   "device=local" \
   "prefix=/opt/oos" \
+  "system_font=ui-proportional.otf" \
   "gstreamer=$(gst-inspect-1.0 --version | sed -n '1s/.*version //p')" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   >"$OOS_PREFIX/rootfs-manifest.env"

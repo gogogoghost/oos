@@ -260,7 +260,15 @@ public:
                   uint32_t width, uint32_t height, uint32_t row_stride,
                   uint32_t flags, const uint8_t *pixels, size_t pixel_bytes) {
     TextureFormatInfo info{};
+    const bool invalid_flags =
+        ((flags & OOS_TEXTURE_REPEAT_X) &&
+         (flags & OOS_TEXTURE_MIRRORED_REPEAT_X)) ||
+        ((flags & OOS_TEXTURE_REPEAT_Y) &&
+         (flags & OOS_TEXTURE_MIRRORED_REPEAT_Y)) ||
+        ((flags & OOS_TEXTURE_LINEAR_MIPMAPS) &&
+         !(flags & OOS_TEXTURE_MIPMAPS));
     if (!current() || handle == 0 || !pixels || width == 0 || height == 0 ||
+        invalid_flags ||
         (flags & ~OOS_TEXTURE_FLAGS_MASK) != 0 ||
         !textureFormatInfo(format, info) ||
         width > std::numeric_limits<uint32_t>::max() / info.bytes_per_pixel)
@@ -320,20 +328,34 @@ public:
                         pixels + static_cast<size_t>(row) * row_stride);
       }
     }
-    const bool linear = (flags & OOS_TEXTURE_LINEAR) != 0;
+    const bool linear_minification =
+        (flags & OOS_TEXTURE_LINEAR_MINIFICATION) != 0;
+    const bool linear_magnification =
+        (flags & OOS_TEXTURE_LINEAR_MAGNIFICATION) != 0;
     const bool mipmaps = (flags & OOS_TEXTURE_MIPMAPS) != 0;
-    const GLint min_filter =
-        mipmaps ? (linear ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST)
-                : (linear ? GL_LINEAR : GL_NEAREST);
+    const bool linear_mipmaps =
+        (flags & OOS_TEXTURE_LINEAR_MIPMAPS) != 0;
+    const GLint min_filter = !mipmaps
+                                 ? (linear_minification ? GL_LINEAR
+                                                       : GL_NEAREST)
+                             : linear_minification
+                                 ? (linear_mipmaps ? GL_LINEAR_MIPMAP_LINEAR
+                                                   : GL_LINEAR_MIPMAP_NEAREST)
+                                 : (linear_mipmaps ? GL_NEAREST_MIPMAP_LINEAR
+                                                   : GL_NEAREST_MIPMAP_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                    linear ? GL_LINEAR : GL_NEAREST);
+                    linear_magnification ? GL_LINEAR : GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
-                    (flags & OOS_TEXTURE_REPEAT_X) ? GL_REPEAT
-                                                   : GL_CLAMP_TO_EDGE);
+                    (flags & OOS_TEXTURE_MIRRORED_REPEAT_X)
+                        ? GL_MIRRORED_REPEAT
+                    : (flags & OOS_TEXTURE_REPEAT_X) ? GL_REPEAT
+                                                     : GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
-                    (flags & OOS_TEXTURE_REPEAT_Y) ? GL_REPEAT
-                                                   : GL_CLAMP_TO_EDGE);
+                    (flags & OOS_TEXTURE_MIRRORED_REPEAT_Y)
+                        ? GL_MIRRORED_REPEAT
+                    : (flags & OOS_TEXTURE_REPEAT_Y) ? GL_REPEAT
+                                                     : GL_CLAMP_TO_EDGE);
     if (mipmaps)
       glGenerateMipmap(GL_TEXTURE_2D);
     const bool success = glGetError() == GL_NO_ERROR;

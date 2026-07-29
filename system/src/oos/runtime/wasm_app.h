@@ -27,6 +27,7 @@ struct WasmAppOptions {
   apps::AppRepository *app_repository = nullptr;
   std::string internal_media_directory = "/data/media/internal";
   std::string removable_media_directory = "/data/media/removable";
+  std::string font_directory = "/opt/oos/share/fonts";
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
 };

@@ -18,7 +18,8 @@ cmake -S "$ROOT_DIR/system/tests/host" -B "$BUILD_DIR" -G Ninja \
 cmake --build "$BUILD_DIR"
 "$BUILD_DIR/oos_wasm_runtime_test" \
   "$ROOT_DIR/build/native-apps/launcher.wasm" \
-  "$ROOT_DIR/build/native-apps/wit-smoke.wasm"
+  "$ROOT_DIR/build/native-apps/wit-smoke.wasm" \
+  "$ROOT_DIR/system/assets/fonts"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
 TEST_PACKAGE="$TEST_DIRECTORY/application.zip"
@@ -31,4 +32,5 @@ trap 'rm -rf "$TEST_DIRECTORY"' EXIT
 "$BUILD_DIR/oos_app_repository_test" "$TEST_PACKAGE" \
   "$KAIOS25_PACKAGE" "$KAIOS3_PACKAGE"
 "$BUILD_DIR/oos_device_storage_test"
+"$BUILD_DIR/oos_font_assets_test"
 "$BUILD_DIR/oos_system_service_test"

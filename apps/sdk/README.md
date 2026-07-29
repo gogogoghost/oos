@@ -7,14 +7,22 @@ export lifecycle symbols by hand.
 - `rust/oos-app` runs `wit-bindgen` for the `oos:platform/app@0.1.0` world and
   provides small Rust convenience wrappers.
 - `rust/oos-egui` converts egui textures and meshes into the generated WIT
-  graphics records and exposes user canvas textures for direct RGB565 updates.
+  graphics records, provides keypad input/system-font integration, and exposes
+  user canvas textures for direct RGB565 updates.
 - `system/src/oos/runtime/graphics_types.h` is the renderer's internal
   canonical-layout mirror. It is deliberately outside the SDK.
 
-The world imports runtime, portable graphics, validated batched GLES2, device discovery, audio, camera, power,
-vibration, Wi-Fi/IP, Bluetooth, modem, and codec interfaces, and exports the
+The world imports runtime, portable graphics, validated batched GLES2, system
+font assets, device discovery, services, and storage, and exports the
 application lifecycle interface. `wit-bindgen` dead-strips unused core-Wasm
 imports, so an application pays only for the capabilities it calls.
+
+`font-assets.load` returns an owned font byte vector for a fixed semantic role.
+It does not expose host paths. Rust egui applications can call
+`oos_egui::install_system_fonts`; the WIT result allocation is moved into egui
+without another Guest copy. `ui-proportional` is guaranteed by the packaged
+OOS runtime. Optional monospace and emoji roles return `unavailable` until a
+device font pack provides them.
 
 Rust applications implement `oos_app::App` and use the generated export macro:
 

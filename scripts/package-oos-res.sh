@@ -73,6 +73,8 @@ if [[ ! -f "$BOOT_SPLASH" ]]; then
 fi
 LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
+SYSTEM_FONT="$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
+SYSTEM_FONT_LICENSE="$ROOT_DIR/system/assets/fonts/LICENSE.txt"
 package_require_file "$OOS_BINARY"
 package_require_file "$OOS_WPE_BINARY"
 package_require_directory "$WPE_SYSROOT/lib"
@@ -83,6 +85,8 @@ package_require_file "$NATIVE_APPS/launcher.aot"
 package_require_file "$BOOT_SPLASH"
 package_require_file "$LUCIDE_LICENSE"
 package_require_file "$WAMR_LICENSE"
+package_require_file "$SYSTEM_FONT"
+package_require_file "$SYSTEM_FONT_LICENSE"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -123,7 +127,8 @@ trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
   "$STAGING/packages/org.orangeos.launcher" \
-  "$STAGING/share/oos" "$STAGING/share/licenses/oos" \
+  "$STAGING/share/oos" "$STAGING/share/fonts" \
+  "$STAGING/share/licenses/oos" \
   "$STAGING/etc"
 
 "$ROOT_DIR/scripts/package-oos-wasm-app.sh" \
@@ -143,6 +148,10 @@ install -m 0644 "$LUCIDE_LICENSE" \
   "$STAGING/share/licenses/oos/Lucide.txt"
 install -m 0644 "$WAMR_LICENSE" \
   "$STAGING/share/licenses/oos/WAMR.txt"
+install -m 0644 "$SYSTEM_FONT" \
+  "$STAGING/share/fonts/ui-proportional.otf"
+install -m 0644 "$SYSTEM_FONT_LICENSE" \
+  "$STAGING/share/licenses/oos/RedHatFonts.txt"
 
 declare -A COPIED_ELF=()
 declare -a ELF_QUEUE=()
@@ -259,6 +268,7 @@ printf '%s\n' \
   "${BUILTIN_MANIFEST_LINES[@]}" \
   "native_app_execution=aot" \
   "native_app_interface=oos-wit-0.1.0-core" \
+  "system_font=ui-proportional.otf" \
   "launcher_framework=egui-0.35" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \

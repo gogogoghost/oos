@@ -1,9 +1,10 @@
 use oos_app::bindings::oos::platform::{
-    audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime,
-    system_services, vibrator, wifi,
+    audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime, system_services,
+    vibrator, wifi,
 };
 use oos_app::{
-    gles2, App as AppLifecycle, ErrorCode, KeyEvent, ShaderStage, TextureFormat, VertexType,
+    gles2, App as AppLifecycle, ErrorCode, FontRole, KeyEvent, ShaderStage, TextureFormat,
+    VertexType,
 };
 
 struct App;
@@ -17,6 +18,7 @@ fn permission_denied<T>(result: Result<T, ErrorCode>) {
 }
 
 fn graphics_smoke() {
+    assert_eq!(oos_app::pixels_per_point(), 1.0);
     assert_ne!(
         oos_app::supported_texture_formats() & (1 << TextureFormat::Rgb565 as u32),
         0
@@ -28,7 +30,9 @@ fn graphics_smoke() {
         [0, 0],
         [2, 2],
         6,
-        oos_app::TextureFlags::REPLACE,
+        oos_app::TextureFlags::REPLACE
+            | oos_app::TextureFlags::LINEAR_MINIFICATION
+            | oos_app::TextureFlags::LINEAR_MAGNIFICATION,
         &rgb565,
     )
     .unwrap();
@@ -184,6 +188,10 @@ fn permission_filtered() {
 impl AppLifecycle for App {
     fn init() -> Result<(), ErrorCode> {
         assert_eq!(runtime::abi_version(), oos_app::ABI_VERSION);
+        let font = oos_app::font_assets::load(FontRole::UiProportional).unwrap();
+        assert!(font.starts_with(b"OTTO"));
+        unavailable(oos_app::font_assets::load(FontRole::UiMonospace));
+        unavailable(oos_app::font_assets::load(FontRole::Emoji));
         let limits = graphics::graphics_limits();
         assert_eq!(limits.max_texture_size, oos_app::MAX_TEXTURE_SIZE as u32);
         graphics_smoke();
