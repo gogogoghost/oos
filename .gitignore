@@ -30,3 +30,4 @@
 # Local agent state
 /.agents/
 /.codex/
+/.wrangler/
