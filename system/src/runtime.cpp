@@ -16,6 +16,9 @@
 #include "oos/device/display.h"
 #include "oos/input/key_input.h"
 #include "oos/runtime/native_app_manager.h"
+#if defined(OOS_EXTERNAL_WPE_RUNTIME)
+#include "oos/web/wpe_app_host.h"
+#endif
 
 namespace oos::platform {
 namespace {
@@ -45,6 +48,38 @@ volatile std::sig_atomic_t g_stop_requested = 0;
 const char *environmentOr(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
   return value && value[0] != '\0' ? value : fallback;
+}
+
+bool validAppId(const char *app_id) {
+  if (!app_id || !app_id[0])
+    return false;
+  for (const unsigned char character : std::string(app_id)) {
+    if ((character < 'a' || character > 'z') &&
+        (character < 'A' || character > 'Z') &&
+        (character < '0' || character > '9') && character != '.' &&
+        character != '_' && character != '-')
+      return false;
+  }
+  return true;
+}
+
+bool importBundledApp(oos::apps::AppRepository &repository,
+                      const char *app_id) {
+  if (!validAppId(app_id))
+    return false;
+  std::string package_path;
+  if (std::strcmp(app_id, kDefaultLauncherId) == 0) {
+    package_path =
+        environmentOr("OOS_LAUNCHER_PACKAGE", kDefaultLauncherPackage);
+  } else {
+    package_path = environmentOr("OOS_PACKAGE_ROOT", "/opt/oos/packages");
+    package_path += "/";
+    package_path += app_id;
+    package_path += "/application.zip";
+  }
+  oos::apps::AppInstallOptions options;
+  options.app_id = app_id;
+  return repository.install(package_path.c_str(), options);
 }
 
 int64_t monotonicMicros() {
@@ -187,16 +222,14 @@ int run(int argc, char **argv) {
 
   oos::apps::AppLaunch app_launch;
   NativeAppLaunchOptions native_launch;
+  oos::apps::RuntimeKind runtime_kind = oos::apps::RuntimeKind::Wamr;
   if (raw_module) {
     native_launch.module_path = raw_module;
   } else {
-    if (!repository.resolve(app_id, app_launch.app) &&
-        std::strcmp(app_id, kDefaultLauncherId) == 0) {
-      const char *bundled =
-          environmentOr("OOS_LAUNCHER_PACKAGE", kDefaultLauncherPackage);
-      if (!repository.install(bundled)) {
-        std::fprintf(stderr, "import bundled Launcher failed: %s\n",
-                     repository.lastError().c_str());
+    if (!repository.resolve(app_id, app_launch.app)) {
+      if (!importBundledApp(repository, app_id)) {
+        std::fprintf(stderr, "import bundled application %s failed: %s\n",
+                     app_id, repository.lastError().c_str());
         return 1;
       }
     }
@@ -205,17 +238,13 @@ int run(int argc, char **argv) {
                    repository.lastError().c_str());
       return 1;
     }
-    if (app_launch.app.manifest.runtime_kind != oos::apps::RuntimeKind::Wamr) {
-      std::fprintf(stderr,
-                   "application %s requires the WPE runner, which is not yet "
-                   "selectable as the system foreground runtime\n",
-                   app_id);
-      return 1;
+    runtime_kind = app_launch.app.manifest.runtime_kind;
+    if (runtime_kind == oos::apps::RuntimeKind::Wamr) {
+      native_launch.module_path = app_launch.executable_path.c_str();
+      native_launch.data_directory = app_launch.data_directory.c_str();
+      native_launch.stack_size = app_launch.app.manifest.stack_bytes;
+      native_launch.heap_size = app_launch.app.manifest.heap_bytes;
     }
-    native_launch.module_path = app_launch.executable_path.c_str();
-    native_launch.data_directory = app_launch.data_directory.c_str();
-    native_launch.stack_size = app_launch.app.manifest.stack_bytes;
-    native_launch.heap_size = app_launch.app.manifest.heap_bytes;
   }
 
   std::unique_ptr<Device> platform_device = device::createDevice();
@@ -241,6 +270,28 @@ int run(int argc, char **argv) {
   }
 
   Compositor compositor(display);
+  std::signal(SIGINT, stopRuntime);
+  std::signal(SIGTERM, stopRuntime);
+  if (runtime_kind == oos::apps::RuntimeKind::Wpe) {
+#if defined(OOS_EXTERNAL_WPE_RUNTIME)
+    oos::web::WpeAppHost web_app(compositor, input);
+    std::fprintf(stderr, "OOS WPE app starting on %s: %s\n", descriptor.id,
+                 app_launch.app.manifest.id.c_str());
+    std::fflush(stderr);
+    const bool success = web_app.run(app_launch, descriptor, &g_stop_requested);
+    if (!success)
+      std::fprintf(stderr, "WPE foreground app failed: %s\n",
+                   web_app.lastError().c_str());
+    platform_device->shutdown();
+    return success ? 0 : 1;
+#else
+    std::fprintf(stderr,
+                 "WPE foreground applications are unavailable on this build\n");
+    platform_device->shutdown();
+    return 1;
+#endif
+  }
+
   NativeAppManager apps(compositor, *platform_device);
   const char *runtime_id = raw_module ? "diagnostic" : app_id;
   if (!apps.load(runtime_id, native_launch) || !apps.activate(runtime_id)) {
@@ -253,8 +304,6 @@ int run(int argc, char **argv) {
                native_launch.module_path);
   std::fflush(stderr);
 
-  std::signal(SIGINT, stopRuntime);
-  std::signal(SIGTERM, stopRuntime);
   InputContext input_context{&apps};
   auto next_frame = std::chrono::steady_clock::now();
   while (!g_stop_requested && !input.stopRequested()) {

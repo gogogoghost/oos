@@ -27,6 +27,7 @@ oos/
 ├── res-1.0.0/
 │   ├── packages/org.orangeos.launcher/application.zip
 │   ├── bin/oos
+│   ├── bin/oos-wpe
 │   └── ...
 └── res-1.0.1/
 ```
@@ -115,8 +116,10 @@ is not required. The production entry presents the 240x320 boot splash,
 imports `/opt/oos/packages/org.orangeos.launcher/application.zip` into the
 application registry on first boot, selects its AOT entry for WAMR, and
 forwards physical navigation keys to it. The portable Wasm fallback stays in
-the same ZIP. WPE libraries support registered KaiOS ZIPs with per-app WebKit
-data and cache directories.
+the same ZIP. Selecting a registered KaiOS application starts the packaged
+`/opt/oos/bin/oos-wpe` producer while the main OOS process retains display and
+input ownership. Each Web app receives separate persistent WebKit data and
+content-versioned cache directories.
 
 ## Upgrade
 

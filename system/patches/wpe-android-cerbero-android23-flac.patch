@@ -1,0 +1,22 @@
+diff --git a/recipes/flac.recipe b/recipes/flac.recipe
+index c81a802..ae42070 100644
+--- a/recipes/flac.recipe
++++ b/recipes/flac.recipe
+@@ -1,5 +1,6 @@
+ # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+ from cerbero.utils import shell
++from cerbero.enums import DistroVersion
+ 
+ 
+ class Recipe(recipe.Recipe):
+@@ -35,6 +36,10 @@ class Recipe(recipe.Recipe):
+         if self.config.target_platform == Platform.WINDOWS:
+             # Newer MinGW requires this define for sscanf in stdio.h
+             self.append_env('CFLAGS', '-D__USE_MINGW_ANSI_STDIO=1')
++        if self.config.target_platform == Platform.ANDROID:
++            api = DistroVersion.get_android_api_version(self.config.target_distro_version)
++            if api < 24:
++                self.append_env('CFLAGS', '-Dfseeko=fseek -Dftello=ftell')
+ 
+     async def configure(self):
+         if self.config.target_platform == Platform.ANDROID:

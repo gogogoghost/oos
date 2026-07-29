@@ -106,6 +106,26 @@ if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
   target_link_libraries(oos_wpe_surface_host PUBLIC
     "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
   add_library(oos::web ALIAS oos_wpe_surface_host)
+
+  add_executable(oos-wpe
+    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_runner.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/local_app_server.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_key_input.cpp")
+  target_include_directories(oos-wpe PRIVATE ${NOKIA_8110_WPE_INCLUDES})
+  target_link_libraries(oos-wpe PRIVATE
+    oos_wpe_surface_host
+    oos_surface_transport
+    oos_app_model
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libwpe-1.0.so"
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libgio-2.0.so"
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libglib-2.0.so"
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libgobject-2.0.so"
+    oos_android23_hardware_buffer)
+  set_target_properties(oos-wpe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
 add_library(oos_nokia_8110_device STATIC src/device.cpp)
@@ -126,6 +146,7 @@ target_include_directories(oos PRIVATE
 target_link_libraries(oos PRIVATE
   oos::platform
   oos_wasm_runtime
+  oos_surface_transport
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libpng.so"
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 
@@ -180,6 +201,11 @@ target_link_libraries(oos_nokia_8110_basic_hardware PUBLIC
 add_library(oos::hardware ALIAS oos_nokia_8110_basic_hardware)
 
 if(OOS_BUILD_DEVICE_TESTS)
+  add_executable(oos_test_nokia_8110_surface_transport_key
+    "${CMAKE_SOURCE_DIR}/tests/web/surface_transport_key_test.cpp")
+  target_link_libraries(oos_test_nokia_8110_surface_transport_key PRIVATE
+    oos_surface_transport oos_android23_hardware_buffer)
+
   if(TARGET oos_wpe_surface_host AND
      EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so")
     add_executable(oos_test_nokia_8110_4g_wpe_producer

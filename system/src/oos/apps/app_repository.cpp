@@ -438,6 +438,7 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
       return false;
     launch.app = std::move(record);
     launch.executable_path = launch.app.package_path;
+    launch.entrypoint = entrypoint;
     launch.data_directory = data_directory;
     launch.cache_directory = cache_directory;
     return true;
@@ -471,6 +472,7 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
     return false;
   launch.app = std::move(record);
   launch.executable_path = executable;
+  launch.entrypoint = entrypoint;
   launch.data_directory = data_directory;
   launch.cache_directory = cache_directory;
   return true;

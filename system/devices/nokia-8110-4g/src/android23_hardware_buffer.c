@@ -3,6 +3,7 @@
 #include <cutils/native_handle.h>
 #include <hardware/gralloc.h>
 #include <hardware/hardware.h>
+#include <linux/ashmem.h>
 #include <system/window.h>
 
 #include <errno.h>
@@ -13,6 +14,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -20,6 +23,31 @@
 // function declarations. This library intentionally backports those symbols.
 void AHardwareBuffer_acquire(AHardwareBuffer *buffer);
 void AHardwareBuffer_release(AHardwareBuffer *buffer);
+
+// WPE 2.52 uses the API 26 NDK shared-memory surface. Android 6 provides the
+// same kernel facility through /dev/ashmem, so expose the missing ABI symbols
+// without requiring a newer platform libc.
+int ASharedMemory_create(const char *name, size_t size) {
+  if (size == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  int fd = open("/dev/ashmem", O_RDWR | O_CLOEXEC);
+  if (fd < 0)
+    return -1;
+  if ((name && name[0] && ioctl(fd, ASHMEM_SET_NAME, name) != 0) ||
+      ioctl(fd, ASHMEM_SET_SIZE, size) != 0) {
+    const int saved_errno = errno;
+    close(fd);
+    errno = saved_errno;
+    return -1;
+  }
+  return fd;
+}
+
+int ASharedMemory_setProt(int fd, int prot) {
+  return ioctl(fd, ASHMEM_SET_PROT_MASK, (unsigned long)prot);
+}
 
 int32_t ANativeWindow_getFormat(ANativeWindow *window) {
   int format = 0;

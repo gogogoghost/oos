@@ -64,6 +64,7 @@ DESTINATION="$OUTPUT_DIR/$RES_NAME"
 [[ ! -e "$DESTINATION" ]] || package_die "Res output already exists: $DESTINATION"
 
 OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
+OOS_WPE_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos-wpe"
 WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
 NATIVE_APPS="$ROOT_DIR/build/native-apps"
 BOOT_SPLASH="$ROOT_DIR/system/assets/boot/$DEVICE/boot-splash.png"
@@ -73,6 +74,7 @@ fi
 LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
 package_require_file "$OOS_BINARY"
+package_require_file "$OOS_WPE_BINARY"
 package_require_directory "$WPE_SYSROOT/lib"
 package_require_directory "$WPE_SYSROOT/libexec"
 "$ROOT_DIR/scripts/build-native-app-aot.sh"
@@ -86,6 +88,13 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
   source "$ROOT_DIR/.env"
   set +a
+fi
+BUILTIN_KAIOS3_APP_ID=${OOS_BUILTIN_KAIOS3_APP_ID:-}
+BUILTIN_KAIOS3_PACKAGE=${OOS_BUILTIN_KAIOS3_PACKAGE:-}
+if [[ -n "$BUILTIN_KAIOS3_APP_ID" || -n "$BUILTIN_KAIOS3_PACKAGE" ]]; then
+  [[ "$BUILTIN_KAIOS3_APP_ID" =~ ^[A-Za-z0-9._-]+$ ]] ||
+    package_die "Invalid built-in KaiOS 3 application id"
+  package_require_file "$BUILTIN_KAIOS3_PACKAGE"
 fi
 WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
 CXX_RUNTIME="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so"
@@ -122,6 +131,13 @@ mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
   --wasm "$NATIVE_APPS/launcher.wasm" \
   --aot "$NATIVE_APPS/launcher.aot" \
   --output "$STAGING/packages/org.orangeos.launcher/application.zip"
+BUILTIN_MANIFEST_LINES=()
+if [[ -n "$BUILTIN_KAIOS3_PACKAGE" ]]; then
+  mkdir -p "$STAGING/packages/$BUILTIN_KAIOS3_APP_ID"
+  install -m 0644 "$BUILTIN_KAIOS3_PACKAGE" \
+    "$STAGING/packages/$BUILTIN_KAIOS3_APP_ID/application.zip"
+  BUILTIN_MANIFEST_LINES+=("builtin_web_app=$BUILTIN_KAIOS3_APP_ID")
+fi
 install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
 install -m 0644 "$LUCIDE_LICENSE" \
   "$STAGING/share/licenses/oos/Lucide.txt"
@@ -158,7 +174,15 @@ system_provides_library() {
 }
 
 copy_runtime_elf "$OOS_BINARY" bin/oos
+copy_runtime_elf "$OOS_WPE_BINARY" bin/oos-wpe
 copy_runtime_elf "$CXX_RUNTIME" lib/libc++_shared.so
+if [[ "$DEVICE" == nokia-8110-4g ]]; then
+  # This shim is built with the current OOS sources. The copy in an existing
+  # WPE sysroot may predate Android 23 compatibility additions such as ashmem.
+  ANDROID23_BUFFER="$ROOT_DIR/build/android-$DEVICE/devices/$DEVICE/liboos-android23-buffer.so"
+  package_require_file "$ANDROID23_BUFFER"
+  copy_runtime_elf "$ANDROID23_BUFFER" lib/liboos-android23-buffer.so
+fi
 for runtime_entry in \
   lib/libWPEBackend-android.so \
   lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so \
@@ -228,7 +252,11 @@ printf '%s\n' \
   "buffer_abi=$OOS_WPE_BUFFER_ABI" \
   "javascript_jit=baseline,dfg" \
   "webassembly_jit=bbq" \
+  "webassembly_execution=eager-bbq" \
   "native_app_runtime=wamr-2.4.4" \
+  "web_app_runtime=wpe-webkit-2.52.5" \
+  "web_app_host=external-single-foreground" \
+  "${BUILTIN_MANIFEST_LINES[@]}" \
   "native_app_execution=aot" \
   "native_app_interface=oos-wit-0.1.0-core" \
   "launcher_framework=egui-0.35" \

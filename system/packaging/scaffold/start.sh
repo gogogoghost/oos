@@ -41,7 +41,11 @@ export HOME=/data/users/0/system
 export TMPDIR=/data/tmp
 export XDG_CACHE_HOME=/data/cache/system
 export XDG_DATA_HOME=/data/users/0/system/share
-export LD_LIBRARY_PATH=/opt/oos/lib:/apex/com.android.runtime/lib:/system/lib:/vendor/lib
+# The host owns the Android display HAL. System libraries must win here so a
+# WPE dependency (notably libpng) cannot interpose on a HAL dependency. The
+# WPE child switches back to its private runtime-first path before exec.
+export LD_LIBRARY_PATH=/system/lib:/vendor/lib:/apex/com.android.runtime/lib:/opt/oos/lib
+export OOS_WPE_LD_LIBRARY_PATH=/opt/oos/lib:/system/lib:/vendor/lib:/apex/com.android.runtime/lib
 export WEBKIT_EXEC_PATH=/opt/oos/libexec/wpe-webkit-2.0
 export WEBKIT_INJECTED_BUNDLE_PATH=/opt/oos/lib/wpe-webkit-2.0/injected-bundle
 export WPE_BACKEND=/opt/oos/lib/libWPEBackend-android.so

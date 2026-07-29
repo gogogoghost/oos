@@ -3,6 +3,7 @@
 #include <string>
 
 typedef struct _WebKitNetworkSession WebKitNetworkSession;
+typedef struct _WebKitUserContentManager WebKitUserContentManager;
 typedef struct _WebKitWebView WebKitWebView;
 typedef struct _WebKitWebViewBackend WebKitWebViewBackend;
 
@@ -15,7 +16,9 @@ public:
   ~WpeAppProfile();
 
   bool initialize();
-  WebKitWebView *createView(WebKitWebViewBackend *backend);
+  WebKitWebView *
+  createView(WebKitWebViewBackend *backend,
+             WebKitUserContentManager *content_manager = nullptr);
 
   const std::string &lastError() const { return error_; }
 

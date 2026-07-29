@@ -22,8 +22,10 @@ bool check(bool condition, const char *message) {
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2 && argc != 4) {
-    std::fprintf(stderr, "usage: %s OOS.zip [KAIOS25.zip KAIOS3.zip]\n",
+  if (argc != 2 && argc != 4 && argc != 5) {
+    std::fprintf(stderr,
+                 "usage: %s OOS.zip [KAIOS25.zip KAIOS3.zip "
+                 "REAL_KAIOS3.zip]\n",
                  argv[0]);
     return 2;
   }
@@ -53,7 +55,7 @@ int main(int argc, char **argv) {
       check(installed.manifest.runtime_kind == oos::apps::RuntimeKind::Wamr,
             "installed runtime discriminator");
 
-  if (argc == 4) {
+  if (argc >= 4) {
     oos::apps::AppInstallOptions kaios25;
     kaios25.app_id = "org.kaios.apnconfig";
     oos::apps::AppRecord webapp;
@@ -78,18 +80,38 @@ int main(int argc, char **argv) {
               repository.lastError().c_str());
     success &= check(web_launch.executable_path == webmanifest.package_path,
                      "WPE launch keeps the ZIP as canonical source");
+    success &= check(web_launch.entrypoint == webmanifest.manifest.entrypoint,
+                     "WPE launch exposes the resolved ZIP entrypoint");
+    success &= check(web_launch.entrypoint == "main.html",
+                     "WPE launch strips query parameters from start_url");
+    if (argc == 5) {
+      oos::apps::AppInstallOptions real_kaios3;
+      real_kaios3.app_id = "omnij2me";
+      oos::apps::AppRecord real_webmanifest;
+      success &=
+          check(repository.install(argv[4], real_kaios3, &real_webmanifest),
+                repository.lastError().c_str());
+      oos::apps::AppLaunch real_web_launch;
+      success &= check(repository.prepareLaunch("omnij2me", real_web_launch),
+                       repository.lastError().c_str());
+      success &= check(real_webmanifest.manifest.package_kind ==
+                               oos::apps::PackageKind::KaiOs3 &&
+                           real_web_launch.entrypoint == "index.html",
+                       "real KaiOS 3 relative start_url is normalized");
+    }
   }
 
   std::vector<oos::apps::AppRecord> records;
   success &= check(repository.list(records), repository.lastError().c_str());
-  success &=
-      check(records.size() == (argc == 4 ? 3u : 1u), "registry app count");
+  const size_t expected_records = argc == 5 ? 4u : (argc == 4 ? 3u : 1u);
+  success &= check(records.size() == expected_records, "registry app count");
 
   oos::apps::AppLaunch launch;
   success &= check(repository.prepareLaunch("org.orangeos.test", launch),
                    repository.lastError().c_str());
   success &= check(access(launch.executable_path.c_str(), R_OK) == 0,
                    "AOT cache file is materialized");
+  success &= check(!launch.entrypoint.empty(), "native entrypoint is resolved");
   success &= check(launch.data_directory.find(
                        "users/0/wasm/org.orangeos.test") != std::string::npos,
                    "per-app data directory");

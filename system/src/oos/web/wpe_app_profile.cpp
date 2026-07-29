@@ -39,10 +39,17 @@ bool WpeAppProfile::initialize() {
   return true;
 }
 
-WebKitWebView *WpeAppProfile::createView(WebKitWebViewBackend *backend) {
+WebKitWebView *
+WpeAppProfile::createView(WebKitWebViewBackend *backend,
+                          WebKitUserContentManager *content_manager) {
   if (!session_ || !backend) {
     error_ = "WPE application profile is not initialized";
     return nullptr;
+  }
+  if (content_manager) {
+    return WEBKIT_WEB_VIEW(g_object_new(
+        WEBKIT_TYPE_WEB_VIEW, "backend", backend, "network-session", session_,
+        "user-content-manager", content_manager, nullptr));
   }
   return WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "backend", backend,
                                       "network-session", session_, nullptr));

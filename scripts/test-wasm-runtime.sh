@@ -22,6 +22,12 @@ cmake --build "$BUILD_DIR"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
 TEST_PACKAGE="$TEST_DIRECTORY/application.zip"
+KAIOS25_PACKAGE="$TEST_DIRECTORY/kaios25.zip"
+KAIOS3_PACKAGE="$TEST_DIRECTORY/kaios3.zip"
 trap 'rm -rf "$TEST_DIRECTORY"' EXIT
 "$ROOT_DIR/system/tests/host/create-app-package.sh" "$TEST_PACKAGE"
-"$BUILD_DIR/oos_app_repository_test" "$TEST_PACKAGE"
+"$ROOT_DIR/system/tests/host/create-kaios-packages.sh" \
+  "$KAIOS25_PACKAGE" "$KAIOS3_PACKAGE"
+"$BUILD_DIR/oos_app_repository_test" "$TEST_PACKAGE" \
+  "$KAIOS25_PACKAGE" "$KAIOS3_PACKAGE"
+"$BUILD_DIR/oos_device_storage_test"

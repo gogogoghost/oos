@@ -103,6 +103,26 @@ target_link_libraries(oos_wpe_surface_host PUBLIC
   "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEBackend-android.so")
 add_library(oos::web ALIAS oos_wpe_surface_host)
 
+add_executable(oos-wpe
+  "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_runner.cpp"
+  "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
+  "${CMAKE_SOURCE_DIR}/src/oos/web/local_app_server.cpp"
+  "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
+  "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_key_input.cpp")
+target_include_directories(oos-wpe PRIVATE ${NOKIA_2780_WPE_INCLUDES})
+target_link_libraries(oos-wpe PRIVATE
+  oos_wpe_surface_host
+  oos_surface_transport
+  oos_app_model
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libwpe-1.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libgio-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
+  android)
+set_target_properties(oos-wpe PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 add_library(oos_nokia_2780_gles_display STATIC
   src/primary_gles_display.cpp)
 oos_nokia_2780_android_target(oos_nokia_2780_gles_display)
@@ -131,6 +151,7 @@ target_include_directories(oos PRIVATE
 target_link_libraries(oos PRIVATE
   oos::platform
   oos_wasm_runtime
+  oos_surface_transport
   "${NOKIA_2780_WPE_SYSROOT}/lib/libpng16.so")
 
 add_library(oos_nokia_2780_network STATIC
@@ -199,6 +220,11 @@ target_link_libraries(oos_nokia_2780_modem PUBLIC
 add_library(oos::modem ALIAS oos_nokia_2780_modem)
 
 if(OOS_BUILD_DEVICE_TESTS)
+  add_executable(oos_test_nokia_2780_surface_transport_key
+    "${CMAKE_SOURCE_DIR}/tests/web/surface_transport_key_test.cpp")
+  target_link_libraries(oos_test_nokia_2780_surface_transport_key PRIVATE
+    oos_surface_transport android)
+
   add_executable(oos_test_nokia_2780_device_contract
     "${CMAKE_SOURCE_DIR}/tests/device/device_contract_test.cpp")
   oos_nokia_2780_android_target(oos_test_nokia_2780_device_contract)

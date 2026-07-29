@@ -723,6 +723,27 @@ interface storage {
   statement-finish: func(statement: u32) -> result<_, error-code>;
 }
 
+/// User-visible files on internal and removable media. This is distinct from
+/// application-private KV/SQLite storage: paths are relative to a selected
+/// volume and the host retains ownership of the underlying filesystem.
+interface device-storage {
+  use types.{error-code};
+
+  enum volume {
+    internal,
+    removable,
+  }
+
+  record entry {
+    path: string,
+    size: u64,
+    last-modified-ms: s64,
+  }
+
+  enumerate-files: func(volume: volume) -> result<list<entry>, error-code>;
+  read-file: func(volume: volume, path: string) -> result<list<u8>, error-code>;
+}
+
 /// Lifecycle exported by every OOS application.
 interface lifecycle {
   use types.{error-code};
@@ -760,6 +781,7 @@ world app {
   import modem;
   import codec;
   import storage;
+  import device-storage;
 
   export lifecycle;
 }

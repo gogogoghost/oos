@@ -1,3 +1,11 @@
+From 16f367251b82265f50d2dd211a26923d4de0b8b2 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Wed, 29 Jul 2026 09:01:00 +0800
+Subject: [PATCH] WPE: compile without libdrm
+
+Use the DRM fourcc ABI value locally when the OOS WPE feature profile omits
+libdrm.
+---
 diff --git a/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp b/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp
 index c7f33b370c26..6491794b1b70 100644
 --- a/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp

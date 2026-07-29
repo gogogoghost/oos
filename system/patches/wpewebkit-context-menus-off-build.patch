@@ -1,8 +1,16 @@
+From 3e8c6fbc4fb09c3feec8c25beef9202e4b1238e1 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Wed, 29 Jul 2026 09:00:00 +0800
+Subject: [PATCH] WPE: compile without context menus
+
+Keep media controls buildable when context menu support is disabled by the
+OOS WPE feature profile.
+---
 diff --git a/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp b/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp
 index 5b61d35c589f..352281a21a1b 100644
 --- a/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp
 +++ b/Source/WebCore/Modules/mediacontrols/MediaControlsHost.cpp
-@@ -853,7 +853,7 @@ bool MediaControlsHost::showMediaControlsContextMenu(HTMLElement& target, String
+@@ -853,6 +853,6 @@ bool MediaControlsHost::showMediaControlsContextMenu(HTMLElement& target, String
  
      return true;
  #else // USE(UICONTEXTMENU) || (ENABLE(CONTEXT_MENUS) && USE(ACCESSIBILITY_CONTEXT_MENUS))

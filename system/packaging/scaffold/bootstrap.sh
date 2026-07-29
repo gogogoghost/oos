@@ -10,6 +10,29 @@ OOS_STATE_DIR="$OOS_PERSIST_DIR/.bootstrap"
 OOS_PID_FILE="$OOS_STATE_DIR/oos.pid"
 OOS_ACTIVE_RES_FILE="$OOS_STATE_DIR/active-res"
 
+# Some stock KaiOS images ship BusyBox without installing every applet as a
+# standalone command. Keep the bootstrap scripts usable on those systems.
+if command -v busybox >/dev/null 2>&1; then
+  OOS_BUSYBOX=$(command -v busybox)
+  if ! command -v awk >/dev/null 2>&1; then
+    awk() {
+      "$OOS_BUSYBOX" awk "$@"
+    }
+  fi
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    sha256sum() {
+      "$OOS_BUSYBOX" sha256sum "$@"
+    }
+  fi
+  # Android 6 toolbox mount lacks the --bind form used by the rootfs setup.
+  mount() {
+    "$OOS_BUSYBOX" mount "$@"
+  }
+  umount() {
+    "$OOS_BUSYBOX" umount "$@"
+  }
+fi
+
 if [ ! -f "$OOS_HOME/bootstrap.conf" ]; then
   echo "missing $OOS_HOME/bootstrap.conf" >&2
   exit 1
@@ -67,6 +90,10 @@ resolve_res() {
       ! grep -q '^type=oos-res$' "$OOS_RES_DIR/manifest.env"; then
     echo "res package has an unsupported manifest format" >&2
     return 1
+  fi
+  if grep -q '^web_app_host=external-single-foreground$' \
+      "$OOS_RES_DIR/manifest.env"; then
+    require_file "$OOS_RES_DIR/bin/oos-wpe" || return 1
   fi
   expected_complete=$(cat "$OOS_RES_DIR/COMPLETE")
   actual_complete=$(sha256sum "$OOS_RES_DIR/SHA256SUMS" | awk '{print $1}')

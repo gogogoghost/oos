@@ -229,6 +229,8 @@ bool parseKaiOsManifest(const std::string &json, PackageKind kind,
                           : "index.html";
   while (!parsed.entrypoint.empty() && parsed.entrypoint.front() == '/')
     parsed.entrypoint.erase(parsed.entrypoint.begin());
+  while (parsed.entrypoint.rfind("./", 0) == 0)
+    parsed.entrypoint.erase(0, 2);
   const size_t query = parsed.entrypoint.find_first_of("?#");
   if (query != std::string::npos)
     parsed.entrypoint.resize(query);

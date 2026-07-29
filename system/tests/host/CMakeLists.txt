@@ -56,3 +56,14 @@ add_executable(oos_app_repository_test
 target_include_directories(oos_app_repository_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
 target_link_libraries(oos_app_repository_test PRIVATE ${CMAKE_DL_LIBS} z)
+
+find_package(Threads REQUIRED)
+add_executable(oos_device_storage_test
+  device_storage_test.cpp
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/device_storage.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/web/device_api_transport.c")
+target_include_directories(oos_device_storage_test PRIVATE
+  "${OOS_SYSTEM_ROOT}/src")
+target_link_libraries(oos_device_storage_test PRIVATE Threads::Threads z)

@@ -16,14 +16,52 @@ int AHardwareBuffer_recvHandleFromUnixSocket(int socket_fd,
 
 enum {
   OOS_SURFACE_TRANSPORT_MAGIC = 0x4f535446,
-  OOS_SURFACE_TRANSPORT_VERSION = 1,
+  OOS_SURFACE_TRANSPORT_VERSION = 2,
+  OOS_SURFACE_PACKET_FRAME = 1,
+  OOS_SURFACE_PACKET_ACKNOWLEDGE = 2,
+  OOS_SURFACE_PACKET_KEY = 3,
 };
 
 typedef struct OosSurfaceTransportPacket {
   uint32_t magic;
   uint32_t version;
-  OosSurfaceTransportFrame frame;
+  uint32_t type;
+  uint32_t reserved;
+  union {
+    OosSurfaceTransportFrame frame;
+    OosSurfaceTransportKey key;
+    uint8_t accepted;
+  } payload;
 } OosSurfaceTransportPacket;
+
+static int wait_for_fd(int fd, short events, int timeout_ms);
+
+static int send_packet(int socket_fd, const OosSurfaceTransportPacket *packet) {
+  ssize_t sent;
+  do {
+    sent = send(socket_fd, packet, sizeof(*packet), MSG_NOSIGNAL);
+  } while (sent < 0 && errno == EINTR);
+  return sent == (ssize_t)sizeof(*packet) ? 0 : (sent < 0 ? -errno : -EIO);
+}
+
+static int receive_packet(int socket_fd, OosSurfaceTransportPacket *packet,
+                          int timeout_ms) {
+  int result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
+  if (result)
+    return result;
+  ssize_t received;
+  do {
+    received = recv(socket_fd, packet, sizeof(*packet), 0);
+  } while (received < 0 && errno == EINTR);
+  if (received == 0)
+    return 0;
+  if (received != (ssize_t)sizeof(*packet))
+    return received < 0 ? -errno : -EPROTO;
+  if (packet->magic != OOS_SURFACE_TRANSPORT_MAGIC ||
+      packet->version != OOS_SURFACE_TRANSPORT_VERSION)
+    return -EPROTO;
+  return 1;
+}
 
 static int wait_for_fd(int fd, short events, int timeout_ms) {
   struct pollfd descriptor = {.fd = fd, .events = events};
@@ -138,28 +176,22 @@ int oos_surface_transport_send(int socket_fd,
   const OosSurfaceTransportPacket packet = {
       .magic = OOS_SURFACE_TRANSPORT_MAGIC,
       .version = OOS_SURFACE_TRANSPORT_VERSION,
-      .frame = *frame,
+      .type = OOS_SURFACE_PACKET_FRAME,
+      .payload.frame = *frame,
   };
-  ssize_t sent;
-  do {
-    sent = send(socket_fd, &packet, sizeof(packet), MSG_NOSIGNAL);
-  } while (sent < 0 && errno == EINTR);
-  if (sent != (ssize_t)sizeof(packet))
-    return sent < 0 ? -errno : -EIO;
-  int result = AHardwareBuffer_sendHandleToUnixSocket(buffer, socket_fd);
+  int result = send_packet(socket_fd, &packet);
   if (result)
     return result;
-  result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
+  result = AHardwareBuffer_sendHandleToUnixSocket(buffer, socket_fd);
   if (result)
     return result;
-  uint8_t accepted = 0;
-  ssize_t received;
-  do {
-    received = recv(socket_fd, &accepted, sizeof(accepted), 0);
-  } while (received < 0 && errno == EINTR);
-  if (received != (ssize_t)sizeof(accepted))
-    return received < 0 ? -errno : -EPIPE;
-  return accepted ? 0 : -ECANCELED;
+  OosSurfaceTransportPacket response;
+  result = receive_packet(socket_fd, &response, timeout_ms);
+  if (result <= 0)
+    return result == 0 ? -EPIPE : result;
+  if (response.type != OOS_SURFACE_PACKET_ACKNOWLEDGE)
+    return -EPROTO;
+  return response.payload.accepted ? 0 : -ECANCELED;
 }
 
 int oos_surface_transport_receive(int socket_fd,
@@ -168,21 +200,13 @@ int oos_surface_transport_receive(int socket_fd,
   if (socket_fd < 0 || !frame || !buffer)
     return -EINVAL;
   *buffer = NULL;
-  int result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
-  if (result)
-    return result;
   OosSurfaceTransportPacket packet;
-  ssize_t received;
-  do {
-    received = recv(socket_fd, &packet, sizeof(packet), 0);
-  } while (received < 0 && errno == EINTR);
-  if (received == 0)
-    return 0;
-  if (received != (ssize_t)sizeof(packet))
-    return received < 0 ? -errno : -EPROTO;
-  if (packet.magic != OOS_SURFACE_TRANSPORT_MAGIC ||
-      packet.version != OOS_SURFACE_TRANSPORT_VERSION ||
-      !packet.frame.surface_id || !packet.frame.width || !packet.frame.height)
+  int result = receive_packet(socket_fd, &packet, timeout_ms);
+  if (result <= 0)
+    return result;
+  if (packet.type != OOS_SURFACE_PACKET_FRAME ||
+      !packet.payload.frame.surface_id || !packet.payload.frame.width ||
+      !packet.payload.frame.height)
     return -EPROTO;
   result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
   if (result)
@@ -190,15 +214,44 @@ int oos_surface_transport_receive(int socket_fd,
   result = AHardwareBuffer_recvHandleFromUnixSocket(socket_fd, buffer);
   if (result)
     return result;
-  *frame = packet.frame;
+  *frame = packet.payload.frame;
   return 1;
 }
 
 int oos_surface_transport_acknowledge(int socket_fd, int accepted) {
-  const uint8_t value = accepted ? 1 : 0;
-  ssize_t sent;
-  do {
-    sent = send(socket_fd, &value, sizeof(value), MSG_NOSIGNAL);
-  } while (sent < 0 && errno == EINTR);
-  return sent == (ssize_t)sizeof(value) ? 0 : (sent < 0 ? -errno : -EIO);
+  const OosSurfaceTransportPacket packet = {
+      .magic = OOS_SURFACE_TRANSPORT_MAGIC,
+      .version = OOS_SURFACE_TRANSPORT_VERSION,
+      .type = OOS_SURFACE_PACKET_ACKNOWLEDGE,
+      .payload.accepted = accepted ? 1 : 0,
+  };
+  return send_packet(socket_fd, &packet);
+}
+
+int oos_surface_transport_send_key(int socket_fd,
+                                   const OosSurfaceTransportKey *key) {
+  if (socket_fd < 0 || !key || key->action > 2)
+    return -EINVAL;
+  const OosSurfaceTransportPacket packet = {
+      .magic = OOS_SURFACE_TRANSPORT_MAGIC,
+      .version = OOS_SURFACE_TRANSPORT_VERSION,
+      .type = OOS_SURFACE_PACKET_KEY,
+      .payload.key = *key,
+  };
+  return send_packet(socket_fd, &packet);
+}
+
+int oos_surface_transport_receive_key(int socket_fd,
+                                      OosSurfaceTransportKey *key,
+                                      int timeout_ms) {
+  if (socket_fd < 0 || !key)
+    return -EINVAL;
+  OosSurfaceTransportPacket packet;
+  const int result = receive_packet(socket_fd, &packet, timeout_ms);
+  if (result <= 0)
+    return result;
+  if (packet.type != OOS_SURFACE_PACKET_KEY || packet.payload.key.action > 2)
+    return -EPROTO;
+  *key = packet.payload.key;
+  return 1;
 }

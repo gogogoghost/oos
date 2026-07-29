@@ -106,12 +106,15 @@ namespace, avoiding a blocking plugin rescan on every WPE WebProcess startup.
 The outputs are:
 
 - `build/android-nokia-2780-flip/bin/oos`: production executable.
+- `build/android-nokia-2780-flip/bin/oos-wpe`: isolated foreground Web app
+  producer supervised and composed by `oos`.
 - `build/native-apps/launcher.wasm`: portable interpreter/debug Launcher.
 - `build/native-apps/launcher.component.wasm`: standard Component Model
   Launcher for compatible runtimes and interface tooling.
 - `build/native-apps/launcher.aot`: production ARMv7 AOT Launcher.
 - `build/android-nokia-2780-flip/bin/tests/nokia-2780-flip/`: on-device tests.
 - `build/android-nokia-8110-4g/bin/oos`: Nokia 8110 production executable.
+- `build/android-nokia-8110-4g/bin/oos-wpe`: Nokia 8110 Web app producer.
 - `build/wpe-sysroot/nokia-2780-flip`: isolated Android 10 WPE sysroot.
 - `build/wpe-sysroot/nokia-8110-4g`: isolated Android 6 WPE sysroot.
 - `build/wpe-sysroot/local-root`: local rootfs containing `/opt/oos`.

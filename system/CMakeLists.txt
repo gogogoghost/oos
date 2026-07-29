@@ -90,8 +90,16 @@ target_include_directories(oos_app_model PUBLIC
 target_link_libraries(oos_app_model PUBLIC ${CMAKE_DL_LIBS} z)
 add_library(oos::apps ALIAS oos_app_model)
 
+add_library(oos_device_storage STATIC
+  src/oos/storage/device_storage.cpp)
+target_include_directories(oos_device_storage PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(oos_device_storage PUBLIC oos_app_model)
+
 if(NOT BUILD_LOCAL)
-  add_library(oos_surface_transport STATIC src/oos/compositor/surface_transport.c)
+  add_library(oos_surface_transport STATIC
+    src/oos/compositor/surface_transport.c
+    src/oos/web/device_api_transport.c)
   target_include_directories(oos_surface_transport PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 endif()
@@ -106,9 +114,12 @@ target_link_libraries(oos_wasm_runtime PUBLIC oos_wamr oos_input oos_app_model)
 add_executable(oos src/main.cpp src/runtime.cpp)
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
 if(NOT BUILD_LOCAL)
+  target_sources(oos PRIVATE src/oos/web/wpe_app_host.cpp)
+  target_compile_definitions(oos PRIVATE OOS_EXTERNAL_WPE_RUNTIME=1)
   target_link_options(oos PRIVATE -nostdlib++)
 endif()
-target_link_libraries(oos PRIVATE oos_device_api oos_compositor oos_app_model)
+target_link_libraries(oos PRIVATE
+  oos_device_api oos_compositor oos_app_model oos_device_storage)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

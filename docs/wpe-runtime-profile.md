@@ -54,14 +54,24 @@ changing WPE or device HAL ownership.
 
 Registered web applications keep their original package as
 `/data/packages/<id>/<version>/<content-key>/application.zip`. The WPE runner
-serves one requested ZIP entry at a time through the local, secure
-`oos-app://` scheme,
+serves one requested ZIP entry at a time from the loopback-only
+`http://<id>.localhost` origin,
 so installing or launching does not expand a complete application tree. Each
 app receives a persistent `WebKitNetworkSession` rooted at
 `/data/users/0/web/<id>` and a content-versioned cache below
-`/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3` for
-the future privileged API bridge; compiling WPE alone does not implement that
-bridge.
+`/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3`.
+The HTTP listener serves only package resources. Privileged KaiOS calls use an
+injected WebKit message handler and a separate inherited control socket to the
+OOS host. DeviceStorage enumeration and reads already use this path; future
+capabilities must follow the same pattern instead of adding HTTP endpoints.
+The native service contract is also represented in WIT so WPE adapters and
+WAMR imports converge on the same host implementation.
+
+On Android the formal process boundary is `oos` plus one foreground
+`oos-wpe`. The host creates the surface socket, launches the producer from the
+resolved registry record, acknowledges every imported frame after composition,
+and sends key events in the reverse direction. Closing the app or stopping OOS
+terminates the producer and removes the runtime socket.
 
 ## Profile Model
 
@@ -92,7 +102,9 @@ Current validated build mappings are:
 The 8110 compatibility library implements the small AHardwareBuffer ABI used
 by WPE over Android 6 gralloc0/native handles. It preserves GPU allocation,
 IPC handle transfer, and EGLImage import; it does not copy pixels through the
-CPU.
+CPU. Resource packaging takes this shim from the current Android device build,
+not an older WPE sysroot copy, because it also supplies Android 23 ashmem
+compatibility used by WebKit shared memory.
 
 Each device mapping lives in `system/config/wpe/devices/<device>.env`. Build with:
 
@@ -151,6 +163,18 @@ Both current profiles retain and verify:
 - WebAssembly with the ARMv7 BBQ JIT;
 - accelerated compositing, EGL, GLES, and WebGL;
 - WPE's Android GPU-buffer producer backend.
+
+OOS runs WebAssembly in a performance-first mode on every WPE platform. Before
+an instance becomes visible to application code, JavaScriptCore compiles and
+installs every function with the BBQ JIT. The IPInt interpreter and
+IPInt-to-BBQ OSR are disabled, so execution never pauses to promote a function
+from interpreted code or compile its first call. This deliberately trades
+module load time and JIT-code memory for stable foreground performance.
+
+Platforms that support the OMG optimizing tier may still promote hot BBQ code
+later. ARMv7 has no OMG tier, so its WebAssembly code remains in the already
+compiled BBQ tier for the full instance lifetime. An eager compilation failure
+rejects instantiation instead of silently falling back to interpreted code.
 
 FTL and WebAssembly OMG are disabled because WebKit does not support those
 optimizing tiers on this 32-bit ARM target. The C-loop interpreter is disabled,

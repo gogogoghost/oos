@@ -18,6 +18,7 @@ struct AppRecord {
 struct AppLaunch {
   AppRecord app;
   std::string executable_path;
+  std::string entrypoint;
   std::string data_directory;
   std::string cache_directory;
 };

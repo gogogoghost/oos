@@ -1,0 +1,21 @@
+diff --git a/recipes/wavpack.recipe b/recipes/wavpack.recipe
+index 5a2ea6c..8aecc02 100644
+--- a/recipes/wavpack.recipe
++++ b/recipes/wavpack.recipe
+@@ -1,5 +1,6 @@
+ # -*- Mode: Python -*- vi:si:et:sw=4:sts=4:ts=4:syntax=python
+ from pathlib import Path
++from cerbero.enums import DistroVersion
+ from cerbero.tools.libtool import LibtoolLibrary
+ 
+ class Recipe(recipe.Recipe):
+@@ -41,6 +42,9 @@ class Recipe(recipe.Recipe):
+             self.configure_options += ' -DCOMPILER_SUPPORTS_SYMBOL_MAPS_EXITCODE=0'
+         if self.config.target_platform == Platform.ANDROID:
+             self.configure_options += ' -DCOMPILER_SUPPORTS_SYMBOL_MAPS=TRUE'
++            api = DistroVersion.get_android_api_version(self.config.target_distro_version)
++            if api < 24:
++                self.configure_options += ' -DHAVE_FSEEKO=OFF'
+ 
+     async def extract(self):
+         await super().extract()
