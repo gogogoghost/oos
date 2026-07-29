@@ -31,3 +31,4 @@ trap 'rm -rf "$TEST_DIRECTORY"' EXIT
 "$BUILD_DIR/oos_app_repository_test" "$TEST_PACKAGE" \
   "$KAIOS25_PACKAGE" "$KAIOS3_PACKAGE"
 "$BUILD_DIR/oos_device_storage_test"
+"$BUILD_DIR/oos_system_service_test"

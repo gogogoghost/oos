@@ -1,5 +1,6 @@
 use oos_app::bindings::oos::platform::{
-    audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime, vibrator, wifi,
+    audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime,
+    system_services, vibrator, wifi,
 };
 use oos_app::{
     gles2, App as AppLifecycle, ErrorCode, KeyEvent, ShaderStage, TextureFormat, VertexType,
@@ -177,6 +178,7 @@ fn permission_filtered() {
     permission_denied(oos_app::device_storage::enumerate(
         oos_app::DeviceStorageVolume::Internal,
     ));
+    permission_denied(system_services::request("settings", "get", "{}"));
 }
 
 impl AppLifecycle for App {
@@ -277,6 +279,23 @@ impl AppLifecycle for App {
             assert!(oos_app::device_storage::delete(volume, path).unwrap());
             assert!(!oos_app::device_storage::delete(volume, path).unwrap());
             runtime::log(runtime::LogLevel::Info, "device storage passed");
+            assert_eq!(
+                system_services::request(
+                    "settings",
+                    "set",
+                    r#"{"name":"wit-smoke","value":"{\"ok\":true}"}"#,
+                )
+                .unwrap(),
+                "null"
+            );
+            assert!(system_services::request(
+                "settings",
+                "get",
+                r#"{"name":"wit-smoke"}"#,
+            )
+            .unwrap()
+            .contains(r#""ok":true"#));
+            runtime::log(runtime::LogLevel::Info, "system services passed");
             assert_eq!(
                 (descriptor.primary_width, descriptor.primary_height),
                 (240, 320)

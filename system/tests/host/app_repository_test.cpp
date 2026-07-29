@@ -29,6 +29,15 @@ bool hasPermission(const oos::apps::AppRecord &record,
   return false;
 }
 
+bool hasHandler(const oos::apps::AppRecord &record, const char *kind,
+                const char *value) {
+  for (const oos::apps::AppHandler &handler : record.manifest.handlers) {
+    if (handler.kind == kind && handler.value == value)
+      return true;
+  }
+  return false;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -85,6 +94,9 @@ int main(int argc, char **argv) {
               "KaiOS 2.5 runtime discriminator");
     success &= check(hasPermission(webapp, "device-storage:sdcard") &&
                          hasPermission(webapp, "wifi-manage") &&
+                         hasPermission(webapp, "settings:read") &&
+                         hasPermission(webapp, "settings:write") &&
+                         hasPermission(webapp, "system-message:alarm") &&
                          hasPermission(
                              webapp,
                              "datastore-owned:readwrite:test-state") &&
@@ -92,6 +104,8 @@ int main(int argc, char **argv) {
                              webapp,
                              "datastore-owned:readonly:owner-write"),
                      "KaiOS 2.5 permissions survive registry resolution");
+    success &= check(hasHandler(webapp, "activity", "pick"),
+                     "KaiOS 2.5 activity handler survives registry resolution");
     const auto owner_stores = oos::apps::ownedDataStoreGrants(
         webapp.manifest.requested_permissions);
     success &= check(owner_stores.size() == 2 && owner_stores[0].writable &&
@@ -107,8 +121,13 @@ int main(int argc, char **argv) {
                          webmanifest.manifest.api_profile == "kaios-v3",
                      "KaiOS 3 runtime discriminator");
     success &= check(hasPermission(webmanifest, "bluetooth") &&
-                         hasPermission(webmanifest, "camera"),
+                         hasPermission(webmanifest, "camera") &&
+                         hasPermission(webmanifest, "settings:read") &&
+                         hasPermission(webmanifest, "settings:write") &&
+                         hasPermission(webmanifest, "system-message:alarm"),
                      "KaiOS 3 permissions survive registry resolution");
+    success &= check(hasHandler(webmanifest, "activity", "view"),
+                     "KaiOS 3 activity handler survives registry resolution");
     oos::apps::AppLaunch web_launch;
     success &=
         check(repository.prepareLaunch("org.kaios.calculator", web_launch),

@@ -14,6 +14,7 @@ enum class DeviceServicePermission : uint32_t {
   Bluetooth = 1U << 4,
   Modem = 1U << 5,
   DeviceStorage = 1U << 6,
+  System = 1U << 7,
 };
 
 struct DataStoreGrant {
@@ -45,6 +46,8 @@ deviceServicePermissionMask(const std::vector<std::string> &permissions) {
     } else if (permission.compare(0, sizeof("device-storage:") - 1,
                                   "device-storage:") == 0) {
       mask |= permissionBit(DeviceServicePermission::DeviceStorage);
+    } else if (permission == "system") {
+      mask |= permissionBit(DeviceServicePermission::System);
     }
   }
   return mask;

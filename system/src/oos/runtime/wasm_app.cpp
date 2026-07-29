@@ -22,6 +22,7 @@
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
 #include "oos/runtime/graphics_host.h"
+#include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 
@@ -49,6 +50,8 @@ constexpr const char *kCodecInterface = "oos:platform/codec@0.1.0";
 constexpr const char *kStorageInterface = "oos:platform/storage@0.1.0";
 constexpr const char *kDeviceStorageInterface =
     "oos:platform/device-storage@0.1.0";
+constexpr const char *kSystemServicesInterface =
+    "oos:platform/system-services@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
 constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.1.0#event";
 constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.1.0#frame";
@@ -109,6 +112,8 @@ struct AppHostContext {
   std::unique_ptr<device::ServiceProvider> *services = nullptr;
   storage::AppStorage *storage = nullptr;
   storage::DeviceStorageService *device_storage = nullptr;
+  services::SystemServiceHub *system_services = nullptr;
+  const std::string *app_id = nullptr;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
 };
@@ -190,6 +195,14 @@ device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
   if (!*host->services)
     *host->services = std::make_unique<device::ServiceProvider>(*host->device);
   return host->services->get();
+}
+
+services::SystemServiceHub *systemServicesFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host && servicePermissionGranted(
+                     environment, apps::DeviceServicePermission::System)
+             ? host->system_services
+             : nullptr;
 }
 
 void trapInvalidReturnArea(wasm_exec_env_t environment) {
@@ -2037,6 +2050,55 @@ void nativeCodec(wasm_exec_env_t environment, uint32_t width, uint32_t height,
   storeCanonical<uint64_t>(result, 48, codec.encoded_bytes);
 }
 
+void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
+                         uint32_t service_length, uint32_t operation_offset,
+                         uint32_t operation_length, uint32_t payload_offset,
+                         uint32_t payload_length, uint32_t result_offset) {
+  std::string service;
+  std::string operation;
+  std::string payload;
+  const bool arguments =
+      guestString(environment, service_offset, service_length, service, 64) &&
+      guestString(environment, operation_offset, operation_length, operation,
+                  64) &&
+      guestString(environment, payload_offset, payload_length, payload,
+                  256 * 1024);
+  AppHostContext *host = hostFor(environment);
+  services::SystemServiceHub *system_services = systemServicesFor(environment);
+  if (!arguments || !host || !host->app_id || !system_services) {
+    writeBytesResult(
+        environment, result_offset, nullptr, 0, false,
+        !arguments ? WitError::InvalidArgument
+                   : servicePermissionGranted(
+                         environment, apps::DeviceServicePermission::System)
+                         ? WitError::Unavailable
+                         : WitError::PermissionDenied);
+    return;
+  }
+  std::string response;
+  const int result = system_services->request(*host->app_id, {}, service,
+                                              operation, payload, response, true);
+  WitError wit_error = WitError::Failed;
+  if (result == -EINVAL)
+    wit_error = WitError::InvalidArgument;
+  else if (result == -EACCES || result == -EPERM)
+    wit_error = WitError::PermissionDenied;
+  else if (result == -ENOSYS || result == -ENOTSUP)
+    wit_error = WitError::Unavailable;
+  else if (result == -E2BIG)
+    wit_error = WitError::LimitExceeded;
+  else if (result == -EBUSY)
+    wit_error = WitError::Busy;
+  else if (result == -ETIMEDOUT)
+    wit_error = WitError::Timeout;
+  else if (result == -EIO)
+    wit_error = WitError::Io;
+  writeBytesResult(environment, result_offset,
+                   reinterpret_cast<const uint8_t *>(response.data()),
+                   static_cast<uint32_t>(response.size()), result == 0,
+                   wit_error);
+}
+
 NativeSymbol kRuntimeSymbols[] = {
     {"abi-version", reinterpret_cast<void *>(nativeAbiVersion), "()i", nullptr},
     {"wall-clock-minutes", reinterpret_cast<void *>(nativeWallClockMinutes),
@@ -2289,6 +2351,11 @@ NativeSymbol kDeviceStorageSymbols[] = {
      reinterpret_cast<void *>(1)},
 };
 
+NativeSymbol kSystemServicesSymbols[] = {
+    {"request", reinterpret_cast<void *>(nativeSystemRequest), "(iiiiiii)",
+     serviceAttachment(4, WasmServicePermission::System)},
+};
+
 struct WitNativeInterface {
   const char *name;
   NativeSymbol *symbols;
@@ -2317,6 +2384,8 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kStorageSymbols))},
     {kDeviceStorageInterface, kDeviceStorageSymbols,
      static_cast<uint32_t>(std::size(kDeviceStorageSymbols))},
+    {kSystemServicesInterface, kSystemServicesSymbols,
+     static_cast<uint32_t>(std::size(kSystemServicesSymbols))},
 };
 
 uint32_t gRuntimeReferences = 0;
@@ -2691,11 +2760,20 @@ public:
           this->options.internal_media_directory,
           this->options.removable_media_directory);
     }
+    if (!this->options.system_data_root.empty() &&
+        apps::hasDeviceServicePermission(
+            this->options.service_permission_mask,
+            apps::DeviceServicePermission::System)) {
+      system_services = std::make_unique<services::SystemServiceHub>(
+          this->options.system_data_root, this->options.app_repository);
+    }
     host = {&this->graphics,
             device,
             &services,
             app_storage.get(),
             device_storage.get(),
+            system_services.get(),
+            &this->options.app_id,
             this->options.service_permission_mask,
             this->options.enforce_service_permissions};
   }
@@ -2774,6 +2852,7 @@ public:
   std::unique_ptr<device::ServiceProvider> services;
   std::unique_ptr<storage::AppStorage> app_storage;
   std::unique_ptr<storage::DeviceStorageService> device_storage;
+  std::unique_ptr<services::SystemServiceHub> system_services;
   AppHostContext host;
   WasmAppOptions options;
   MappedModule module_bytes;
@@ -2803,6 +2882,11 @@ bool WasmApp::load(const char *path) {
   }
   if (impl_->app_storage && !impl_->app_storage->initialize()) {
     impl_->error = "initialize app storage: " + impl_->app_storage->lastError();
+    return false;
+  }
+  if (impl_->system_services && !impl_->system_services->initialize()) {
+    impl_->error = "initialize system services: " +
+                   impl_->system_services->lastError();
     return false;
   }
   if (!impl_->initializeRuntime() ||

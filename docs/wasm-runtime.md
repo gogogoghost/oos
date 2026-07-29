@@ -78,7 +78,7 @@ delegates to the existing audio, camera, power, vibration, Wi-Fi/IP, Bluetooth,
 modem, and codec managers. No HAL manager is initialized at app startup. A
 runtime created without a `Device` returns the typed WIT `unavailable` error.
 For repository-launched applications, granted manifest permissions are reduced
-to a seven-bit mask once at launch. Each privileged WIT call performs one mask
+to a permission mask once at launch. Each privileged WIT call performs one mask
 test before the lazy provider is reached and returns `permission-denied` when
 the capability was not granted. Raw `--module` hardware diagnostics explicitly
 retain unrestricted service access because they have no application manifest.
@@ -98,6 +98,11 @@ or removable media. WAMR writes directly from validated guest linear memory;
 reads allocate the Canonical ABI result in guest memory and read file bytes into
 that allocation without an intermediate host byte vector. It is exposed only
 when a granted permission starts with `device-storage:`.
+
+The `system-services` interface is a trusted JSON policy broker for SystemUI.
+It is registered only for applications granted `system`; ordinary WAMR apps do
+not instantiate its SQLite service. It manages software state and events, not
+device drivers.
 
 ## WAMR And Components
 

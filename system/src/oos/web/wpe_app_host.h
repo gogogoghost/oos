@@ -26,7 +26,7 @@ namespace oos::web {
 class WpeAppHost {
 public:
   WpeAppHost(compositor::Compositor &compositor, input::KeyInputSource &input,
-             device::Device &device);
+             device::Device &device, apps::AppRepository &repository);
   ~WpeAppHost();
 
   bool run(const apps::AppLaunch &launch,
@@ -38,6 +38,7 @@ private:
   compositor::Compositor &compositor_;
   input::KeyInputSource &input_;
   device::Device &device_;
+  apps::AppRepository &repository_;
   std::unique_ptr<device::ServiceProvider> services_;
   std::string error_;
 };

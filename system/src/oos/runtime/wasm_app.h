@@ -10,6 +10,10 @@ namespace oos::device {
 class Device;
 }
 
+namespace oos::apps {
+class AppRepository;
+}
+
 namespace oos::runtime {
 
 class GraphicsHost;
@@ -19,6 +23,8 @@ struct WasmAppOptions {
   uint32_t heap_size = 4 * 1024 * 1024;
   std::string app_id;
   std::string data_directory;
+  std::string system_data_root;
+  apps::AppRepository *app_repository = nullptr;
   std::string internal_media_directory = "/data/media/internal";
   std::string removable_media_directory = "/data/media/removable";
   uint32_t service_permission_mask = 0;

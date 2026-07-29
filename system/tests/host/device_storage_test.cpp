@@ -226,12 +226,11 @@ int main() {
          battery.second.find("\"capacityPercent\":82") !=
              std::string::npos);
   const auto wifi = platformRequest("wifi.status", "{}");
-  assert(wifi.first == 0 &&
-         wifi.second.find("OOS Mock Network") != std::string::npos);
+  assert(wifi.first == -ENOTSUP && wifi.second.empty());
   assert(platformRequest(
              "ip.static",
              R"({"interfaceName":"wlan0","address":"192.0.2.8","prefixLength":24,"gateway":"192.0.2.1","dns1":"192.0.2.53","dns2":"198.51.100.53"})")
-             .first == 0);
+             .first == -ENOTSUP);
   assert(platformRequest("camera.enumerate", "{}").first == -EACCES);
   const auto empty_store =
       platformRequest("datastore.get", R"({"name":"test-state"})");

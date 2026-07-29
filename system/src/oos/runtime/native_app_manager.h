@@ -10,6 +10,10 @@ namespace oos::device {
 class Device;
 }
 
+namespace oos::apps {
+class AppRepository;
+}
+
 namespace oos::runtime {
 
 class GraphicsHost;
@@ -17,6 +21,8 @@ class GraphicsHost;
 struct NativeAppLaunchOptions {
   const char *module_path = nullptr;
   const char *data_directory = nullptr;
+  const char *system_data_root = nullptr;
+  apps::AppRepository *app_repository = nullptr;
   const char *internal_media_directory = "/data/media/internal";
   const char *removable_media_directory = "/data/media/removable";
   uint32_t stack_size = 128 * 1024;

@@ -114,6 +114,26 @@ bool loadGrantedPermissions(storage::SqliteDatabase &database,
   }
 }
 
+bool loadHandlers(storage::SqliteDatabase &database, AppRecord &record) {
+  storage::SqliteStatement handlers;
+  if (!database.prepare(
+          "SELECT handler_kind,handler_value FROM app_handlers"
+          " WHERE app_id=? ORDER BY handler_kind,handler_value;",
+          handlers) || !handlers.bindText(1, record.manifest.id))
+    return false;
+  record.manifest.handlers.clear();
+  while (true) {
+    const auto result = handlers.step();
+    if (result == storage::SqliteStatement::Step::Done)
+      return true;
+    const char *kind = handlers.columnText(0);
+    const char *value = handlers.columnText(1);
+    if (result != storage::SqliteStatement::Step::Row || !kind || !value)
+      return false;
+    record.manifest.handlers.push_back({kind, value});
+  }
+}
+
 } // namespace
 
 class AppRepository::Impl {
@@ -339,6 +359,27 @@ bool AppRepository::install(const char *package_path,
     }
     if (!metadata_success)
       break;
+    storage::SqliteStatement clear_handlers;
+    if (!impl_->database.prepare("DELETE FROM app_handlers WHERE app_id=?;",
+                                 clear_handlers) ||
+        !clear_handlers.bindText(1, manifest.id) ||
+        clear_handlers.step() != storage::SqliteStatement::Step::Done)
+      break;
+    for (const AppHandler &handler : manifest.handlers) {
+      storage::SqliteStatement insert_handler;
+      if (!impl_->database.prepare(
+              "INSERT INTO app_handlers(app_id,handler_kind,handler_value)"
+              " VALUES(?,?,?);",
+              insert_handler) || !insert_handler.bindText(1, manifest.id) ||
+          !insert_handler.bindText(2, handler.kind) ||
+          !insert_handler.bindText(3, handler.value) ||
+          insert_handler.step() != storage::SqliteStatement::Step::Done) {
+        metadata_success = false;
+        break;
+      }
+    }
+    if (!metadata_success)
+      break;
     storage::SqliteStatement clear_roles;
     if (!impl_->database.prepare("DELETE FROM app_roles WHERE app_id=?;",
                                  clear_roles) ||
@@ -395,7 +436,8 @@ bool AppRepository::resolve(const char *app_id, AppRecord &record) {
              std::string(app_id ? app_id : "(null)");
     return false;
   }
-  if (!loadGrantedPermissions(impl_->database, record)) {
+  if (!loadGrantedPermissions(impl_->database, record) ||
+      !loadHandlers(impl_->database, record)) {
     error_ = impl_->database.lastError();
     return false;
   }
@@ -423,7 +465,8 @@ bool AppRepository::list(std::vector<AppRecord> &records) {
     AppRecord record;
     if (result != storage::SqliteStatement::Step::Row ||
         !parseRecord(statement, record) ||
-        !loadGrantedPermissions(impl_->database, record)) {
+        !loadGrantedPermissions(impl_->database, record) ||
+        !loadHandlers(impl_->database, record)) {
       error_ = impl_->database.lastError();
       return false;
     }

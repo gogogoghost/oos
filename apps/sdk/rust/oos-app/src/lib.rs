@@ -79,6 +79,14 @@ pub fn kv_clear() -> Result<(), ErrorCode> {
     storage::kv_clear()
 }
 
+pub mod system_services {
+    use super::{bindings, ErrorCode};
+
+    pub fn request(service: &str, operation: &str, payload: &str) -> Result<String, ErrorCode> {
+        bindings::oos::platform::system_services::request(service, operation, payload)
+    }
+}
+
 pub mod device_storage {
     use super::{
         bindings, DeviceStorageEntry, DeviceStorageVolume, DeviceStorageWriteMode, ErrorCode,

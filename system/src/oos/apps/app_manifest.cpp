@@ -102,6 +102,76 @@ bool collectPermissions(const JsonValue *permissions, AppManifest &manifest,
       return false;
     }
     manifest.requested_permissions.push_back(entry.first);
+    if (!entry.second.isObject())
+      continue;
+    const JsonValue *access = entry.second.get("access");
+    if (!access)
+      continue;
+    if (!access->isString()) {
+      error = "manifest permission access must be a string";
+      return false;
+    }
+    if (access->stringValue() == "readonly") {
+      manifest.requested_permissions.push_back(entry.first + ":read");
+    } else if (access->stringValue() == "readwrite") {
+      manifest.requested_permissions.push_back(entry.first + ":read");
+      manifest.requested_permissions.push_back(entry.first + ":write");
+    } else if (access->stringValue() == "createonly") {
+      manifest.requested_permissions.push_back(entry.first + ":create");
+    }
+  }
+  return true;
+}
+
+bool collectMessages(const JsonValue *messages, AppManifest &manifest,
+                     std::string &error) {
+  if (!messages)
+    return true;
+  if (!messages->isArray()) {
+    error = "manifest field 'messages' must be an array";
+    return false;
+  }
+  for (const JsonValue &message : messages->arrayValue()) {
+    if (message.isString()) {
+      if (message.stringValue().empty() || message.stringValue().size() > 128) {
+        error = "manifest system message name is empty or too long";
+        return false;
+      }
+      manifest.requested_permissions.push_back("system-message:" +
+                                                message.stringValue());
+      continue;
+    }
+    if (!message.isObject() || message.objectValue().empty()) {
+      error = "manifest field 'messages' contains an invalid entry";
+      return false;
+    }
+    for (const auto &entry : message.objectValue()) {
+      if (entry.first.empty() || entry.first.size() > 128) {
+        error = "manifest system message name is empty or too long";
+        return false;
+      }
+      manifest.requested_permissions.push_back("system-message:" +
+                                                entry.first);
+    }
+  }
+  return true;
+}
+
+bool collectActivities(const JsonValue *activities, AppManifest &manifest,
+                       std::string &error) {
+  if (!activities)
+    return true;
+  if (!activities->isObject()) {
+    error = "manifest field 'activities' must be an object";
+    return false;
+  }
+  for (const auto &entry : activities->objectValue()) {
+    if (entry.first.empty() || entry.first.size() > 128 ||
+        !entry.second.isObject()) {
+      error = "manifest field 'activities' contains an invalid handler";
+      return false;
+    }
+    manifest.handlers.push_back({"activity", entry.first});
   }
   return true;
 }
@@ -281,13 +351,21 @@ bool parseKaiOsManifest(const std::string &json, PackageKind kind,
   }
   const JsonValue *role = root.get("role");
   const JsonValue *permissions = root.get("permissions");
+  const JsonValue *messages = root.get("messages");
+  const JsonValue *activities = root.get("activities");
   if (kind == PackageKind::KaiOs3 && features && features->isObject()) {
     role = features->get("role");
     permissions = features->get("permissions");
+    if (features->get("messages"))
+      messages = features->get("messages");
+    if (features->get("activities"))
+      activities = features->get("activities");
   }
   if (role && role->isString())
     parsed.role = role->stringValue();
-  if (!collectPermissions(permissions, parsed, error))
+  if (!collectPermissions(permissions, parsed, error) ||
+      !collectMessages(messages, parsed, error) ||
+      !collectActivities(activities, parsed, error))
     return false;
   if (kind == PackageKind::KaiOs25 &&
       (!collectDataStores(root.get("datastores-owned"), "datastore-owned",

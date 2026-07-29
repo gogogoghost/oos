@@ -13,7 +13,7 @@ trap 'rm -rf "$staging"' EXIT
 
 mkdir -p "$staging/kaios25" "$staging/kaios3"
 printf '%s\n' \
-  '{"name":"APN Config","version":"1.0.0","launch_path":"/index.html","permissions":{"device-storage:sdcard":{"access":"readwrite"},"wifi-manage":{}},"datastores-owned":{"test-state":{"access":"readwrite","description":"WPE bridge test"},"owner-write":{"access":"readonly","description":"Owner remains writable"}}}' \
+  '{"name":"APN Config","version":"1.0.0","launch_path":"/index.html","permissions":{"alarms":{},"device-storage:sdcard":{"access":"readwrite"},"settings":{"access":"readwrite"},"wifi-manage":{}},"messages":[{"alarm":"/index.html"}],"activities":{"pick":{"filters":{"type":["image/*"]}}},"datastores-owned":{"test-state":{"access":"readwrite","description":"WPE bridge test"},"owner-write":{"access":"readonly","description":"Owner remains writable"}}}' \
   > "$staging/kaios25/manifest.webapp"
 cat > "$staging/kaios25/index.html" <<'EOF'
 <!doctype html><meta charset="utf-8"><title>KaiOS 2.5 API test</title>
@@ -26,9 +26,30 @@ cat > "$staging/kaios25/index.html" <<'EOF'
         typeof navigator.getDataStores !== 'function' ||
         typeof navigator.getFeature !== 'function')
       throw new Error('invalid KaiOS 2.5 API profile');
-    const status = await navigator.mozWifiManager.refresh();
-    if (status.ssid !== 'OOS Mock Network')
-      throw new Error('Wi-Fi host bridge failed');
+    try {
+      await navigator.mozWifiManager.refresh();
+      throw new Error('Wi-Fi control unexpectedly succeeded');
+    } catch (error) {
+      if (error.name !== 'NotSupportedError') throw error;
+    }
+    try {
+      navigator.mozWifiManager.enabled = true;
+      throw new Error('Wi-Fi enabled setter unexpectedly succeeded');
+    } catch (error) {
+      if (error.name !== 'NotSupportedError') throw error;
+    }
+    const settings = navigator.mozSettings.createLock();
+    await new Promise((resolve, reject) => {
+      const request = settings.set({ 'oos.test': 42 });
+      request.onsuccess = resolve; request.onerror = () => reject(request.error);
+    });
+    const alarmId = await new Promise((resolve, reject) => {
+      const request = navigator.mozAlarms.add(new Date(Date.now() + 60000),
+        'honorTimezone', { test: true });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    navigator.mozAlarms.remove(alarmId);
     const [store] = await navigator.getDataStores('test-state');
     await store.clear();
     const id = await store.add({ value: 7 });
@@ -60,7 +81,7 @@ cat > "$staging/kaios25/index.html" <<'EOF'
 </script>
 EOF
 printf '%s\n' \
-  '{"name":"Calculator","start_url":"./main.html?source=test","b2g_features":{"version":"3.0.0","permissions":{"bluetooth":{},"camera":{}}}}' \
+  '{"name":"Calculator","start_url":"./main.html?source=test","b2g_features":{"version":"3.0.0","permissions":{"alarms":{},"bluetooth":{},"camera":{},"settings":{"access":"readwrite"}},"messages":["alarm"],"activities":{"view":{"filters":{"type":["text/*"]}}}}}' \
   > "$staging/kaios3/manifest.webmanifest"
 cat > "$staging/kaios3/main.html" <<'EOF'
 <!doctype html><meta charset="utf-8"><title>KaiOS 3 API test</title>
@@ -81,6 +102,21 @@ cat > "$staging/kaios3/main.html" <<'EOF'
     const cameras = await navigator.b2g.cameras.refresh();
     if (cameras[0]?.id !== 'mock-camera-0')
       throw new Error('camera host bridge failed');
+    await new Promise((resolve, reject) => {
+      const request = navigator.b2g.bluetooth.defaultAdapter.enable();
+      request.onsuccess = () => reject(
+        new Error('Bluetooth control unexpectedly succeeded'));
+      request.onerror = () => request.error?.name === 'NotSupportedError'
+        ? resolve() : reject(request.error);
+    });
+    const alarmId = await navigator.b2g.alarmManager.add({
+      date: new Date(Date.now() + 60000), data: { test: true },
+      ignoreTimezone: false
+    });
+    await navigator.b2g.alarmManager.remove(alarmId);
+    const settings = await lib_settings.SettingsManager
+      .get(new lib_session.Session());
+    await settings.set([{ name: 'oos.test', value: 3 }]);
     document.body.textContent = 'PASS';
     await new Promise(resolve => requestAnimationFrame(() =>
       requestAnimationFrame(resolve)));

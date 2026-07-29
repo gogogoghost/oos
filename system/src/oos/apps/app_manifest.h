@@ -9,6 +9,11 @@ namespace oos::apps {
 enum class PackageKind { OosWasmV1, KaiOs25, KaiOs3 };
 enum class RuntimeKind { Wamr, Wpe };
 
+struct AppHandler {
+  std::string kind;
+  std::string value;
+};
+
 struct AppManifest {
   uint32_t format = 0;
   std::string id;
@@ -23,6 +28,7 @@ struct AppManifest {
   uint32_t stack_bytes = 128 * 1024;
   uint32_t heap_bytes = 4 * 1024 * 1024;
   std::vector<std::string> requested_permissions;
+  std::vector<AppHandler> handlers;
 };
 
 const char *packageKindName(PackageKind kind);

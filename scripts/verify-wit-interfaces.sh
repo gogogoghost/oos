@@ -50,7 +50,7 @@ fi
 
 for interface in \
   runtime graphics device audio camera power vibrator wifi ip bluetooth modem codec \
-  storage device-storage; do
+  storage device-storage system-services; do
   rg -Fq "(import \"oos:platform/$interface@0.1.0\"" \
     "$TEMP_DIR/smoke.wat"
 done

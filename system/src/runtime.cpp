@@ -243,6 +243,8 @@ int run(int argc, char **argv) {
     if (runtime_kind == oos::apps::RuntimeKind::Wamr) {
       native_launch.module_path = app_launch.executable_path.c_str();
       native_launch.data_directory = app_launch.data_directory.c_str();
+      native_launch.system_data_root = data_root;
+      native_launch.app_repository = &repository;
       native_launch.stack_size = app_launch.app.manifest.stack_bytes;
       native_launch.heap_size = app_launch.app.manifest.heap_bytes;
       native_launch.service_permission_mask =
@@ -279,7 +281,8 @@ int run(int argc, char **argv) {
   std::signal(SIGTERM, stopRuntime);
   if (runtime_kind == oos::apps::RuntimeKind::Wpe) {
 #if defined(OOS_EXTERNAL_WPE_RUNTIME)
-    oos::web::WpeAppHost web_app(compositor, input, *platform_device);
+    oos::web::WpeAppHost web_app(compositor, input, *platform_device,
+                                 repository);
     std::fprintf(stderr, "OOS WPE app starting on %s: %s\n", descriptor.id,
                  app_launch.app.manifest.id.c_str());
     std::fflush(stderr);

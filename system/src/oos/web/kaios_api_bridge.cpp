@@ -389,6 +389,7 @@ const eventTarget = target => {
   return target;
 };
 const failedRequest = name => domRequest(null, notSupported(name));
+const failedPromise = name => Promise.reject(notSupported(name));
 const deviceHandler = globalThis.webkit?.messageHandlers?.oosDeviceApi;
 const deviceCall = (operation, volume, path = '', data = '', mode = '') => {
   if (!deviceHandler)
@@ -599,6 +600,9 @@ const hasPermissionPrefix = prefix => runtime.permissions.some(permission =>
 const platformCall = (method, parameters = {}) =>
   deviceCall('platform', 0, method, JSON.stringify(parameters)).then(encoded =>
     JSON.parse(encoded));
+const systemCall = (service, operation, payload = {}) =>
+  platformCall('system.request', { service, operation,
+    payload: JSON.stringify(payload) });
 const makeWakeLock = topic => {
   let released = false;
   platformCall('power.acquire-wake-lock', { name: String(topic) })
@@ -619,6 +623,27 @@ const bluetoothAllowed = hasPermission('bluetooth');
 const cameraAllowed = hasPermission('camera');
 const modemAllowed = hasPermission('mobileconnection', 'mobilenetwork');
 const powerSupplyAllowed = hasPermission('powersupply');
+const alarmsAllowed = hasPermission('alarms');
+const settingsAllowed = hasPermission('settings', 'settings:read',
+  'settings:write');
+const contactsAllowed = hasPermission('contacts', 'contacts:read',
+  'contacts:write');
+const notificationsAllowed = hasPermission('desktop-notification',
+  'notification');
+const applicationsAllowed = hasPermission('apps-management');
+const audioPolicyAllowed = hasPermission('volume-control') ||
+  hasPermissionPrefix('audio-channel-');
+const inputMethodAllowed = hasPermission('input', 'input-manage');
+const timeAllowed = hasPermission('system-time', 'system-time:read',
+  'system-time:write');
+const nfcAllowed = hasPermission('nfc', 'nfc-manager');
+const secureElementAllowed = hasPermission('secureelement-manage',
+  'secure-element');
+const networkStatsAllowed = hasPermission('networkstats-manage');
+const fmRadioAllowed = hasPermission('fmradio');
+const tcpSocketAllowed = hasPermission('tcp-socket');
+const telephonyAllowed = hasPermission('telephony');
+const externalApiAllowed = hasPermission('external-api');
 const ownedDataStoreDefinitions = new Map();
 for (const permission of runtime.permissions) {
   for (const [prefix, writable] of [
@@ -836,90 +861,71 @@ define(nav, 'getBattery', () => batteryManager.refresh());
 batteryManager.refresh().catch(() => {});
 
 const wifiManager = eventTarget({
-  enabled: true, connection: { status: 'disconnected', network: null },
+  enabled: false, connection: { status: 'disconnected', network: null },
   connectionInformation: { ipAddress: '', signalStrength: 0,
     relSignalStrength: 0, linkSpeed: 0 },
   onstatuschange: null, onconnectioninfoupdate: null,
-  getNetworks: () => domRequest(platformCall('wifi.scan').then(networks =>
-    networks.map(network => {
-      const flags = String(network.capabilities || '');
-      const security = /WPA-EAP/i.test(flags) ? ['WPA-EAP']
-        : /WPA/i.test(flags) ? ['WPA-PSK']
-        : /WEP/i.test(flags) ? ['WEP'] : [];
-      return { ...network, signalStrength: network.signalDbm,
-        relSignalStrength: Math.max(0, Math.min(100,
-          2 * (network.signalDbm + 100))), security,
-        capabilities: /WPS/i.test(flags) ? ['WPS'] : [],
-        connected: false, known: false };
-    }))),
-  getKnownNetworks: () => domRequest(platformCall('wifi.networks').then(
-    networks => networks.map(network => ({ ...network, known: true,
-      connected: /CURRENT/i.test(String(network.capabilities || '')) })))),
-  associate: network => domRequest(platformCall('wifi.connect', {
-    ssid: String(network?.ssid || ''),
-    security: /WPA/i.test(String(network?.capabilities ||
-      network?.security?.join?.('') || '')) ? 1 : 0,
-    credential: String(network?.psk || network?.password || '')
-  })),
-  forget: network => domRequest(platformCall('wifi.forget', {
-    networkId: Number(network?.networkId ?? network?.id ?? -1)
-  })),
-  disconnect: () => domRequest(platformCall('wifi.disconnect')),
-  reconnect: () => domRequest(platformCall('wifi.reconnect')),
-  setStaticIpMode: (_network, info) => domRequest(info?.enabled
-    ? platformCall('ip.static', {
-        interfaceName: String(info.ifname || 'wlan0'),
-        address: String(info.ipaddr || ''),
-        prefixLength: Number(info.maskLength || 0),
-        gateway: String(info.gateway || ''),
-        dns1: String(info.dns1 || ''), dns2: String(info.dns2 || '')
-      })
-    : platformCall('ip.dhcp', { timeoutMs: 15000 })),
-  async refresh() {
-    const status = await platformCall('wifi.status');
-    const state = String(status.state).toUpperCase();
-    this.connection.status = state === 'COMPLETED' ? 'connected'
-      : state === 'ASSOCIATING' ? 'connecting'
-      : state === 'ASSOCIATED' ? 'associated' : 'disconnected';
-    this.connection.network = status.ssid ? { ssid: status.ssid,
-      bssid: status.bssid, networkId: status.networkId } : null;
-    this.connectionInformation.ipAddress = status.ipAddress;
-    this.dispatchEvent({ type: 'statuschange', target: this });
-    return status;
-  },
-  getIpConfiguration: () => platformCall('ip.status'),
-  useDhcp: timeoutMs => platformCall('ip.dhcp', { timeoutMs })
+  getNetworks: () => failedRequest('WiFiManager.getNetworks'),
+  getKnownNetworks: () => failedRequest('WiFiManager.getKnownNetworks'),
+  associate: () => failedRequest('WiFiManager.associate'),
+  forget: () => failedRequest('WiFiManager.forget'),
+  disconnect: () => failedRequest('WiFiManager.disconnect'),
+  reconnect: () => failedRequest('WiFiManager.reconnect'),
+  wps: () => failedRequest('WiFiManager.wps'),
+  setStaticIpMode: () => failedRequest('WiFiManager.setStaticIpMode'),
+  setPowerSavingMode: () => failedRequest('WiFiManager.setPowerSavingMode'),
+  importCert: () => failedRequest('WiFiManager.importCert'),
+  deleteCert: () => failedRequest('WiFiManager.deleteCert'),
+  getImportedCerts: () => failedRequest('WiFiManager.getImportedCerts'),
+  setHttpProxy: () => failedRequest('WiFiManager.setHttpProxy'),
+  getHttpProxy: () => failedRequest('WiFiManager.getHttpProxy'),
+  refresh: () => failedPromise('WiFiManager.refresh'),
+  getIpConfiguration: () => failedPromise('WiFiManager.getIpConfiguration'),
+  useDhcp: () => failedPromise('WiFiManager.useDhcp')
 });
 const bluetoothAdapter = eventTarget({
-  state: 'disabled', discovering: false, ondevicefound: null,
-  enable: () => domRequest(platformCall('bluetooth.enable').then(() => {
-    bluetoothAdapter.state = 'enabled'; return true;
-  })),
-  disable: () => domRequest(platformCall('bluetooth.disable').then(() => {
-    bluetoothAdapter.state = 'disabled'; return true;
-  })),
-  startDiscovery: () => domRequest((async () => {
-    bluetoothAdapter.discovering = true;
-    const devices = await platformCall('bluetooth.classic-scan');
-    for (const device of devices)
-      bluetoothAdapter.dispatchEvent({ type: 'devicefound', target:
-        bluetoothAdapter, device });
-    bluetoothAdapter.discovering = false;
-    return devices;
-  })()),
-  stopDiscovery: () => domRequest(Promise.resolve().then(() => {
-    bluetoothAdapter.discovering = false; return true;
-  })),
-  pair: (address, transport = 0) => domRequest(platformCall('bluetooth.pair',
-    { address: String(address), transport: Number(transport) || 0 })),
-  unpair: address => domRequest(platformCall('bluetooth.unpair',
-    { address: String(address) })),
-  cancelPairing: address => domRequest(platformCall('bluetooth.cancel-pairing',
-    { address: String(address) })),
-  leScan: durationMs => platformCall('bluetooth.le-scan', { durationMs })
+  state: 'disabled', discovering: false, pairedDevices: [],
+  ondevicefound: null,
+  enable: () => failedRequest('BluetoothAdapter.enable'),
+  disable: () => failedRequest('BluetoothAdapter.disable'),
+  setName: () => failedRequest('BluetoothAdapter.setName'),
+  setDiscoverable: () => failedRequest('BluetoothAdapter.setDiscoverable'),
+  startDiscovery: () => failedRequest('BluetoothAdapter.startDiscovery'),
+  stopDiscovery: () => failedRequest('BluetoothAdapter.stopDiscovery'),
+  pair: () => failedRequest('BluetoothAdapter.pair'),
+  unpair: () => failedRequest('BluetoothAdapter.unpair'),
+  cancelPairing: () => failedRequest('BluetoothAdapter.cancelPairing'),
+  fetchUuids: () => failedRequest('BluetoothAdapter.fetchUuids'),
+  connect: () => failedRequest('BluetoothAdapter.connect'),
+  disconnect: () => failedRequest('BluetoothAdapter.disconnect'),
+  getConnectedDevices: () =>
+    failedRequest('BluetoothAdapter.getConnectedDevices'),
+  sendFile: () => failedRequest('BluetoothAdapter.sendFile'),
+  stopSendingFile: () => failedRequest('BluetoothAdapter.stopSendingFile'),
+  confirmReceivingFile: () =>
+    failedRequest('BluetoothAdapter.confirmReceivingFile'),
+  connectSco: () => failedRequest('BluetoothAdapter.connectSco'),
+  disconnectSco: () => failedRequest('BluetoothAdapter.disconnectSco'),
+  isScoConnected: () => failedRequest('BluetoothAdapter.isScoConnected'),
+  leScan: () => failedPromise('BluetoothAdapter.leScan'),
+  startLeScan: () => failedPromise('BluetoothAdapter.startLeScan'),
+  stopLeScan: () => failedPromise('BluetoothAdapter.stopLeScan')
 });
 const bluetoothManager = eventTarget({ enabled: false,
-  defaultAdapter: bluetoothAdapter, onenabled: null, ondisabled: null });
+  defaultAdapter: bluetoothAdapter, onenabled: null, ondisabled: null,
+  enable: () => failedRequest('BluetoothManager.enable'),
+  disable: () => failedRequest('BluetoothManager.disable'),
+  getDefaultAdapter: () => failedPromise('BluetoothManager.getDefaultAdapter'),
+  getAdapters: () => failedPromise('BluetoothManager.getAdapters') });
+Object.defineProperty(wifiManager, 'enabled', { configurable: false,
+  enumerable: true, get: () => false,
+  set: () => { throw notSupported('WiFiManager.enabled'); } });
+Object.defineProperty(bluetoothManager, 'enabled', { configurable: false,
+  enumerable: true, get: () => false,
+  set: () => { throw notSupported('BluetoothManager.enabled'); } });
+Object.defineProperty(bluetoothManager, 'defaultAdapter', { configurable: false,
+  enumerable: true, get: () => bluetoothAdapter,
+  set: () => { throw notSupported('BluetoothManager.defaultAdapter'); } });
 
 let cameraCache = [];
 const camerasManager = {
@@ -936,28 +942,43 @@ const mobileConnection = eventTarget({
   iccId: null, lastKnownNetwork: null, lastKnownHomeNetwork: null,
   networkSelectionMode: 'automatic', onvoicechange: null,
   ondatachange: null, onradiostatechange: null,
-  async refresh() {
-    const snapshot = await platformCall('modem.snapshot');
-    this.radioState = String(snapshot.radioState);
-    this.cardState = String(snapshot.sim.cardState);
-    this.lastKnownNetwork = snapshot.networkOperator.numeric || null;
-    this.lastKnownHomeNetwork = this.lastKnownNetwork;
-    this.voice = { connected: snapshot.voiceRegistration.state === 1,
-      state: snapshot.voiceRegistration.state,
-      type: snapshot.voiceRegistration.radioTechnology,
-      network: snapshot.networkOperator, signalStrength:
-        snapshot.signal.lteStrength };
-    this.data = { connected: snapshot.dataRegistration.state === 1,
-      state: snapshot.dataRegistration.state,
-      type: snapshot.dataRegistration.radioTechnology,
-      network: snapshot.networkOperator, signalStrength:
-        snapshot.signal.lteStrength };
-    this.dispatchEvent({ type: 'voicechange', target: this });
-    this.dispatchEvent({ type: 'datachange', target: this });
-    return snapshot;
-  },
-  setRadioEnabled: enabled => domRequest(platformCall('modem.radio-power',
-    { enabled: !!enabled }))
+  refresh: () => failedPromise('MobileConnection.refresh'),
+  setRadioEnabled: () => failedRequest('MobileConnection.setRadioEnabled'),
+  getNetworks: () => failedRequest('MobileConnection.getNetworks'),
+  selectNetwork: () => failedRequest('MobileConnection.selectNetwork'),
+  selectNetworkAutomatically: () =>
+    failedRequest('MobileConnection.selectNetworkAutomatically'),
+  setPreferredNetworkType: () =>
+    failedRequest('MobileConnection.setPreferredNetworkType'),
+  getPreferredNetworkType: () =>
+    failedRequest('MobileConnection.getPreferredNetworkType'),
+  setRoamingPreference: () =>
+    failedRequest('MobileConnection.setRoamingPreference'),
+  getRoamingPreference: () =>
+    failedRequest('MobileConnection.getRoamingPreference'),
+  setVoicePrivacyMode: () =>
+    failedRequest('MobileConnection.setVoicePrivacyMode'),
+  getVoicePrivacyMode: () =>
+    failedRequest('MobileConnection.getVoicePrivacyMode'),
+  sendMMI: () => failedRequest('MobileConnection.sendMMI'),
+  cancelMMI: () => failedRequest('MobileConnection.cancelMMI'),
+  setCallForwardingOption: () =>
+    failedRequest('MobileConnection.setCallForwardingOption'),
+  getCallForwardingOption: () =>
+    failedRequest('MobileConnection.getCallForwardingOption'),
+  setCallBarringOption: () =>
+    failedRequest('MobileConnection.setCallBarringOption'),
+  getCallBarringOption: () =>
+    failedRequest('MobileConnection.getCallBarringOption'),
+  changeCallBarringPassword: () =>
+    failedRequest('MobileConnection.changeCallBarringPassword'),
+  setCallWaitingOption: () =>
+    failedRequest('MobileConnection.setCallWaitingOption'),
+  getCallWaitingOption: () =>
+    failedRequest('MobileConnection.getCallWaitingOption'),
+  getNeighboringCellIds: () =>
+    failedRequest('MobileConnection.getNeighboringCellIds'),
+  getCellInfoList: () => failedRequest('MobileConnection.getCellInfoList')
 });
 let deviceCapabilities = null;
 const getCapabilities = () => deviceCapabilities
@@ -987,6 +1008,782 @@ const deviceCapabilityService = Object.freeze({
   get: feature => getFeature(feature)
 });
 
+const encodedValue = value => JSON.stringify(value === undefined ? null : value);
+const settingsObservers = new Map();
+const settingsSubscriptions = new Set();
+const notifySetting = (name, value) => {
+  const info = { name, value };
+  for (const observer of settingsObservers.get(name) || []) {
+    try {
+      if (typeof observer === 'function') observer(info);
+      else if (typeof observer?.callback === 'function') observer.callback(info);
+    } catch (_) {}
+  }
+  settingsService.dispatchEvent({ type: settingsService.CHANGE_EVENT,
+    target: settingsService, detail: info, value: info });
+  mozSettings.dispatchEvent({ type: 'settingchange', target: mozSettings,
+    settingName: name, settingValue: value });
+};
+const readSetting = name => systemCall('settings', 'get', {
+  name: String(name)
+}).then(result => result.found ? result.value : undefined);
+const writeSetting = (name, value) => systemCall('settings', 'set', {
+  name: String(name), value: encodedValue(value)
+});
+const writeSettings = async settings => {
+  const entries = Array.isArray(settings)
+    ? settings.map(setting => [setting.name, setting.value])
+    : Object.entries(settings || {});
+  for (const [name, value] of entries) await writeSetting(name, value);
+};
+const settingsService = eventTarget({
+  service_id: 'settings', CHANGE_EVENT: 'change',
+  addObserver(name, observer) {
+    name = String(name);
+    const observers = settingsObservers.get(name) || [];
+    if (!observers.includes(observer)) observers.push(observer);
+    settingsObservers.set(name, observers);
+    if (settingsSubscriptions.has(name)) return Promise.resolve();
+    settingsSubscriptions.add(name);
+    return addInternalSystemMessageHandler(`setting:${name}`, payload => {
+      if (payload?.name === name) notifySetting(name, payload.value);
+    });
+  },
+  removeObserver(name, observer) {
+    name = String(name);
+    settingsObservers.set(name, (settingsObservers.get(name) || [])
+      .filter(candidate => candidate !== observer));
+    return Promise.resolve();
+  },
+  clear: () => systemCall('settings', 'clear'),
+  get: name => readSetting(name).then(value => {
+    if (value === undefined)
+      return Promise.reject({ name: String(name),
+        reason: 'NON_EXISTING_SETTING' });
+    return { name: String(name), value };
+  }),
+  getBatch: names => systemCall('settings', 'get-batch', {
+    names: Array.from(names || [], String)
+  }).then(values => Object.entries(values).map(([name, value]) =>
+    ({ name, value }))),
+  set: settings => writeSettings(settings)
+});
+class OosSettingObserverBase {
+  constructor(id, session) { this.id = id; this.session = session; }
+  callback(_setting) { return Promise.resolve(); }
+}
+const mozSettings = eventTarget({
+  onsettingchange: null,
+  createLock: () => ({
+    get: name => promiseRequest(readSetting(name).then(value =>
+      ({ [String(name)]: value }))),
+    set: values => promiseRequest(writeSettings(values)),
+    clear: name => promiseRequest(name === undefined
+      ? systemCall('settings', 'clear')
+      : systemCall('settings', 'remove', { name: String(name) }))
+  }),
+  addObserver: (name, observer) => settingsService.addObserver(name, observer),
+  removeObserver: (name, observer) =>
+    settingsService.removeObserver(name, observer)
+});
+
+const alarmFromRecord = record => ({ id: record.id,
+  date: new Date(record.value.dateMs),
+  respectTimezone: record.value.ignoreTimezone
+    ? 'ignoreTimezone' : 'honorTimezone',
+  ignoreTimezone: !!record.value.ignoreTimezone,
+  data: record.value.data });
+const alarmManager = Object.freeze({
+  getAll: () => systemCall('alarms', 'list').then(records =>
+    records.map(alarmFromRecord)),
+  add: options => {
+    if (!options || !(options.date instanceof Date) ||
+        !Number.isFinite(options.date.getTime()))
+      return Promise.reject(new TypeError('Alarm date must be valid'));
+    return systemCall('alarms', 'add', { dateMs: options.date.getTime(),
+      ignoreTimezone: !!options.ignoreTimezone,
+      data: encodedValue(options.data) });
+  },
+  remove: id => systemCall('alarms', 'remove', { id: Number(id) })
+});
+const mozAlarms = Object.freeze({
+  getAll: () => promiseRequest(alarmManager.getAll()),
+  add: (date, respectTimezone, data) => promiseRequest(alarmManager.add({
+    date, ignoreTimezone: respectTimezone === 'ignoreTimezone', data
+  })),
+  remove: id => { alarmManager.remove(id).catch(() => {}); }
+});
+
+const systemMessageHandlers = new Map();
+const internalSystemMessageHandlers = new Map();
+const explicitSystemSubscriptions = new Set();
+const pendingSystemMessages = new Map();
+let systemMessageCursor = 0;
+let systemMessagePollTimer = 0;
+let systemMessagePolling = false;
+const systemMessageData = entry => ({
+  json: () => entry.payload,
+  webActivityRequestHandler: () => {
+    throw notSupported('WebActivityRequestHandler');
+  }
+});
+const deliverSystemMessage = entry => {
+  for (const handler of internalSystemMessageHandlers.get(entry.topic) || []) {
+    try { handler(entry.payload); } catch (_) {}
+  }
+  const handler = systemMessageHandlers.get(entry.topic);
+  if (typeof handler === 'function') {
+    defer(() => handler(entry.payload));
+  } else {
+    const pending = pendingSystemMessages.get(entry.topic) || [];
+    pending.push(entry);
+    pendingSystemMessages.set(entry.topic, pending);
+  }
+  const event = typeof Event === 'function' ? new Event('systemmessage')
+    : { type: 'systemmessage' };
+  try {
+    Object.defineProperties(event, {
+      name: { value: entry.topic },
+      data: { value: systemMessageData(entry) }
+    });
+    globalThis.dispatchEvent?.(event);
+  } catch (_) {
+    if (typeof globalThis.onsystemmessage === 'function')
+      globalThis.onsystemmessage({ type: 'systemmessage', name: entry.topic,
+        data: systemMessageData(entry) });
+  }
+};
+const scheduleSystemMessagePoll = delay => {
+  if (systemMessagePollTimer ||
+      (!systemMessageHandlers.size && !internalSystemMessageHandlers.size &&
+       !explicitSystemSubscriptions.size))
+    return;
+  systemMessagePollTimer = setTimeout(() => {
+    systemMessagePollTimer = 0;
+    pollSystemMessages();
+  }, delay);
+};
+const pollSystemMessages = async () => {
+  if (systemMessagePolling) return;
+  systemMessagePolling = true;
+  try {
+    const entries = await systemCall('system-messages', 'poll', {
+      after: systemMessageCursor, limit: 32
+    });
+    for (const entry of entries) {
+      systemMessageCursor = Math.max(systemMessageCursor, entry.sequence);
+      deliverSystemMessage(entry);
+    }
+    scheduleSystemMessagePoll(entries.length ? 50 : 1000);
+  } catch (_) {
+    scheduleSystemMessagePoll(2000);
+  } finally {
+    systemMessagePolling = false;
+  }
+};
+const subscribeSystemMessage = (topic, activate = false) => {
+  topic = String(topic);
+  if (activate) explicitSystemSubscriptions.add(topic);
+  return systemCall('system-messages', 'subscribe', { topic }).then(() => {
+    scheduleSystemMessagePoll(0);
+  });
+};
+const addInternalSystemMessageHandler = (topic, handler) => {
+  const handlers = internalSystemMessageHandlers.get(topic) || [];
+  if (!handlers.includes(handler)) handlers.push(handler);
+  internalSystemMessageHandlers.set(topic, handlers);
+  return subscribeSystemMessage(topic);
+};
+const setSystemMessageHandler = (topic, handler) => {
+  topic = String(topic);
+  if (handler === null || handler === undefined) {
+    systemMessageHandlers.delete(topic);
+    return;
+  }
+  if (typeof handler !== 'function')
+    throw new TypeError('System message handler must be a function');
+  systemMessageHandlers.set(topic, handler);
+  subscribeSystemMessage(topic).catch(() => {});
+  for (const entry of pendingSystemMessages.get(topic) || [])
+    defer(() => handler(entry.payload));
+  pendingSystemMessages.delete(topic);
+};
+const hasPendingSystemMessage = topic => {
+  pollSystemMessages();
+  return (pendingSystemMessages.get(String(topic)) || []).length > 0;
+};
+const systemMessageManager = Object.freeze({
+  subscribe: topic => subscribeSystemMessage(topic, true)
+});
+for (const permission of runtime.permissions) {
+  if (permission.startsWith('system-message:'))
+    subscribeSystemMessage(permission.slice(15)).catch(() => {});
+}
+if (globalThis.ServiceWorkerRegistration?.prototype) {
+  try {
+    Object.defineProperty(globalThis.ServiceWorkerRegistration.prototype,
+      'systemMessageManager', { configurable: true,
+        get: () => systemMessageManager });
+  } catch (_) {}
+}
+
+class OosWebActivity {
+  constructor(name, data = {}) {
+    if (!name) throw new TypeError('WebActivity requires a name');
+    this.name = String(name); this.data = data; this.id = 0;
+    this.started = false; this.cancelled = false;
+  }
+  async start() {
+    if (this.started)
+      throw new DOMException('Activity already started', 'InvalidStateError');
+    this.started = true;
+    this.id = await systemCall('activities', 'start', { name: this.name,
+      data: encodedValue(this.data) });
+    while (!this.cancelled) {
+      const state = await systemCall('activities', 'status', { id: this.id });
+      if (!state) throw new DOMException('Activity was cancelled', 'AbortError');
+      if (state.state === 'resolved') return state.result;
+      if (state.state === 'rejected') throw state.error;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new DOMException('Activity was cancelled', 'AbortError');
+  }
+  cancel() {
+    if (!this.started || this.cancelled) return;
+    this.cancelled = true;
+    systemCall('activities', 'cancel', { id: this.id }).catch(() => {});
+  }
+}
+class OosMozActivity {
+  constructor(options = {}) {
+    const activity = new OosWebActivity(options.name, options.data);
+    const request = promiseRequest(activity.start());
+    request.cancel = () => activity.cancel();
+    return request;
+  }
+}
+
+const contactKind = value => value?._oosKind || 'contact';
+const cleanContact = record => {
+  const value = { ...record.value };
+  delete value._oosKind;
+  value.id = String(record.id);
+  return value;
+};
+const contactRecords = () => systemCall('contacts', 'list');
+const recordsByKind = kind => contactRecords().then(records =>
+  records.filter(record => contactKind(record.value) === kind));
+const addContactRecord = (kind, value) => systemCall('contacts', 'add', {
+  value: encodedValue({ ...value, _oosKind: kind })
+});
+const updateContactRecord = (kind, id, value) =>
+  systemCall('contacts', 'put', { id: Number(id),
+    value: encodedValue({ ...value, id: undefined, _oosKind: kind }) });
+const removeContactRecord = id => systemCall('contacts', 'remove', {
+  id: Number(id)
+});
+const contactSearchText = contact => JSON.stringify(contact).toLocaleLowerCase();
+const filterContacts = (contacts, options = {}) => {
+  const needle = String(options.filterValue || '').toLocaleLowerCase();
+  if (!needle) return contacts;
+  return contacts.filter(contact => contactSearchText(contact).includes(needle));
+};
+const contactCursor = (promise, batchSize = 20) => {
+  let index = 0;
+  const records = Promise.resolve(promise);
+  return { async next() {
+    const values = await records;
+    if (index >= values.length) return [];
+    const batch = values.slice(index, index + Math.max(1, Number(batchSize) || 20));
+    index += batch.length;
+    return batch;
+  } };
+};
+const domCursor = promise => {
+  let index = 0;
+  let pending = false;
+  const cursor = { result: null, error: null, done: false,
+    onsuccess: null, onerror: null,
+    continue() {
+      if (!pending && !cursor.done) { pending = true; defer(emit); }
+    }
+  };
+  const emit = async () => {
+    pending = false;
+    try {
+      const values = await promise;
+      cursor.result = index < values.length ? values[index++] : null;
+      cursor.done = cursor.result === null;
+      cursor.onsuccess?.call(cursor, { type: 'success', target: cursor });
+    } catch (error) {
+      cursor.error = error; cursor.done = true;
+      cursor.onerror?.call(cursor, { type: 'error', target: cursor });
+    }
+  };
+  pending = true; defer(emit); return cursor;
+};
+const emitContactsChange = (reason, contacts) => contactsService.dispatchEvent({
+  type: contactsService.CONTACTS_CHANGE_EVENT, target: contactsService,
+  reason, contacts
+});
+const metadataValues = kind => recordsByKind(kind).then(records =>
+  records.map(record => ({ ...record.value, id: String(record.id),
+    _oosKind: undefined })));
+const removeMetadataBy = async (kind, predicate) => {
+  const records = await recordsByKind(kind);
+  for (const record of records) {
+    if (predicate(record.value, record.id)) await removeContactRecord(record.id);
+  }
+};
+const contactsService = eventTarget({
+  service_id: 'contacts', CONTACTS_CHANGE_EVENT: 'contactschange',
+  BLOCKEDNUMBER_CHANGE_EVENT: 'blockednumberchange',
+  GROUP_CHANGE_EVENT: 'groupchange', SIM_CONTACT_LOADED_EVENT: 'simcontactloaded',
+  SPEEDDIAL_CHANGE_EVENT: 'speeddialchange',
+  async add(contacts) {
+    for (const contact of contacts || []) {
+      const id = await addContactRecord('contact', contact);
+      contact.id = String(id);
+    }
+    emitContactsChange('CREATE', contacts || []);
+  },
+  async update(contacts) {
+    for (const contact of contacts || []) {
+      if (!contact.id) throw new TypeError('Contact id is required');
+      await updateContactRecord('contact', contact.id, contact);
+    }
+    emitContactsChange('UPDATE', contacts || []);
+  },
+  async remove(ids) {
+    const removed = [];
+    for (const id of ids || []) {
+      const record = await systemCall('contacts', 'get', { id: Number(id) });
+      if (record) removed.push({ ...record, id: String(id) });
+      await removeContactRecord(id);
+    }
+    emitContactsChange('REMOVE', removed);
+  },
+  async clearContacts() {
+    const records = await recordsByKind('contact');
+    for (const record of records) await removeContactRecord(record.id);
+    emitContactsChange('REMOVE', records.map(cleanContact));
+  },
+  get: (id, _onlyMainData) => systemCall('contacts', 'get', {
+    id: Number(id)
+  }).then(value => value ? { ...value, id: String(id), _oosKind: undefined }
+    : null),
+  getAll: (options, batchSize, _onlyMainData) => Promise.resolve(contactCursor(
+    recordsByKind('contact').then(records =>
+      filterContacts(records.map(cleanContact), options)), batchSize)),
+  find: (options, batchSize) => Promise.resolve(contactCursor(
+    recordsByKind('contact').then(records =>
+      filterContacts(records.map(cleanContact), options)), batchSize)),
+  getCount: () => recordsByKind('contact').then(records => records.length),
+  matches: (filterBy, filter, value) => recordsByKind('contact').then(records => {
+    const needle = String(value || '').toLocaleLowerCase();
+    const fields = Array.isArray(filterBy) ? filterBy : [filterBy];
+    return records.some(record => fields.some(field => {
+      const candidate = record.value?.[String(field).toLowerCase()] ??
+        record.value?.[field];
+      const text = JSON.stringify(candidate || '').toLocaleLowerCase();
+      return String(filter).toUpperCase() === 'EQUALS'
+        ? text === JSON.stringify(needle) : text.includes(needle);
+    }));
+  }),
+  async importVcf(vcf) {
+    const blocks = String(vcf).split(/END:VCARD/i);
+    let imported = 0;
+    for (const block of blocks) {
+      if (!/BEGIN:VCARD/i.test(block)) continue;
+      const contact = { name: [], tel: [], email: [] };
+      for (const line of block.split(/\r?\n/)) {
+        const separator = line.indexOf(':');
+        if (separator < 0) continue;
+        const key = line.slice(0, separator).split(';')[0].toUpperCase();
+        const value = line.slice(separator + 1).trim();
+        if (key === 'FN') contact.name.push(value);
+        else if (key === 'TEL') contact.tel.push({ value });
+        else if (key === 'EMAIL') contact.email.push({ value });
+      }
+      await addContactRecord('contact', contact); imported += 1;
+    }
+    return imported;
+  },
+  async addGroup(name) { return addContactRecord('group', { name: String(name) }); },
+  getAllGroups: () => metadataValues('group'),
+  async updateGroup(id, name) {
+    return updateContactRecord('group', id, { name: String(name) });
+  },
+  removeGroup: id => removeContactRecord(id),
+  getContactidsFromGroup: groupId => recordsByKind('contact').then(records =>
+    records.filter(record => (record.value.groups || []).map(String)
+      .includes(String(groupId))).map(record => String(record.id))),
+  async addSpeedDial(dialKey, tel, contactId) {
+    await removeMetadataBy('speed-dial', value =>
+      String(value.dialKey) === String(dialKey));
+    return addContactRecord('speed-dial', { dialKey: String(dialKey),
+      tel: String(tel), contactId: String(contactId) });
+  },
+  getSpeedDials: () => metadataValues('speed-dial'),
+  updateSpeedDial(dialKey, tel, contactId) {
+    return this.addSpeedDial(dialKey, tel, contactId);
+  },
+  removeSpeedDial: dialKey => removeMetadataBy('speed-dial', value =>
+    String(value.dialKey) === String(dialKey)),
+  async addBlockedNumber(number) {
+    return addContactRecord('blocked-number', { number: String(number) });
+  },
+  getAllBlockedNumbers: () => metadataValues('blocked-number').then(values =>
+    values.map(value => value.number)),
+  findBlockedNumbers: options => metadataValues('blocked-number').then(values =>
+    values.map(value => value.number).filter(number =>
+      String(number).includes(String(options?.filterValue || '')))),
+  removeBlockedNumber: number => removeMetadataBy('blocked-number', value =>
+    String(value.number) === String(number)),
+  async setIce(contactId, position) {
+    await removeMetadataBy('ice', value =>
+      String(value.contactId) === String(contactId));
+    return addContactRecord('ice', { contactId: String(contactId),
+      position: Number(position) });
+  },
+  getAllIce: () => metadataValues('ice'),
+  removeIce: contactId => removeMetadataBy('ice', value =>
+    String(value.contactId) === String(contactId))
+});
+const mozContacts = eventTarget({
+  oncontactchange: null,
+  find: options => promiseRequest(recordsByKind('contact').then(records =>
+    filterContacts(records.map(cleanContact), options))),
+  getAll: options => domCursor(recordsByKind('contact').then(records =>
+    filterContacts(records.map(cleanContact), options))),
+  getCount: () => promiseRequest(contactsService.getCount()),
+  save: contact => promiseRequest((async () => {
+    if (contact.id) await contactsService.update([contact]);
+    else await contactsService.add([contact]);
+    return contact.id;
+  })()),
+  remove: contact => promiseRequest(contactsService.remove([
+    typeof contact === 'object' ? contact.id : contact
+  ])),
+  clear: () => promiseRequest(contactsService.clearContacts())
+});
+let contactsEventsSubscribed = false;
+const ensureContactsEvents = () => {
+  if (contactsEventsSubscribed) return Promise.resolve();
+  contactsEventsSubscribed = true;
+  return addInternalSystemMessageHandler('contacts', payload => {
+    if (payload?.sourceApp === runtime.appId) return;
+    contactsService.dispatchEvent({ type: contactsService.CONTACTS_CHANGE_EVENT,
+      target: contactsService, reason: String(payload?.operation || '')
+        .toUpperCase(), contacts: null });
+    mozContacts.dispatchEvent({ type: 'contactchange', target: mozContacts,
+      reason: payload?.operation, contactID: payload?.id });
+  });
+};
+const mozContactsAddEventListener = mozContacts.addEventListener;
+mozContacts.addEventListener = (type, callback) => {
+  if (type === 'contactchange') ensureContactsEvents().catch(() => {});
+  mozContactsAddEventListener(type, callback);
+};
+const contactsServiceAddEventListener = contactsService.addEventListener;
+contactsService.addEventListener = (type, callback) => {
+  if (type === contactsService.CONTACTS_CHANGE_EVENT)
+    ensureContactsEvents().catch(() => {});
+  contactsServiceAddEventListener(type, callback);
+};
+const speedDialManager = Object.freeze({
+  get: dialKey => promiseRequest(contactsService.getSpeedDials().then(values =>
+    values.find(value => String(value.dialKey) === String(dialKey)) || null)),
+  set: (dialKey, tel, contactId = '') => promiseRequest(
+    contactsService.addSpeedDial(dialKey, tel, contactId)),
+  remove: dialKey => promiseRequest(contactsService.removeSpeedDial(dialKey))
+});
+
+const appObject = app => ({ name: app.name, manifestUrl:
+  `${globalThis.location.protocol}//${app.id}.localhost/manifest.webmanifest`,
+  manifestURL:
+  `${globalThis.location.protocol}//${app.id}.localhost/manifest.webmanifest`,
+  installState: 'INSTALLED', removable: false,
+  status: app.enabled ? 'ENABLED' : 'DISABLED', updateManifestUrl: '',
+  updateState: 'IDLE', updateUrl: '', allowedAutoDownload: false,
+  preloaded: true, id: app.id, version: app.version, runtime: app.runtime });
+const unsupportedAppOperation = name => () => failedPromise(`AppsManager.${name}`);
+const appsService = eventTarget({
+  service_id: 'apps', APP_DOWNLOAD_FAILED_EVENT: 'appdownloadfailed',
+  APP_INSTALLED_EVENT: 'appinstalled', APP_INSTALLING_EVENT: 'appinstalling',
+  APP_UNINSTALLED_EVENT: 'appuninstalled',
+  APP_UPDATE_AVAILABLE_EVENT: 'appupdateavailable',
+  APP_UPDATED_EVENT: 'appupdated', APP_UPDATING_EVENT: 'appupdating',
+  APPSTATUS_CHANGED_EVENT: 'appstatuschanged',
+  getAll: () => systemCall('applications', 'list').then(apps =>
+    apps.map(appObject)),
+  getApp: manifestUrl => systemCall('applications', 'list').then(apps => {
+    const text = String(manifestUrl);
+    const app = apps.find(candidate => text.includes(candidate.id));
+    if (!app) throw new DOMException('Application was not found', 'NotFoundError');
+    return appObject(app);
+  }),
+  getState: () => Promise.resolve('RUNNING'),
+  getUpdatePolicy: () => Promise.resolve({ enabled: false,
+    connType: 'WI_FI_ONLY', delay: 0 }),
+  cancelDownload: unsupportedAppOperation('cancelDownload'),
+  checkForUpdate: unsupportedAppOperation('checkForUpdate'),
+  clear: unsupportedAppOperation('clear'),
+  installPackage: unsupportedAppOperation('installPackage'),
+  installPwa: unsupportedAppOperation('installPwa'),
+  setEnabled: unsupportedAppOperation('setEnabled'),
+  setTokenProvider: unsupportedAppOperation('setTokenProvider'),
+  setUpdatePolicy: unsupportedAppOperation('setUpdatePolicy'),
+  uninstall: unsupportedAppOperation('uninstall'),
+  update: unsupportedAppOperation('update'),
+  verify: unsupportedAppOperation('verify')
+});
+
+const audioPolicyRequest = action => systemCall('audio-policy', 'request', {
+  action
+});
+const audioVolumeService = eventTarget({
+  service_id: 'audiovolumemanager', AUDIO_VOLUME_CHANGED_EVENT:
+    'audiovolumechanged',
+  requestVolumeUp: () => audioPolicyRequest('VOLUME_UP'),
+  requestVolumeDown: () => audioPolicyRequest('VOLUME_DOWN'),
+  requestVolumeShow: () => audioPolicyRequest('VOLUME_SHOW')
+});
+const volumeManager = Object.freeze({
+  requestUp: () => { audioVolumeService.requestVolumeUp().catch(() => {}); },
+  requestDown: () => { audioVolumeService.requestVolumeDown().catch(() => {}); },
+  requestShow: () => { audioVolumeService.requestVolumeShow().catch(() => {}); }
+});
+const audioChannelManager = eventTarget({
+  headphones: false, telephonyChannelActive: false,
+  contentChannelActive: false, notificationChannelActive: false,
+  alarmChannelActive: false, publicnotificationChannelActive: false,
+  ringerChannelActive: false, normalChannelActive: false,
+  onheadphoneschange: null, getVolumeControlChannel: () => 'normal'
+});
+class OosAudioChannelClient {
+  constructor(channel = 'normal') {
+    this.channel = String(channel); this.isActive = false;
+    this.onactivestatechanged = null; eventTarget(this);
+  }
+  requestChannel() {
+    this.isActive = true;
+    return systemCall('audio-policy', 'set', { name: `channel:${this.channel}`,
+      value: encodedValue({ active: true, requestedAt: Date.now() }) })
+      .then(() => { this.dispatchEvent({ type: 'activestatechanged',
+        target: this }); return true; });
+  }
+  abandonChannel() {
+    this.isActive = false;
+    return systemCall('audio-policy', 'set', { name: `channel:${this.channel}`,
+      value: encodedValue({ active: false, requestedAt: Date.now() }) })
+      .then(() => { this.dispatchEvent({ type: 'activestatechanged',
+        target: this }); return true; });
+  }
+}
+class OosSpeakerManager {
+  constructor() {
+    this.speakerforced = false; this.forcespeaker = false;
+    this.onspeakerforcedchange = null; eventTarget(this);
+  }
+}
+
+const inputMethod = {
+  setComposition: text => systemCall('input-method', 'set', {
+    name: 'composition', value: encodedValue(String(text))
+  }).then(() => true),
+  endComposition: (text = '') => systemCall('input-method', 'set', {
+    name: 'composition', value: encodedValue(String(text))
+  }).then(() => true),
+  sendKey: key => Promise.all([inputMethod.keydown(key),
+    inputMethod.keyup(key)]).then(() => true),
+  keydown: key => {
+    const target = document.activeElement || document.body;
+    return Promise.resolve(target.dispatchEvent(new KeyboardEvent('keydown', {
+      key: String(key), bubbles: true, cancelable: true })));
+  },
+  keyup: key => {
+    const target = document.activeElement || document.body;
+    return Promise.resolve(target.dispatchEvent(new KeyboardEvent('keyup', {
+      key: String(key), bubbles: true, cancelable: true })));
+  },
+  deleteBackward: () => {
+    const target = document.activeElement;
+    if (target && typeof target.setRangeText === 'function') {
+      const start = Math.max(0, target.selectionStart - 1);
+      target.setRangeText('', start, target.selectionStart, 'end');
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      return Promise.resolve(true);
+    }
+    return Promise.resolve(false);
+  },
+  setSelectedOption: index => systemCall('input-method', 'set', {
+    name: 'selected-option', value: encodedValue(Number(index))
+  }),
+  setSelectedOptions: indexes => systemCall('input-method', 'set', {
+    name: 'selected-options', value: encodedValue(Array.from(indexes, Number))
+  }),
+  removeFocus: () => { document.activeElement?.blur?.(); }
+};
+const timeService = Object.freeze({
+  service_id: 'time',
+  getTime: () => systemCall('time', 'get').then(value => value.timeMs),
+  setTime: value => systemCall('time', 'set', { name: 'requested-time-ms',
+    value: encodedValue(Number(value instanceof Date ? value.getTime() : value)) }),
+  setTimezone: value => systemCall('time', 'set', {
+    name: 'requested-timezone', value: encodedValue(String(value))
+  })
+});
+const powerManagerService = Object.freeze({
+  service_id: 'powermanager',
+  cpuSleepAllowed: () => Promise.resolve(true),
+  extScreenBrightness: () => Promise.resolve(0),
+  extScreenEnabled: () => Promise.resolve(false),
+  factoryReset: () => Promise.resolve('NORMAL'),
+  keyLightBrightness: () => Promise.resolve(0),
+  keyLightEnabled: () => Promise.resolve(false),
+  screenBrightness: () => Promise.resolve(100),
+  screenEnabled: () => Promise.resolve(true),
+  controlScreen: () => failedPromise('PowerManager.controlScreen'),
+  powerOff: () => failedPromise('PowerManager.powerOff'),
+  reboot: () => failedPromise('PowerManager.reboot')
+});
+
+const activeNotifications = new Map();
+class OosNotification {
+  constructor(title, options = {}) {
+    if (!notificationsAllowed)
+      throw new DOMException('Notification permission denied', 'NotAllowedError');
+    ensureNotificationEvents().catch(() => {});
+    this.title = String(title); this.body = String(options.body || '');
+    this.tag = String(options.tag || ''); this.icon = options.icon || '';
+    this.data = options.data; this.dir = options.dir || 'auto';
+    this.lang = options.lang || ''; this.onclick = null; this.onshow = null;
+    this.onerror = null; this.onclose = null; this._closed = false;
+    eventTarget(this);
+    this._stored = systemCall('notifications', 'add', {
+      value: encodedValue({ title: this.title, body: this.body, tag: this.tag,
+        icon: this.icon, data: this.data, createdAt: Date.now() })
+    }).then(id => {
+      this.id = Number(id); activeNotifications.set(this.id, this);
+      this.dispatchEvent({ type: 'show', target: this }); return this.id;
+    }, error => { this.dispatchEvent({ type: 'error', target: this, error });
+      throw error; });
+  }
+  close() {
+    if (this._closed) return;
+    this._closed = true;
+    this._stored.then(id => systemCall('notifications', 'remove', { id }))
+      .catch(() => {});
+    if (this.id) activeNotifications.delete(this.id);
+    defer(() => this.dispatchEvent({ type: 'close', target: this }));
+  }
+  static requestPermission(callback) {
+    const result = Promise.resolve(notificationsAllowed ? 'granted' : 'denied');
+    if (typeof callback === 'function') result.then(callback);
+    return result;
+  }
+  static get permission() { return notificationsAllowed ? 'granted' : 'denied'; }
+}
+let notificationEventsSubscribed = false;
+const ensureNotificationEvents = () => {
+  if (notificationEventsSubscribed) return Promise.resolve();
+  notificationEventsSubscribed = true;
+  return addInternalSystemMessageHandler('notification', payload => {
+    const notification = activeNotifications.get(Number(payload?.id));
+    if (!notification) return;
+    if (payload.action === 'close') notification.close();
+    else notification.dispatchEvent({ type: 'click', target: notification,
+      action: payload.action || 'default' });
+  });
+};
+
+const unsupportedPromiseApi = (name, methods) => {
+  const api = {};
+  for (const method of methods)
+    api[method] = () => failedPromise(`${name}.${method}`);
+  return eventTarget(api);
+};
+const dataCallManager = unsupportedPromiseApi('DataCallManager',
+  ['requestDataCall', 'getDataCallState']);
+const telephonyService = unsupportedPromiseApi('Telephony',
+  ['dial', 'dialEmergency', 'hangUpAll', 'startTone', 'stopTone']);
+const externalApi = unsupportedPromiseApi('Externalapi',
+  ['invoke', 'call', 'get']);
+const fmRadio = eventTarget({ enabled: false, frequency: null,
+  enable: () => failedPromise('FmRadio.enable'),
+  disable: () => failedPromise('FmRadio.disable'),
+  setFrequency: () => failedPromise('FmRadio.setFrequency'),
+  seekUp: () => failedPromise('FmRadio.seekUp'),
+  seekDown: () => failedPromise('FmRadio.seekDown'),
+  cancelSeek: () => failedPromise('FmRadio.cancelSeek')
+});
+const networkStats = {
+  getAvailableNetworks: () => failedRequest('NetworkStats.getAvailableNetworks'),
+  getSamples: () => failedRequest('NetworkStats.getSamples'),
+  clearStats: () => failedRequest('NetworkStats.clearStats'),
+  clearAllStats: () => failedRequest('NetworkStats.clearAllStats'),
+  addAlarm: () => failedRequest('NetworkStats.addAlarm'),
+  getAllAlarms: () => failedRequest('NetworkStats.getAllAlarms'),
+  removeAlarms: () => failedRequest('NetworkStats.removeAlarms')
+};
+const nfcManager = unsupportedPromiseApi('NFC',
+  ['startPoll', 'stopPoll', 'powerOff', 'sendFile']);
+const seManager = unsupportedPromiseApi('SEManager', ['getSEReaders']);
+const tcpSocketFactory = Object.freeze({
+  open: () => { throw notSupported('MozTCPSocket.open'); }
+});
+class OosTcpSocket {
+  constructor() { throw notSupported('TcpSocket'); }
+}
+
+let largeTextEnabled = false;
+systemCall('accessibility', 'get', { name: 'large-text-enabled' })
+  .then(value => {
+    if (!value.found || largeTextEnabled === !!value.value) return;
+    largeTextEnabled = !!value.value;
+    globalThis.dispatchEvent?.(new Event('largetextenabledchanged'));
+  }).catch(() => {});
+let largeTextEventsSubscribed = false;
+const ensureLargeTextEvents = () => {
+  if (largeTextEventsSubscribed) return Promise.resolve();
+  largeTextEventsSubscribed = true;
+  return addInternalSystemMessageHandler(
+    'accessibility:large-text-enabled', payload => {
+      if (payload?.name !== 'large-text-enabled' ||
+          largeTextEnabled === !!payload.value) return;
+      largeTextEnabled = !!payload.value;
+      globalThis.dispatchEvent?.(new Event('largetextenabledchanged'));
+    });
+};
+const nativeWindowAddEventListener = globalThis.addEventListener;
+try {
+  Object.defineProperty(globalThis, 'addEventListener', { configurable: true,
+    writable: true, value(type, callback, options) {
+      if (type === 'largetextenabledchanged')
+        ensureLargeTextEvents().catch(() => {});
+      return nativeWindowAddEventListener.call(this, type, callback, options);
+    } });
+} catch (_) {}
+const virtualCursor = eventTarget({
+  enabled: false, position: { x: 0, y: 0 },
+  setEnabled(value) { this.enabled = !!value; return Promise.resolve(); },
+  move(direction) {
+    const key = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft',
+      right: 'ArrowRight' }[String(direction).toLowerCase()];
+    return key ? inputMethod.sendKey(key) : Promise.resolve(false);
+  },
+  click: () => inputMethod.sendKey('Enter')
+});
+try {
+  Object.defineProperty(globalThis, 'WebActivity', { value: OosWebActivity,
+    writable: true, configurable: true });
+  Object.defineProperty(globalThis, 'Notification', { value: OosNotification,
+    writable: true, configurable: true });
+} catch (_) {}
+define(globalThis, 'MozActivity', OosMozActivity);
+define(globalThis, 'MozSpeakerManager', OosSpeakerManager);
+
 const appRecord = Object.freeze({
   manifestURL: `${globalThis.location.origin}/manifest.webapp`,
   origin: globalThis.location.origin,
@@ -1000,13 +1797,72 @@ if (runtime.apiProfile === 'kaios-v3') {
       get: _session => Promise.resolve(deviceCapabilityService)
     })
   });
+  if (settingsAllowed) define(globalThis, 'lib_settings', {
+    SettingObserverBase: OosSettingObserverBase,
+    SettingsManager: Object.freeze({
+      get: _session => Promise.resolve(settingsService)
+    })
+  });
+  if (contactsAllowed) define(globalThis, 'lib_contacts', {
+    ContactsManager: Object.freeze({
+      get: _session => Promise.resolve(contactsService)
+    })
+  });
+  if (applicationsAllowed) define(globalThis, 'lib_apps', {
+    AppsManager: Object.freeze({
+      get: _session => Promise.resolve(appsService)
+    })
+  });
+  if (audioPolicyAllowed) define(globalThis, 'lib_audiovolume', {
+    AudioVolumeManager: Object.freeze({
+      get: _session => Promise.resolve(audioVolumeService)
+    })
+  });
+  if (powerAllowed) define(globalThis, 'lib_powermanager', {
+    PowermanagerService: Object.freeze({
+      get: _session => Promise.resolve(powerManagerService)
+    })
+  });
+  if (timeAllowed) {
+    const timeLibrary = { TimeService: Object.freeze({
+      get: _session => Promise.resolve(timeService)
+    }) };
+    define(globalThis, 'lib_time', timeLibrary);
+    define(globalThis, 'lib_timeservice', timeLibrary);
+  }
+  if (tcpSocketAllowed) define(globalThis, 'lib_tcpsocket', {
+    TcpSocket: Object.freeze({
+      get: _session => failedPromise('TcpSocket service')
+    })
+  });
+  if (telephonyAllowed) define(globalThis, 'lib_telephony', {
+    Telephony: Object.freeze({
+      get: _session => Promise.resolve(telephonyService)
+    })
+  });
+  if (tcpSocketAllowed) {
+    define(nav, 'mozTCPSocket', tcpSocketFactory);
+    define(globalThis, 'TcpSocket', OosTcpSocket);
+  }
   const b2g = {};
+  if (alarmsAllowed) b2g.alarmManager = alarmManager;
   if (storageAllowed) Object.assign(b2g, { getDeviceStorage,
     getDeviceStorages });
   if (powerSupplyAllowed) b2g.powerSupplyManager = batteryManager;
   if (bluetoothAllowed) b2g.bluetooth = bluetoothManager;
   if (cameraAllowed) b2g.cameras = camerasManager;
-  if (modemAllowed) b2g.mobileConnection = [mobileConnection];
+  if (modemAllowed) {
+    b2g.mobileConnection = [mobileConnection];
+    b2g.dataCallManager = dataCallManager;
+  }
+  if (audioPolicyAllowed) {
+    b2g.audioChannelManager = audioChannelManager;
+    b2g.AudioChannelClient = OosAudioChannelClient;
+  }
+  if (inputMethodAllowed) b2g.inputMethod = inputMethod;
+  if (externalApiAllowed) b2g.externalapi = externalApi;
+  if (fmRadioAllowed) b2g.fmRadio = fmRadio;
+  b2g.virtualCursor = virtualCursor;
   if (typeof globalThis.AudioContext === 'function')
     b2g.AudioContext = globalThis.AudioContext;
   if (typeof globalThis.HTMLMediaElement === 'function')
@@ -1015,7 +1871,24 @@ if (runtime.apiProfile === 'kaios-v3') {
 } else {
   define(nav, 'getFeature', getFeature);
   define(nav, 'hasFeature', hasFeature);
-  define(nav, 'mozApps', { getSelf: () => domRequest(appRecord) });
+  const mozApps = { getSelf: () => domRequest(appRecord) };
+  if (applicationsAllowed) mozApps.mgmt = {
+    getAll: () => promiseRequest(appsService.getAll()),
+    uninstall: () => failedRequest('Apps.mgmt.uninstall'),
+    applyDownload: () => failedRequest('Apps.mgmt.applyDownload')
+  };
+  define(nav, 'mozApps', mozApps);
+  define(nav, 'mozSetMessageHandler', setSystemMessageHandler);
+  define(nav, 'mozHasPendingMessage', hasPendingSystemMessage);
+  if (alarmsAllowed) define(nav, 'mozAlarms', mozAlarms);
+  try { Object.defineProperty(nav, 'largeTextEnabled', { configurable: true,
+    enumerable: true, get: () => largeTextEnabled }); } catch (_) {}
+  define(nav, 'volumeManager', volumeManager);
+  if (settingsAllowed) define(nav, 'mozSettings', mozSettings);
+  if (contactsAllowed) {
+    define(nav, 'mozContacts', mozContacts);
+    define(nav, 'mozSpeedDial', speedDialManager);
+  }
   if (ownedDataStoreDefinitions.size)
     define(nav, 'getDataStores', getDataStores);
   if (storageAllowed) {
@@ -1031,6 +1904,13 @@ if (runtime.apiProfile === 'kaios-v3') {
   if (wifiAllowed) define(nav, 'mozWifiManager', wifiManager);
   if (bluetoothAllowed) define(nav, 'mozBluetooth', bluetoothManager);
   if (cameraAllowed) define(nav, 'mozCameras', camerasManager);
+  if (inputMethodAllowed) define(nav, 'mozInputMethod', inputMethod);
+  if (networkStatsAllowed) define(nav, 'mozNetworkStats', networkStats);
+  if (nfcAllowed) define(nav, 'mozNfc', nfcManager);
+  if (secureElementAllowed) define(nav, 'seManager', seManager);
+  if (fmRadioAllowed) define(nav, 'mozFMRadio', fmRadio);
+  if (tcpSocketAllowed) define(nav, 'mozTCPSocket', tcpSocketFactory);
+  define(nav, 'spatialNavigationEnabled', true);
   if (modemAllowed) {
     define(nav, 'mozMobileConnection', mobileConnection);
     define(nav, 'mozMobileConnections', [mobileConnection]);

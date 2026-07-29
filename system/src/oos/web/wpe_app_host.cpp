@@ -6,6 +6,7 @@
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
 #include "oos/input/key_input.h"
+#include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/web/device_api_service.h"
@@ -138,8 +139,10 @@ pid_t startRunner(const apps::AppLaunch &launch,
 } // namespace
 
 WpeAppHost::WpeAppHost(compositor::Compositor &compositor,
-                       input::KeyInputSource &input, device::Device &device)
+                       input::KeyInputSource &input, device::Device &device,
+                       apps::AppRepository &repository)
     : compositor_(compositor), input_(input), device_(device),
+      repository_(repository),
       services_(std::make_unique<device::ServiceProvider>(device)) {}
 
 WpeAppHost::~WpeAppHost() = default;
@@ -147,6 +150,11 @@ WpeAppHost::~WpeAppHost() = default;
 bool WpeAppHost::run(const apps::AppLaunch &launch,
                      volatile std::sig_atomic_t *stop_requested) {
   error_.clear();
+  services::SystemServiceHub system_services(repository_.dataRoot(), &repository_);
+  if (!system_services.initialize()) {
+    error_ = "initialize OOS system services: " + system_services.lastError();
+    return false;
+  }
   const std::vector<apps::DataStoreGrant> data_store_grants =
       apps::ownedDataStoreGrants(launch.app.manifest.requested_permissions);
   std::unique_ptr<storage::AppStorage> app_storage;
@@ -190,6 +198,9 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
   device_api_context.services = services_.get();
   device_api_context.device = &device_;
   device_api_context.app_storage = app_storage.get();
+  device_api_context.system_services = &system_services;
+  device_api_context.app_id = launch.app.manifest.id;
+  device_api_context.permissions = launch.app.manifest.requested_permissions;
   device_api_context.permission_mask = apps::deviceServicePermissionMask(
       launch.app.manifest.requested_permissions);
   for (const apps::DataStoreGrant &grant : data_store_grants)

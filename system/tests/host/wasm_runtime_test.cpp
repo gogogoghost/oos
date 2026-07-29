@@ -268,6 +268,7 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppLaunchOptions mock_launch;
   mock_launch.module_path = argv[2];
   mock_launch.data_directory = storage_root;
+  mock_launch.system_data_root = storage_root;
   const std::string internal_media = std::string(storage_root) + "/internal";
   const std::string removable_media = std::string(storage_root) + "/removable";
   if (!std::filesystem::create_directories(internal_media) ||
@@ -279,7 +280,8 @@ int main(int argc, char **argv) {
   mock_launch.removable_media_directory = removable_media.c_str();
   const std::vector<std::string> mock_permissions = {
       "audio-capture", "camera",       "power",     "wifi-manage",
-      "bluetooth",     "mobileconnection", "device-storage:sdcard"};
+      "bluetooth",     "mobileconnection", "device-storage:sdcard",
+      "system"};
   mock_launch.service_permission_mask =
       oos::apps::deviceServicePermissionMask(mock_permissions);
   mock_launch.enforce_service_permissions = true;

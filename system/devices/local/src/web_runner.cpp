@@ -4,6 +4,7 @@
 #include "oos/device/service_provider.h"
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
+#include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/web/device_api_service.h"
@@ -211,6 +212,7 @@ int main(int argc, char **argv) {
   std::thread api_thread;
   std::shared_ptr<oos::device::ServiceProvider> services;
   std::shared_ptr<oos::storage::AppStorage> app_storage;
+  std::shared_ptr<oos::services::SystemServiceHub> system_services;
   std::shared_ptr<oos::web::DeviceApiContext> device_api_context;
   if (use_registered_app) {
     const int socket_result = oos_device_api_socket_pair(api_sockets);
@@ -233,6 +235,15 @@ int main(int argc, char **argv) {
     }
     api_connected = true;
     services = std::make_shared<oos::device::ServiceProvider>(*device);
+    system_services = std::make_shared<oos::services::SystemServiceHub>(
+        data_root, repository.get());
+    if (!system_services->initialize()) {
+      std::fprintf(stderr, "failed to initialize OOS system services: %s\n",
+                   system_services->lastError().c_str());
+      close(api_sockets[0]);
+      g_main_loop_unref(loop);
+      return 1;
+    }
     const std::vector<oos::apps::DataStoreGrant> data_store_grants =
         oos::apps::ownedDataStoreGrants(
             registered_app.app.manifest.requested_permissions);
@@ -251,6 +262,10 @@ int main(int argc, char **argv) {
     device_api_context->services = services.get();
     device_api_context->device = device.get();
     device_api_context->app_storage = app_storage.get();
+    device_api_context->system_services = system_services.get();
+    device_api_context->app_id = registered_app.app.manifest.id;
+    device_api_context->permissions =
+        registered_app.app.manifest.requested_permissions;
     device_api_context->permission_mask =
         oos::apps::deviceServicePermissionMask(
             registered_app.app.manifest.requested_permissions);
@@ -262,7 +277,7 @@ int main(int argc, char **argv) {
     const std::string removable_media =
         std::string(data_root) + "/media/removable";
     api_thread = std::thread([&, internal_media, removable_media, services,
-                              app_storage, device_api_context] {
+                              app_storage, system_services, device_api_context] {
       oos::storage::DeviceStorageService storage(internal_media,
                                                  removable_media);
       while (!stop_api && api_connected) {

@@ -763,6 +763,19 @@ interface device-storage {
   used-space: func(volume: volume) -> result<u64, error-code>;
 }
 
+// Trusted policy and state broker for SystemUI. Payloads use JSON because the
+// managed KaiOS services contain open dictionaries and versioned vendor data.
+// Device access is deliberately excluded from this interface.
+interface system-services {
+  use types.{error-code};
+
+  request: func(
+    service: string,
+    operation: string,
+    payload: string,
+  ) -> result<string, error-code>;
+}
+
 /// Lifecycle exported by every OOS application.
 interface lifecycle {
   use types.{error-code};
@@ -801,6 +814,7 @@ world app {
   import codec;
   import storage;
   import device-storage;
+  import system-services;
 
   export lifecycle;
 }

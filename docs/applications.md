@@ -67,24 +67,30 @@ The injected bridge exposes immutable `__oosRuntime` identity, lifecycle,
 key-name compatibility, and the selected KaiOS API profile. Implemented
 calls travel from the KaiOS 2.5 `navigator.moz*` surface, the KaiOS 3
 `navigator.b2g` surface, or a supported 3.0 daemon-service adapter through a
-WebKit message handler and a private OOS control socket. DeviceCapability uses
-the documented `lib_session` / `lib_devicecapability` service entry point.
+WebKit message handler and a private OOS control socket. DeviceCapability and
+managed KaiOS 3 services use their documented `lib_session` daemon factories.
 The OOS host performs the operation; HTTP remains unaware of it. Battery and
 vibration remain baseline Web capabilities. Granted manifest permissions are
 loaded from the registry, passed as individual runner arguments, checked again
 by the host, and used to select every sensitive injected surface. Unsupported
-APIs are not injected, so an empty object cannot be mistaken for a working
-implementation.
+hardware APIs keep their documented surface and fail explicitly with
+`NotSupportedError`; they never return success-shaped empty data.
 
-DeviceStorage, power/battery, vibration, Wi-Fi/IP, Bluetooth, camera discovery/
-torch, mobile-network snapshots, and device capabilities use the shared host
-provider. DeviceStorage enumeration returns metadata from
+DeviceStorage, power/battery, vibration, camera discovery/torch, and device
+capabilities use the shared host provider. WPE Wi-Fi/IP, Bluetooth, and modem
+calls are rejected before a provider is reached. DeviceStorage enumeration
+returns metadata from
 `/data/media/internal` and `/data/media/removable`; file bytes are fetched only
 when `FileReader` reads the selected file. Creation, replacement, append,
 deletion, and volume space queries use the same service. WIT `device-storage`
 exposes that service to WAMR, so WPE and WAMR do not grow separate filesystem
 implementations. The remaining compatibility matrix is tracked in
 [kaios-api-coverage.md](kaios-api-coverage.md).
+
+Settings, alarms, notifications, contacts, activities, system messages, audio
+policy, input method, time policy, and application metadata use the shared
+[system service broker](system-services.md). The same broker is exposed to a
+trusted future SystemUI package through WIT.
 
 For KaiOS 2.5, `datastores-owned` declarations are normalized into launch
 grants and `navigator.getDataStores()` is injected only when at least one owned

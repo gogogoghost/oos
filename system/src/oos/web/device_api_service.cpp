@@ -4,6 +4,7 @@
 #include "oos/apps/permissions.h"
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
+#include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/web/device_api_transport.h"
@@ -371,6 +372,22 @@ int servicePlatformCall(const OosDeviceApiRequest &request,
   device::ServiceProvider &services = *context->services;
   const std::string_view method(request.path);
 
+  if (method == "system.request") {
+    if (!context->system_services || context->app_id.empty())
+      return -ENOSYS;
+    std::string service;
+    std::string operation;
+    std::string payload;
+    if (!fieldString(arguments, "service", service, 64) || service.empty() ||
+        !fieldString(arguments, "operation", operation, 64) ||
+        operation.empty() || !fieldString(arguments, "payload", payload,
+                                           256 * 1024))
+      return -EINVAL;
+    return context->system_services->request(
+        context->app_id, context->permissions, service, operation, payload,
+        response);
+  }
+
   if (method == "datastore.get" || method == "datastore.set") {
     std::string name;
     if (!context->app_storage ||
@@ -491,6 +508,8 @@ int servicePlatformCall(const OosDeviceApiRequest &request,
 
   if (method.compare(0, 5, "wifi.") == 0 ||
       method.compare(0, 3, "ip.") == 0) {
+    if (context->restrict_connectivity)
+      return -ENOTSUP;
     if (!hasPermission(context, apps::DeviceServicePermission::Wifi))
       return -EACCES;
     if (method == "wifi.status") {
@@ -600,6 +619,8 @@ int servicePlatformCall(const OosDeviceApiRequest &request,
   }
 
   if (method.compare(0, 10, "bluetooth.") == 0) {
+    if (context->restrict_connectivity)
+      return -ENOTSUP;
     if (!hasPermission(context, apps::DeviceServicePermission::Bluetooth))
       return -EACCES;
     if (method == "bluetooth.enable" || method == "bluetooth.disable") {
@@ -684,6 +705,8 @@ int servicePlatformCall(const OosDeviceApiRequest &request,
   }
 
   if (method == "modem.snapshot" || method == "modem.radio-power") {
+    if (context->restrict_connectivity)
+      return -ENOTSUP;
     if (!hasPermission(context, apps::DeviceServicePermission::Modem))
       return -EACCES;
     int64_t timeout_ms = method == "modem.snapshot" ? 5000 : 10000;

@@ -15,13 +15,21 @@ class AppStorage;
 class DeviceStorageService;
 }
 
+namespace oos::services {
+class SystemServiceHub;
+}
+
 namespace oos::web {
 
 struct DeviceApiContext {
   device::ServiceProvider *services = nullptr;
   const device::Device *device = nullptr;
   storage::AppStorage *app_storage = nullptr;
+  services::SystemServiceHub *system_services = nullptr;
+  std::string app_id;
+  std::vector<std::string> permissions;
   uint32_t permission_mask = 0;
+  bool restrict_connectivity = true;
   std::unordered_map<std::string, bool> owned_data_stores;
   std::vector<std::string> wake_locks;
 };

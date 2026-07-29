@@ -62,9 +62,10 @@ app receives a persistent `WebKitNetworkSession` rooted at
 `/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3`.
 The HTTP listener serves only package resources. Privileged KaiOS calls use an
 injected WebKit message handler and a separate inherited control socket to the
-OOS host. DeviceStorage, power, vibration, Wi-Fi/IP, Bluetooth, camera,
-mobile-network, device-capability, and KaiOS 2.5 application-owned DataStore
-operations use this path; future
+OOS host. DeviceStorage, power, vibration, camera, device-capability, managed
+system services, and KaiOS 2.5 application-owned DataStore operations use this
+path. Wi-Fi/IP, Bluetooth, and mobile-network requests are rejected at this
+boundary; future
 capabilities must follow the same pattern instead of adding HTTP endpoints.
 The bridge preserves the API-version boundary: 2.5 uses the legacy navigator
 names, 3.0 uses `navigator.b2g` where KaiOS defines it, and 3.0

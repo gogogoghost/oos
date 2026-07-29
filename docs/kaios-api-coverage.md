@@ -1,11 +1,8 @@
 # KaiOS API Coverage
 
-This audit uses the 34 API families in the official KaiOS Smart Feature Phone
-3.0 device API index as its countable baseline. Standard DOM, CSS, ECMAScript,
-and media interfaces are not counted individually. The legacy 2.5 index is
-counted separately using its 22 named entries; its five Secure Element
-interfaces are separate entries because that is how the official index lists
-them.
+This matrix uses the 34 families in the official KaiOS 3.0 device API index
+and the 22 entries in the KaiOS 2.5 index. It describes the OOS bridge, not
+standard Web APIs that WPE already supplies.
 
 Sources:
 
@@ -13,96 +10,100 @@ Sources:
 - <https://developer.kaiostech.com/docs/api/web-apis>
 - <https://developer.kaiostech.com/docs/getting-started/main-concepts/permissions/>
 
-## Summary
+## Safety Policy
 
-| Classification | Families | Meaning |
-| --- | ---: | --- |
-| WPE engine API | 7 | Compiled into the shared WPE profile; hardware/provider behavior still needs device validation |
-| OOS host API, partial | 6 | Calls cross the private control socket and use the same lazy device provider as WAMR |
-| Absent | 21 | No object is injected because OOS cannot yet provide the documented semantics |
+KaiOS Web applications cannot change Wi-Fi, Bluetooth, or mobile-network
+state. Their version-correct objects are injected when the manifest grants the
+permission, but every method and writable state property returns or throws
+`NotSupportedError`. The host independently rejects all WPE Wi-Fi, IP,
+Bluetooth, modem snapshot, and radio-power calls with `ENOTSUP` before a device
+provider is created. The native WIT device interfaces remain available only to
+trusted OOS applications with their explicit permissions.
 
-There are **21 of 34 families with no implementation** and six more with a
-usable but incomplete host adapter. There is not yet a fully implemented
-privileged KaiOS family. DeviceStorage implements 10 of its 16 documented methods:
-`add`, `addNamed`, `appendNamed`, `delete`, `get`, `enumerate`, `available`,
-`storageStatus`, `freeSpace`, and `usedSpace`. `enumerateEditable` still returns
-read-only `File` objects. `getEditable`, `getRoot`, `format`, `mount`, and
-`unmount` remain unsupported. Change events currently cover mutations initiated
-by the same bridge, not changes made by another process.
+Hardware that OOS has no portable implementation for follows the same rule:
+NFC, Secure Element, FM radio, raw TCP sockets, telephony, data calls, and
+vendor External API expose their expected surface but never fake success.
 
 ## KaiOS 3 Matrix
 
-| API family | Current state | Shared host/WIT work |
-| --- | --- | --- |
-| AlarmManager | Absent | Add persistent alarms WIT plus RTC scheduler and SystemMessage delivery |
-| AppsManager | Absent in v3 | Add app registry/launch WIT and permission checks; KaiOS 3 removed legacy `mozApps` |
-| Audio Channels API | Absent | Connect WPE policy to the existing `audio` WIT service |
-| AudioChannelClient | Absent | Extend `audio` WIT with focus/channel ownership |
-| AudioChannelManager | Absent | Extend `audio` WIT with volume/focus events |
-| AudioContext | WPE engine | Validate GStreamer audio sink on every device |
-| AudioVolumeManager | Absent | Add volume methods/events to `audio` WIT |
-| Bluetooth | Host-backed, partial | Enable/disable, classic/LE discovery, pair/unpair, and cancel use `bluetooth` WIT provider; add full adapter/events |
-| Cameras | Host-backed, partial | Enumeration and torch use `camera` WIT provider; add `MediaStream` camera sessions |
-| Contacts | Absent | Add permission-scoped contacts WIT and persistent store |
-| DataCallManager | Absent | Extend `modem`/`ip` WIT with data-call lifecycle |
-| DeviceCapability | Host-backed, partial | The daemon-service `get()` returns selected `Device::capability()` states; add documented feature-value queries |
-| Externalapi | Absent | Define supported activity/vendor operations before adding WIT |
-| FmRadio | Absent | Add FM radio WIT behind the existing device feature bit |
-| Geolocation | WPE engine | Supply and validate a host geolocation provider |
-| GetDeviceStorage | Host-backed, partial | Finish editable handles, external change events, and permission modes |
-| GetUserMedia | WPE engine | Bind camera/microphone providers and prompts to `camera`/`audio` WIT policy |
-| HTMLMediaElement | WPE engine | Validate codecs, audio routing, visibility, and suspend behavior |
-| InputMethod | Absent | Add focused-input/event protocol; WIT required for non-Web peers |
-| MobileConnection | Host-backed, partial | Snapshot and radio power use `modem` WIT provider; add complete registration/SIM/call events |
-| MozSpeakerManager | Absent | Add route/speaker selection to `audio` WIT |
-| MozTCPSocket | Absent | Prefer capability-scoped WASI sockets or add asynchronous socket WIT |
-| Notification | WPE engine | Add OOS notification UI, persistence, click, and system-message delivery |
-| PowerManager | Absent | KaiOS 3 exposes a daemon service, not `navigator.b2g`; add the service/session protocol before adapting the existing `power` WIT controls |
-| powerSupplyManager | Host-backed, partial | With the `powersupply` permission, battery snapshots use `power`; add continuous charger events |
-| ServiceWorker | WPE engine | Validate restart, offline cache, quota, and background policy |
-| Settings | Absent | Add typed, permission-scoped settings WIT and observer events |
-| SystemMessage | Absent | Add host event queue shared by WPE and WAMR |
-| TcpSocket | Absent | Share the selected socket contract with MozTCPSocket |
-| Telephony | Absent | Add call-control/event WIT over the modem service |
-| TimeService | Absent | Add privileged clock/timezone WIT and policy |
-| VirtualCursor | Absent | Implement in the input/compositor layer; expose controls through WIT if needed |
-| WebActivity | Absent | Add handler resolution/launch/result WIT over the app registry |
-| XMLHttpRequest | WPE engine | Validate TLS roots, proxy policy, and offline errors |
+| API family | OOS status |
+| --- | --- |
+| AlarmManager | Persistent alarms, list/add/remove, and queued `alarm` system messages |
+| AppsManager | Installed-app read API; install, update, enable, clear, and uninstall are explicitly unsupported |
+| Audio Channels API | WPE media support plus host-managed channel policy |
+| AudioChannelClient | Channel acquire/abandon requests enter the host policy store |
+| AudioChannelManager | Version-correct manager surface; physical route events await SystemUI |
+| AudioContext | WPE engine |
+| AudioVolumeManager | Volume up/down/show requests are queued for SystemUI; no direct mixer control |
+| Bluetooth | Present when granted; all operations return `NotSupportedError` |
+| Cameras | Host enumeration and torch; media sessions depend on WPE `getUserMedia` providers |
+| Contacts | Persistent contacts, find/cursors, groups, speed dial, ICE, and blocked-number operations |
+| DataCallManager | Present when granted; all operations return `NotSupportedError` |
+| DeviceCapability | Host device capability values through `lib_devicecapability` |
+| Externalapi | Present when granted; all operations return `NotSupportedError` |
+| FmRadio | Present when granted; all operations return `NotSupportedError` |
+| Geolocation | WPE engine; device provider validation remains device-specific |
+| GetDeviceStorage | Host-backed file, enumeration, mutation, and space APIs; editable handles/mount/format are unsupported |
+| GetUserMedia | WPE engine and device media providers |
+| HTMLMediaElement | WPE engine |
+| InputMethod | Composition, key injection, selection, deletion, and focus surface plus host policy state |
+| MobileConnection | Present when granted; all operations return `NotSupportedError` |
+| MozSpeakerManager | Compatibility surface; direct speaker routing is not allowed |
+| MozTCPSocket | Present when granted; connection creation returns `NotSupportedError` |
+| Notification | Host persistence and SystemUI click/close event path; visible UI belongs to SystemUI |
+| PowerManager | Read-only compatibility values; screen, reboot, power-off, and reset controls are unsupported |
+| powerSupplyManager | Host battery/charger snapshot; continuous device events remain provider-specific |
+| ServiceWorker | WPE engine |
+| Settings | Persistent get/getBatch/set/clear and observer delivery through the host event queue |
+| SystemMessage | Persistent subscription/event queue and document adapter; worker wake-up still needs engine integration |
+| TcpSocket | Daemon factory is present when granted and rejects connection creation |
+| Telephony | Daemon factory is present when granted and rejects call control |
+| TimeService | Clock reads and managed time/timezone requests; never calls host `settimeofday` directly |
+| VirtualCursor | Local key-driven cursor compatibility surface |
+| WebActivity | Persistent pending/status/cancel flow; SystemUI selects a declared handler and writes the result |
+| XMLHttpRequest | WPE engine |
 
-## KaiOS 2.5 Delta
+## KaiOS 2.5 Matrix
 
-| Classification | Entries | APIs |
-| --- | ---: | --- |
-| WPE engine API | 4 | AudioContext, Clients, Geolocation, MediaSource |
-| OOS host API, partial | 5 | BatteryManager, Bluetooth, Data Store, Device Storage, WiFi Information |
-| Absent | 13 | Alarm, LargeText, mozHasPendingMessage, mozSetMessageHandler, Network Stats, NFC, SEChannel, SEManager, SEReader, SEResponse, SESession, SpeedDial, VolumeManager |
+| API | OOS status |
+| --- | --- |
+| Alarm | Persistent `mozAlarms` and `alarm` system-message delivery |
+| AudioContext | WPE engine |
+| BatteryManager | Host snapshot |
+| Bluetooth | Present when granted; all operations return `NotSupportedError` |
+| Clients | WPE engine |
+| Data Store | Complete app-owned record/revision/cursor API; cross-app stores remain registry work |
+| Device Storage | Same host service as KaiOS 3 and WIT |
+| Geolocation | WPE engine/provider-dependent |
+| LargeText | Managed accessibility state and lazy change subscription |
+| MediaSource | WPE engine |
+| mozHasPendingMessage | Backed by the persistent host event queue |
+| mozSetMessageHandler | Backed by the persistent host event queue |
+| Network Stats | Present when granted; all methods return `NotSupportedError` |
+| NFC | Present when granted; all methods return `NotSupportedError` |
+| SEChannel / SEManager / SEReader / SEResponse / SESession | `seManager` is present when granted and reader creation returns `NotSupportedError` |
+| SpeedDial | Persistent contact management service |
+| VolumeManager | Up/down/show requests are queued for SystemUI |
+| WiFi Information | Present when granted; all methods and the `enabled` setter return `NotSupportedError` |
 
-The legacy profile exposes only its own B2G 2.5 names. Beyond the 22-entry
-public index, it currently has partial host adapters for PowerSupply,
-vibration, wake locks, device capabilities, Wi-Fi management, camera
-enumeration/torch, MobileConnection, and `mozApps.getSelf()`.
-DataStore implements the complete record method surface for stores declared in
-`datastores-owned`: `get`, `add`, `put`, `remove`, `clear`, `getLength`,
-revision checks, local change events, and `sync` cursors. State is persisted by
-the same application-private `storage` WIT backend used by WAMR. Cross-app
-`datastores-access`, global ownership arbitration, and cross-process change
-broadcasts remain absent. WebSMS, voicemail, and cell broadcast also stay
-absent until their backing service and event semantics exist. Missing APIs are
-not represented by success-returning empty objects.
+The bridge also supplies the common KaiOS 2.5 `mozSettings`, `mozContacts`,
+`mozApps.getSelf`, `MozActivity`, wake lock, vibration, power-supply, camera,
+input-method, and device-capability compatibility surfaces. Manifest permission
+access modes, message subscriptions, and activity handlers are normalized and
+persisted in the OOS application registry.
 
-## Implementation Order
+## Remaining Engine Work
 
-1. Build a permission-aware host event channel. Alarms, notifications,
-   telephony, settings observers, storage changes, and activities all depend on
-   reliable asynchronous delivery and application wake-up.
-2. Finish the partial adapters: camera/media sessions, Bluetooth and modem
-   events, battery events, Wi-Fi state events, and wake-lock ownership cleanup.
-3. Add new shared WIT contracts for alarms, settings, contacts, applications /
-   activities, notifications, and telephony. Implement each once in the host,
-   then add thin WPE and WAMR adapters.
-4. Finish lower-priority or hardware-specific APIs: FM radio, NFC/SE,
-   NetworkStats, input method, virtual cursor, and vendor Externalapi methods.
+OOS now has host ownership for every software-manageable missing family. Work
+that cannot be completed by an API shim alone is deliberately visible:
 
-Every new privileged operation must terminate in an OOS host service. WPE may
-adapt DOMRequest/Promise/event semantics and WAMR may lower Canonical ABI data,
-but neither runtime should own a second device implementation.
+1. SystemUI must render notifications, arbitrate activities, present volume and
+   settings UI, and submit decisions through `system-services` WIT.
+2. WPE must deliver queued SystemMessage events into terminated/restarted
+   ServiceWorkers. The current document adapter does not pretend to provide
+   background worker wake-up.
+3. Camera/microphone, geolocation, charger, codec, and media behavior still
+   needs validation on each real device while keeping the shared WPE feature
+   profile identical.
+4. Unsupported hardware/network families need a real OOS provider and policy
+   decision before their explicit errors may be replaced.
