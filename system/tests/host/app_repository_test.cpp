@@ -1,5 +1,6 @@
 #include "oos/apps/app_manifest.h"
 #include "oos/apps/app_repository.h"
+#include "oos/apps/permissions.h"
 #include "oos/storage/app_storage.h"
 
 #include <cstdio>
@@ -17,6 +18,15 @@ bool check(bool condition, const char *message) {
   if (!condition)
     std::fprintf(stderr, "FAIL: %s\n", message);
   return condition;
+}
+
+bool hasPermission(const oos::apps::AppRecord &record,
+                   const char *permission) {
+  for (const std::string &requested : record.manifest.requested_permissions) {
+    if (requested == permission)
+      return true;
+  }
+  return false;
 }
 
 } // namespace
@@ -43,6 +53,11 @@ int main(int argc, char **argv) {
           R"({"format":1,"id":"../bad","name":"bad","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wamr","api_profile":"oos-wit-0.1","entrypoint":"../app.aot"})",
           invalid, error),
       "unsafe manifest must be rejected");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"format":1,"id":"org.orangeos.bad","name":"bad","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wamr","api_profile":"oos-wit-0.1","entrypoint":"app.aot","permissions":["camera"]})",
+          invalid, error),
+      "malformed permissions must be rejected");
 
   oos::apps::AppRepository repository(root);
   success &= check(repository.initialize(), repository.lastError().c_str());
@@ -54,6 +69,9 @@ int main(int argc, char **argv) {
   success &=
       check(installed.manifest.runtime_kind == oos::apps::RuntimeKind::Wamr,
             "installed runtime discriminator");
+  success &= check(hasPermission(installed, "camera") &&
+                       hasPermission(installed, "wifi-manage"),
+                   "OOS manifest permissions survive registry resolution");
 
   if (argc >= 4) {
     oos::apps::AppInstallOptions kaios25;
@@ -65,6 +83,20 @@ int main(int argc, char **argv) {
         check(webapp.manifest.package_kind == oos::apps::PackageKind::KaiOs25 &&
                   webapp.manifest.api_profile == "kaios-b2g48",
               "KaiOS 2.5 runtime discriminator");
+    success &= check(hasPermission(webapp, "device-storage:sdcard") &&
+                         hasPermission(webapp, "wifi-manage") &&
+                         hasPermission(
+                             webapp,
+                             "datastore-owned:readwrite:test-state") &&
+                         hasPermission(
+                             webapp,
+                             "datastore-owned:readonly:owner-write"),
+                     "KaiOS 2.5 permissions survive registry resolution");
+    const auto owner_stores = oos::apps::ownedDataStoreGrants(
+        webapp.manifest.requested_permissions);
+    success &= check(owner_stores.size() == 2 && owner_stores[0].writable &&
+                         owner_stores[1].writable,
+                     "DataStore owners always retain write access");
     oos::apps::AppInstallOptions kaios3;
     kaios3.app_id = "org.kaios.calculator";
     oos::apps::AppRecord webmanifest;
@@ -74,6 +106,9 @@ int main(int argc, char **argv) {
                              oos::apps::PackageKind::KaiOs3 &&
                          webmanifest.manifest.api_profile == "kaios-v3",
                      "KaiOS 3 runtime discriminator");
+    success &= check(hasPermission(webmanifest, "bluetooth") &&
+                         hasPermission(webmanifest, "camera"),
+                     "KaiOS 3 permissions survive registry resolution");
     oos::apps::AppLaunch web_launch;
     success &=
         check(repository.prepareLaunch("org.kaios.calculator", web_launch),
@@ -84,6 +119,9 @@ int main(int argc, char **argv) {
                      "WPE launch exposes the resolved ZIP entrypoint");
     success &= check(web_launch.entrypoint == "main.html",
                      "WPE launch strips query parameters from start_url");
+    success &= check(hasPermission(web_launch.app, "bluetooth") &&
+                         hasPermission(web_launch.app, "camera"),
+                     "WPE launch receives granted permissions");
     if (argc == 5) {
       oos::apps::AppInstallOptions real_kaios3;
       real_kaios3.app_id = "omnij2me";

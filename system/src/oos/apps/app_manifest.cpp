@@ -88,11 +88,51 @@ bool boundedMemory(const JsonValue &root, AppManifest &manifest,
   return true;
 }
 
-void collectPermissions(const JsonValue *permissions, AppManifest &manifest) {
-  if (!permissions || !permissions->isObject())
-    return;
-  for (const auto &entry : permissions->objectValue())
+bool collectPermissions(const JsonValue *permissions, AppManifest &manifest,
+                        std::string &error) {
+  if (!permissions)
+    return true;
+  if (!permissions->isObject()) {
+    error = "manifest field 'permissions' must be an object";
+    return false;
+  }
+  for (const auto &entry : permissions->objectValue()) {
+    if (entry.first.empty() || entry.first.size() > 128) {
+      error = "manifest permission name is empty or too long";
+      return false;
+    }
     manifest.requested_permissions.push_back(entry.first);
+  }
+  return true;
+}
+
+bool collectDataStores(const JsonValue *stores, const char *kind,
+                       AppManifest &manifest, std::string &error) {
+  if (!stores)
+    return true;
+  if (!stores->isObject()) {
+    error = std::string("manifest field '") + kind + "' must be an object";
+    return false;
+  }
+  for (const auto &entry : stores->objectValue()) {
+    if (entry.first.empty() || entry.first.size() > 128 ||
+        !entry.second.isObject()) {
+      error = std::string("manifest field '") + kind +
+              "' contains an invalid store";
+      return false;
+    }
+    const JsonValue *access = entry.second.get("access");
+    if (!access || !access->isString() ||
+        (access->stringValue() != "readonly" &&
+         access->stringValue() != "readwrite")) {
+      error = std::string("manifest field '") + kind +
+              "' requires readonly or readwrite access";
+      return false;
+    }
+    manifest.requested_permissions.emplace_back(
+        std::string(kind) + ":" + access->stringValue() + ":" + entry.first);
+  }
+  return true;
 }
 
 } // namespace
@@ -144,7 +184,8 @@ bool parseAppManifest(const std::string &json, AppManifest &manifest,
       !optionalString(root, "fallback_entrypoint", parsed.fallback_entrypoint,
                       error) ||
       !optionalString(root, "role", parsed.role, error) ||
-      !boundedMemory(root, parsed, error))
+      !boundedMemory(root, parsed, error) ||
+      !collectPermissions(root.get("permissions"), parsed, error))
     return false;
 
   if (!validIdentifier(parsed.id) || !validVersion(parsed.version)) {
@@ -246,7 +287,14 @@ bool parseKaiOsManifest(const std::string &json, PackageKind kind,
   }
   if (role && role->isString())
     parsed.role = role->stringValue();
-  collectPermissions(permissions, parsed);
+  if (!collectPermissions(permissions, parsed, error))
+    return false;
+  if (kind == PackageKind::KaiOs25 &&
+      (!collectDataStores(root.get("datastores-owned"), "datastore-owned",
+                          parsed, error) ||
+       !collectDataStores(root.get("datastores-access"), "datastore-access",
+                          parsed, error)))
+    return false;
   manifest = std::move(parsed);
   return true;
 }

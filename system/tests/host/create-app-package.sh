@@ -22,6 +22,7 @@ cat > "$staging/oos-manifest.json" <<'EOF'
   "api_profile": "oos-wit-0.1",
   "entrypoint": "aot/armv7/wamr-2.4.4/app.aot",
   "role": "test",
+  "permissions": {"camera": {}, "wifi-manage": {}},
   "memory": {"stack_bytes": 131072, "heap_bytes": 4194304}
 }
 EOF

@@ -84,6 +84,9 @@ bool NativeAppManager::load(const char *id,
   wasm_options.removable_media_directory =
       options.removable_media_directory ? options.removable_media_directory
                                         : "";
+  wasm_options.service_permission_mask = options.service_permission_mask;
+  wasm_options.enforce_service_permissions =
+      options.enforce_service_permissions;
   auto app = impl_->device
                  ? std::make_unique<WasmApp>(impl_->graphics, *impl_->device,
                                              wasm_options)

@@ -2,14 +2,18 @@
 
 #include "oos/compositor/compositor.h"
 #include "oos/compositor/surface_transport.h"
+#include "oos/apps/permissions.h"
 #include "oos/device/device.h"
+#include "oos/device/service_provider.h"
 #include "oos/input/key_input.h"
+#include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/web/device_api_service.h"
 #include "oos/web/device_api_transport.h"
 
 #include <android/hardware_buffer.h>
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +21,7 @@
 #include <signal.h>
 #include <string>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -94,46 +99,37 @@ pid_t startRunner(const apps::AppLaunch &launch,
   const std::string width = std::to_string(device.primary_width);
   const std::string height = std::to_string(device.primary_height);
   const std::string api_descriptor = std::to_string(api_fd);
-  std::vector<const char *> arguments = {
+  std::vector<std::string> argument_storage = {
       runner,
-      "--id",
-      launch.app.manifest.id.c_str(),
-      "--package",
-      launch.executable_path.c_str(),
-      "--entrypoint",
-      launch.entrypoint.c_str(),
-      "--api-profile",
-      launch.app.manifest.api_profile.c_str(),
-      "--data",
-      launch.data_directory.c_str(),
-      "--cache",
-      launch.cache_directory.c_str(),
-      "--socket",
-      socket_path,
-      "--api-fd",
-      api_descriptor.c_str(),
-      "--width",
-      width.c_str(),
-      "--height",
-      height.c_str(),
-      nullptr,
+      "--id", launch.app.manifest.id,
+      "--package", launch.executable_path,
+      "--entrypoint", launch.entrypoint,
+      "--api-profile", launch.app.manifest.api_profile,
+      "--data", launch.data_directory,
+      "--cache", launch.cache_directory,
+      "--socket", socket_path,
+      "--api-fd", api_descriptor,
+      "--width", width,
+      "--height", height,
   };
+  for (const std::string &permission :
+       launch.app.manifest.requested_permissions) {
+    argument_storage.emplace_back("--permission");
+    argument_storage.push_back(permission);
+  }
+  std::vector<char *> arguments;
+  arguments.reserve(argument_storage.size() + 1);
+  for (std::string &argument : argument_storage)
+    arguments.push_back(argument.data());
+  arguments.push_back(nullptr);
   const pid_t child = fork();
   if (child == 0) {
     close(host_api_fd);
-    // OOS favors steady-state application performance over startup latency:
-    // compile every Wasm function with BBQ before exposing the instance.
-    if (!std::getenv("JSC_useEagerBBQCompilation"))
-      setenv("JSC_useEagerBBQCompilation", "true", 1);
-    if (!std::getenv("JSC_useWasmIPInt"))
-      setenv("JSC_useWasmIPInt", "false", 1);
-    if (!std::getenv("JSC_useWasmOSR"))
-      setenv("JSC_useWasmOSR", "false", 1);
     const char *wpe_library_path = environmentOr(
         "OOS_WPE_LD_LIBRARY_PATH",
         "/opt/oos/lib:/system/lib:/vendor/lib:/apex/com.android.runtime/lib");
     setenv("LD_LIBRARY_PATH", wpe_library_path, 1);
-    execv(runner, const_cast<char *const *>(arguments.data()));
+    execv(runner, arguments.data());
     _exit(127);
   }
   return child;
@@ -142,13 +138,26 @@ pid_t startRunner(const apps::AppLaunch &launch,
 } // namespace
 
 WpeAppHost::WpeAppHost(compositor::Compositor &compositor,
-                       input::KeyInputSource &input)
-    : compositor_(compositor), input_(input) {}
+                       input::KeyInputSource &input, device::Device &device)
+    : compositor_(compositor), input_(input), device_(device),
+      services_(std::make_unique<device::ServiceProvider>(device)) {}
+
+WpeAppHost::~WpeAppHost() = default;
 
 bool WpeAppHost::run(const apps::AppLaunch &launch,
-                     const device::DeviceDescriptor &device,
                      volatile std::sig_atomic_t *stop_requested) {
   error_.clear();
+  const std::vector<apps::DataStoreGrant> data_store_grants =
+      apps::ownedDataStoreGrants(launch.app.manifest.requested_permissions);
+  std::unique_ptr<storage::AppStorage> app_storage;
+  if (!data_store_grants.empty()) {
+    app_storage = std::make_unique<storage::AppStorage>(
+        launch.data_directory + "/oos-platform");
+    if (!app_storage->initialize()) {
+      error_ = "initialize KaiOS DataStore: " + app_storage->lastError();
+      return false;
+    }
+  }
   const char *socket_path =
       environmentOr("OOS_WPE_SURFACE_SOCKET", "/data/runtime/wpe-surface.sock");
   const int listener = oos_surface_transport_listen(socket_path);
@@ -164,8 +173,8 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
     unlink(socket_path);
     return false;
   }
-  const pid_t child =
-      startRunner(launch, device, socket_path, api_sockets[1], api_sockets[0]);
+  const pid_t child = startRunner(launch, device_.descriptor(), socket_path,
+                                  api_sockets[1], api_sockets[0]);
   if (child < 0) {
     error_ = std::string("start WPE runner: ") + std::strerror(errno);
     close(listener);
@@ -175,6 +184,40 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
     return false;
   }
   close(api_sockets[1]);
+
+  storage::DeviceStorageService device_storage;
+  DeviceApiContext device_api_context;
+  device_api_context.services = services_.get();
+  device_api_context.device = &device_;
+  device_api_context.app_storage = app_storage.get();
+  device_api_context.permission_mask = apps::deviceServicePermissionMask(
+      launch.app.manifest.requested_permissions);
+  for (const apps::DataStoreGrant &grant : data_store_grants)
+    device_api_context.owned_data_stores.emplace(grant.name, grant.writable);
+  std::atomic<bool> stop_device_api{false};
+  std::atomic<bool> device_api_success{true};
+  bool device_api_connected = true;
+  std::string device_api_error;
+  std::thread device_api_thread([&] {
+    while (!stop_device_api && device_api_connected) {
+      if (!serviceDeviceApi(api_sockets[0], device_storage,
+                            device_api_connected, device_api_error, 50,
+                            &device_api_context)) {
+        device_api_success = false;
+        break;
+      }
+    }
+  });
+
+  const auto stopDeviceApi = [&] {
+    stop_device_api = true;
+    if (device_api_thread.joinable())
+      device_api_thread.join();
+    close(api_sockets[0]);
+    for (const std::string &wake_lock : device_api_context.wake_locks)
+      services_->releaseWakeLock(wake_lock);
+    device_api_context.wake_locks.clear();
+  };
 
   int connection = -ETIMEDOUT;
   int child_status = 0;
@@ -191,8 +234,8 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
         (stop_requested && *stop_requested) || input_.stopRequested();
     error_ = errorText("accept WPE producer", connection);
     stopChild(child);
+    stopDeviceApi();
     close(listener);
-    close(api_sockets[0]);
     unlink(socket_path);
     return externally_stopped;
   }
@@ -201,11 +244,9 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
   uint64_t presented_frames = 0;
   KeyDispatchContext key_context{connection, true,
                                  std::getenv("OOS_TRACE_KEYS") != nullptr};
-  storage::DeviceStorageService device_storage;
-  bool device_api_connected = true;
   while (!(stop_requested && *stop_requested) && !input_.stopRequested()) {
-    if (!serviceDeviceApi(api_sockets[0], device_storage, device_api_connected,
-                          error_)) {
+    if (!device_api_success) {
+      error_ = device_api_error;
       success = false;
       break;
     }
@@ -248,17 +289,11 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       success = false;
       break;
     }
-    if (!serviceDeviceApi(api_sockets[0], device_storage, device_api_connected,
-                          error_)) {
-      success = false;
-      break;
-    }
     if (childExited(child, child_status))
       break;
   }
 
   close(connection);
-  close(api_sockets[0]);
   close(listener);
   unlink(socket_path);
   const bool externally_stopped =
@@ -268,6 +303,11 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
   else if (!externally_stopped &&
            (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)) {
     error_ = "WPE runner exited unsuccessfully";
+    success = false;
+  }
+  stopDeviceApi();
+  if (!device_api_success) {
+    error_ = device_api_error;
     success = false;
   }
   std::fprintf(stderr, "OOS WPE host presented %llu frames\n",

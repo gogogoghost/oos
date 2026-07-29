@@ -24,7 +24,6 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-libdrm-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch"
-  "$ROOT_DIR/system/patches/wpewebkit-oos-eager-wasm-bbq.patch"
 )
 SOURCE_PATCH_SHA=$(sha256sum "${SOURCE_PATCHES[@]}" | awk '{print $1}' |
   sha256sum | awk '{print $1}')
@@ -66,12 +65,6 @@ source_patch_is_ready() {
     wpewebkit-libdrm-off-build.patch)
       grep -Fq 'static constexpr uint32_t xRGB8888Format' "$backing_store" &&
         grep -Fq '== xRGB8888Format' "$backing_store"
-      ;;
-    wpewebkit-oos-eager-wasm-bbq.patch)
-      grep -Fq 'useEagerBBQCompilation' \
-        "$ROOT_DIR/third_party/wpewebkit/Source/JavaScriptCore/runtime/OptionsList.h" &&
-        grep -Fq 'eagerlyCompileBBQ' \
-        "$ROOT_DIR/third_party/wpewebkit/Source/JavaScriptCore/wasm/WasmModule.cpp"
       ;;
     *)
       return 1

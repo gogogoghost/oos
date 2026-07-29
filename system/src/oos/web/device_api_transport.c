@@ -11,6 +11,7 @@
 #define OOS_DEVICE_API_VERSION 2u
 #define OOS_DEVICE_API_MAX_PATH 4096u
 #define OOS_DEVICE_API_MAX_PAYLOAD (64u * 1024u * 1024u)
+#define OOS_DEVICE_API_MAX_PLATFORM_PAYLOAD (256u * 1024u)
 
 typedef struct RequestHeader {
   uint32_t magic;
@@ -93,7 +94,7 @@ int oos_device_api_socket_pair(int sockets[2]) {
 
 static int valid_operation(uint16_t operation) {
   return operation >= OOS_DEVICE_API_LIST_FILES &&
-         operation <= OOS_DEVICE_API_USED_SPACE;
+         operation <= OOS_DEVICE_API_PLATFORM_CALL;
 }
 
 int oos_device_api_request_with_payload(
@@ -104,8 +105,11 @@ int oos_device_api_request_with_payload(
   if (socket_fd < 0 || !response_payload || !response_payload_size ||
       !valid_operation(operation) || volume > OOS_DEVICE_API_REMOVABLE ||
       request_payload_size > OOS_DEVICE_API_MAX_PAYLOAD ||
+      (operation == OOS_DEVICE_API_PLATFORM_CALL &&
+       request_payload_size > OOS_DEVICE_API_MAX_PLATFORM_PAYLOAD) ||
       (request_payload_size && !request_payload) ||
-      (operation != OOS_DEVICE_API_WRITE_FILE && request_payload_size) ||
+      (operation != OOS_DEVICE_API_WRITE_FILE &&
+       operation != OOS_DEVICE_API_PLATFORM_CALL && request_payload_size) ||
       (operation == OOS_DEVICE_API_WRITE_FILE &&
        flags > OOS_DEVICE_API_WRITE_APPEND) ||
       (operation != OOS_DEVICE_API_WRITE_FILE && flags))
@@ -118,7 +122,8 @@ int oos_device_api_request_with_payload(
   if (path_size > OOS_DEVICE_API_MAX_PATH ||
       ((operation == OOS_DEVICE_API_READ_FILE ||
         operation == OOS_DEVICE_API_WRITE_FILE ||
-        operation == OOS_DEVICE_API_DELETE_FILE) &&
+        operation == OOS_DEVICE_API_DELETE_FILE ||
+        operation == OOS_DEVICE_API_PLATFORM_CALL) &&
        path_size == 0))
     return -EINVAL;
   const RequestHeader request = {
@@ -189,13 +194,18 @@ int oos_device_api_receive(int socket_fd, OosDeviceApiRequest *request,
       header.volume > OOS_DEVICE_API_REMOVABLE ||
       header.path_size > OOS_DEVICE_API_MAX_PATH ||
       header.payload_size > OOS_DEVICE_API_MAX_PAYLOAD ||
-      (header.operation != OOS_DEVICE_API_WRITE_FILE && header.payload_size) ||
+      (header.operation == OOS_DEVICE_API_PLATFORM_CALL &&
+       header.payload_size > OOS_DEVICE_API_MAX_PLATFORM_PAYLOAD) ||
+      (header.operation != OOS_DEVICE_API_WRITE_FILE &&
+       header.operation != OOS_DEVICE_API_PLATFORM_CALL &&
+       header.payload_size) ||
       (header.operation == OOS_DEVICE_API_WRITE_FILE &&
        header.flags > OOS_DEVICE_API_WRITE_APPEND) ||
       (header.operation != OOS_DEVICE_API_WRITE_FILE && header.flags) ||
       ((header.operation == OOS_DEVICE_API_READ_FILE ||
         header.operation == OOS_DEVICE_API_WRITE_FILE ||
-        header.operation == OOS_DEVICE_API_DELETE_FILE) &&
+        header.operation == OOS_DEVICE_API_DELETE_FILE ||
+        header.operation == OOS_DEVICE_API_PLATFORM_CALL) &&
        !header.path_size))
     return -EPROTO;
   memset(request, 0, sizeof(*request));

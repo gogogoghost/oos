@@ -72,23 +72,32 @@ flags so framework font atlases can grow safely.
 
 Device identity and capability discovery are backed by the selected production
 `Device`. All optional service interfaces are registered so generated apps can
-link and perform capability fallback. Until a per-application permission
-policy injects a service provider, those calls return the typed WIT
-`unavailable` error. An implemented device capability alone is not authority
-for an app to use it.
+link and perform capability fallback. The first hardware WIT call lazily creates
+the target `ServiceProvider`; local uses deterministic test data and Android
+delegates to the existing audio, camera, power, vibration, Wi-Fi/IP, Bluetooth,
+modem, and codec managers. No HAL manager is initialized at app startup. A
+runtime created without a `Device` returns the typed WIT `unavailable` error.
+For repository-launched applications, granted manifest permissions are reduced
+to a seven-bit mask once at launch. Each privileged WIT call performs one mask
+test before the lazy provider is reached and returns `permission-denied` when
+the capability was not granted. Raw `--module` hardware diagnostics explicitly
+retain unrestricted service access because they have no application manifest.
 
 The `storage` interface provides persistent byte-valued KV plus bounded
 prepared SQLite statements. Database handles and statement cursors stay in
 the native host; guests bind/read null, integer, float, text, and blob values
 through validated WIT buffers. Each application receives only its configured
-`/data/users/0/wasm/<app-id>` storage root. Permission enforcement is deferred
-during rooted bring-up, but the app identity is already carried into every
-runtime instance.
+`/data/users/0/wasm/<app-id>` storage root. The app identity and launch-time
+permission mask are carried into every runtime instance.
+The KaiOS 2.5 application-owned DataStore adapter uses this same host storage
+implementation for Web applications; it is an API-shape adapter, not a second
+database service.
 
 The separate `device-storage` interface reads and writes user-visible internal
 or removable media. WAMR writes directly from validated guest linear memory;
 reads allocate the Canonical ABI result in guest memory and read file bytes into
-that allocation without an intermediate host byte vector.
+that allocation without an intermediate host byte vector. It is exposed only
+when a granted permission starts with `device-storage:`.
 
 ## WAMR And Components
 

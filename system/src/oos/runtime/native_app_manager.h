@@ -21,6 +21,8 @@ struct NativeAppLaunchOptions {
   const char *removable_media_directory = "/data/media/removable";
   uint32_t stack_size = 128 * 1024;
   uint32_t heap_size = 4 * 1024 * 1024;
+  uint32_t service_permission_mask = 0;
+  bool enforce_service_permissions = false;
 };
 
 class NativeAppManager {

@@ -1,7 +1,10 @@
 #include "oos/apps/app_repository.h"
+#include "oos/apps/permissions.h"
 #include "oos/compositor/compositor.h"
+#include "oos/device/service_provider.h"
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
+#include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/web/device_api_service.h"
 #include "oos/web/device_api_transport.h"
@@ -206,6 +209,9 @@ int main(int argc, char **argv) {
   bool api_connected = false;
   std::string api_error;
   std::thread api_thread;
+  std::shared_ptr<oos::device::ServiceProvider> services;
+  std::shared_ptr<oos::storage::AppStorage> app_storage;
+  std::shared_ptr<oos::web::DeviceApiContext> device_api_context;
   if (use_registered_app) {
     const int socket_result = oos_device_api_socket_pair(api_sockets);
     if (socket_result != 0) {
@@ -215,7 +221,8 @@ int main(int argc, char **argv) {
       return 1;
     }
     bridge = std::make_unique<oos::web::KaiOsApiBridge>(
-        app_id, registered_app.app.manifest.api_profile, api_sockets[1]);
+        app_id, registered_app.app.manifest.api_profile,
+        registered_app.app.manifest.requested_permissions, api_sockets[1]);
     api_sockets[1] = -1;
     if (!bridge->initialize(closeFromWeb, loop)) {
       std::fprintf(stderr, "failed to initialize local KaiOS API bridge: %s\n",
@@ -225,16 +232,43 @@ int main(int argc, char **argv) {
       return 1;
     }
     api_connected = true;
+    services = std::make_shared<oos::device::ServiceProvider>(*device);
+    const std::vector<oos::apps::DataStoreGrant> data_store_grants =
+        oos::apps::ownedDataStoreGrants(
+            registered_app.app.manifest.requested_permissions);
+    if (!data_store_grants.empty()) {
+      app_storage = std::make_shared<oos::storage::AppStorage>(
+          registered_app.data_directory + "/oos-platform");
+      if (!app_storage->initialize()) {
+        std::fprintf(stderr, "failed to initialize KaiOS DataStore: %s\n",
+                     app_storage->lastError().c_str());
+        close(api_sockets[0]);
+        g_main_loop_unref(loop);
+        return 1;
+      }
+    }
+    device_api_context = std::make_shared<oos::web::DeviceApiContext>();
+    device_api_context->services = services.get();
+    device_api_context->device = device.get();
+    device_api_context->app_storage = app_storage.get();
+    device_api_context->permission_mask =
+        oos::apps::deviceServicePermissionMask(
+            registered_app.app.manifest.requested_permissions);
+    for (const oos::apps::DataStoreGrant &grant : data_store_grants)
+      device_api_context->owned_data_stores.emplace(grant.name,
+                                                    grant.writable);
     const std::string internal_media =
         std::string(data_root) + "/media/internal";
     const std::string removable_media =
         std::string(data_root) + "/media/removable";
-    api_thread = std::thread([&, internal_media, removable_media] {
+    api_thread = std::thread([&, internal_media, removable_media, services,
+                              app_storage, device_api_context] {
       oos::storage::DeviceStorageService storage(internal_media,
                                                  removable_media);
       while (!stop_api && api_connected) {
         if (!oos::web::serviceDeviceApi(api_sockets[0], storage, api_connected,
-                                        api_error, 50)) {
+                                        api_error, 50,
+                                        device_api_context.get())) {
           g_main_loop_quit(loop);
           break;
         }
@@ -253,6 +287,10 @@ int main(int argc, char **argv) {
       api_thread.join();
     if (api_sockets[0] >= 0)
       close(api_sockets[0]);
+    if (device_api_context) {
+      for (const std::string &wake_lock : device_api_context->wake_locks)
+        services->releaseWakeLock(wake_lock);
+    }
     g_main_loop_unref(loop);
     return 1;
   }
@@ -270,6 +308,10 @@ int main(int argc, char **argv) {
     api_thread.join();
   if (api_sockets[0] >= 0)
     close(api_sockets[0]);
+  if (use_registered_app && device_api_context) {
+    for (const std::string &wake_lock : device_api_context->wake_locks)
+      services->releaseWakeLock(wake_lock);
+  }
   if (!api_error.empty())
     std::fprintf(stderr, "local WPE device API failed: %s\n",
                  api_error.c_str());

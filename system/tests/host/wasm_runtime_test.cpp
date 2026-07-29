@@ -8,6 +8,7 @@
 #include "oos/input/key_input.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/runtime/native_app_manager.h"
+#include "oos/apps/permissions.h"
 
 namespace {
 
@@ -170,10 +171,11 @@ public:
 
 class MockDevice final : public oos::device::Device {
 public:
+  explicit MockDevice(const char *id = "local")
+      : descriptor_{id, "OOS", "Local Test Device", 0, 240, 320, 0, 0} {}
+
   const oos::device::DeviceDescriptor &descriptor() const override {
-    static constexpr oos::device::DeviceDescriptor descriptor = {
-        "local", "OOS", "Local Test Device", 0, 240, 320, 0, 0};
-    return descriptor;
+    return descriptor_;
   }
 
   const oos::device::ServiceConfiguration &services() const override {
@@ -199,6 +201,7 @@ public:
   const std::string &lastError() const override { return error_; }
 
 private:
+  oos::device::DeviceDescriptor descriptor_;
   std::string error_;
 };
 
@@ -274,6 +277,12 @@ int main(int argc, char **argv) {
   }
   mock_launch.internal_media_directory = internal_media.c_str();
   mock_launch.removable_media_directory = removable_media.c_str();
+  const std::vector<std::string> mock_permissions = {
+      "audio-capture", "camera",       "power",     "wifi-manage",
+      "bluetooth",     "mobileconnection", "device-storage:sdcard"};
+  mock_launch.service_permission_mask =
+      oos::apps::deviceServicePermissionMask(mock_permissions);
+  mock_launch.enforce_service_permissions = true;
   if (!mock_smoke.load("local-mock", mock_launch) ||
       !mock_smoke.activate("local-mock") || !mock_smoke.render(1'600'000)) {
     std::fprintf(stderr, "WIT local mock API smoke failed: %s\n",
@@ -281,11 +290,23 @@ int main(int argc, char **argv) {
     return 1;
   }
   mock_smoke.shutdown();
+  MockDevice denied_device("local-denied");
+  oos::runtime::NativeAppManager denied_smoke(graphics, denied_device, 1);
+  oos::runtime::NativeAppLaunchOptions denied_launch = mock_launch;
+  denied_launch.service_permission_mask = 0;
+  if (!denied_smoke.load("permission-denied", denied_launch) ||
+      !denied_smoke.activate("permission-denied") ||
+      !denied_smoke.render(1'700'000)) {
+    std::fprintf(stderr, "WIT permission filtering smoke failed: %s\n",
+                 denied_smoke.lastError());
+    return 1;
+  }
+  denied_smoke.shutdown();
   std::filesystem::remove_all(storage_root);
-  std::printf("WAMR WIT local mock API imports passed\n");
+  std::printf("WAMR WIT local mock and permission filtering passed\n");
   return graphics.frames == 5 && resident_textures == 3 &&
                  graphics.textures.empty() && graphics.texture_updates > 0 &&
-                 graphics.gles_frames == 2
+                 graphics.gles_frames == 3
              ? 0
              : 1;
 }

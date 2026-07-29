@@ -8,18 +8,226 @@
 #include <wpe/webkit.h>
 
 #include <cerrno>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <mutex>
+#include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 
 namespace oos::web {
 
+namespace {
+
+std::string jsonString(const std::string &value) {
+  static const char hex[] = "0123456789abcdef";
+  std::string output = "\"";
+  for (const unsigned char character : value) {
+    switch (character) {
+    case '"':
+      output += "\\\"";
+      break;
+    case '\\':
+      output += "\\\\";
+      break;
+    case '\b':
+      output += "\\b";
+      break;
+    case '\f':
+      output += "\\f";
+      break;
+    case '\n':
+      output += "\\n";
+      break;
+    case '\r':
+      output += "\\r";
+      break;
+    case '\t':
+      output += "\\t";
+      break;
+    default:
+      if (character < 0x20) {
+        output += "\\u00";
+        output.push_back(hex[character >> 4]);
+        output.push_back(hex[character & 0x0f]);
+      } else {
+        output.push_back(static_cast<char>(character));
+      }
+    }
+  }
+  output.push_back('"');
+  return output;
+}
+
+std::string jsonStrings(const std::vector<std::string> &values) {
+  std::string output = "[";
+  for (const std::string &value : values) {
+    if (output.size() > 1)
+      output.push_back(',');
+    output += jsonString(value);
+  }
+  output.push_back(']');
+  return output;
+}
+
+} // namespace
+
+class DeviceApiClient {
+public:
+  static constexpr size_t kMaximumPendingRequests = 64;
+
+  explicit DeviceApiClient(int socket_fd)
+      : socket_fd_(socket_fd), worker_(&DeviceApiClient::run, this) {}
+
+  ~DeviceApiClient() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stopping_ = true;
+    }
+    ready_.notify_one();
+    shutdown(socket_fd_, SHUT_RDWR);
+    worker_.join();
+  }
+
+  bool enqueue(uint16_t operation, uint16_t volume, uint16_t flags,
+               std::string path, const void *payload, uint32_t payload_size,
+               JSCValue *message, WebKitScriptMessageReply *reply) {
+    Pending pending;
+    pending.operation = operation;
+    pending.volume = volume;
+    pending.flags = flags;
+    pending.path = std::move(path);
+    if (payload_size) {
+      const auto *bytes = static_cast<const uint8_t *>(payload);
+      pending.payload.assign(bytes, bytes + payload_size);
+    }
+    pending.context =
+        static_cast<JSCContext *>(g_object_ref(jsc_value_get_context(message)));
+    pending.reply = webkit_script_message_reply_ref(reply);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (stopping_ || pending_.size() >= kMaximumPendingRequests) {
+        g_object_unref(pending.context);
+        webkit_script_message_reply_unref(pending.reply);
+        return false;
+      }
+      pending_.push_back(std::move(pending));
+    }
+    ready_.notify_one();
+    return true;
+  }
+
+private:
+  struct Pending {
+    uint16_t operation = 0;
+    uint16_t volume = 0;
+    uint16_t flags = 0;
+    std::string path;
+    std::vector<uint8_t> payload;
+    JSCContext *context = nullptr;
+    WebKitScriptMessageReply *reply = nullptr;
+  };
+
+  struct Completion {
+    JSCContext *context = nullptr;
+    WebKitScriptMessageReply *reply = nullptr;
+    int result = 0;
+    std::string response;
+  };
+
+  static gboolean finish(gpointer data) {
+    std::unique_ptr<Completion> completion(
+        static_cast<Completion *>(data));
+    if (completion->result != 0) {
+      webkit_script_message_reply_return_error_message(
+          completion->reply,
+          completion->result < 0 ? std::strerror(-completion->result)
+                                 : "OOS device API failed");
+    } else {
+      JSCValue *value =
+          jsc_value_new_string(completion->context,
+                               completion->response.c_str());
+      webkit_script_message_reply_return_value(completion->reply, value);
+      g_object_unref(value);
+    }
+    webkit_script_message_reply_unref(completion->reply);
+    g_object_unref(completion->context);
+    return G_SOURCE_REMOVE;
+  }
+
+  void run() {
+    while (true) {
+      Pending request;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        ready_.wait(lock, [&] { return stopping_ || !pending_.empty(); });
+        if (stopping_) {
+          while (!pending_.empty()) {
+            auto completion = std::make_unique<Completion>();
+            completion->context = pending_.front().context;
+            completion->reply = pending_.front().reply;
+            completion->result = -ECANCELED;
+            pending_.pop_front();
+            g_main_context_invoke(nullptr, finish, completion.release());
+          }
+          return;
+        }
+        request = std::move(pending_.front());
+        pending_.pop_front();
+      }
+      void *payload = nullptr;
+      uint32_t payload_size = 0;
+      auto completion = std::make_unique<Completion>();
+      completion->context = request.context;
+      completion->reply = request.reply;
+      completion->result = oos_device_api_request_with_payload(
+          socket_fd_, request.operation, request.volume, request.flags,
+          request.path.c_str(), request.payload.data(),
+          static_cast<uint32_t>(request.payload.size()), &payload,
+          &payload_size, 30000);
+      if (completion->result == 0) {
+        if (request.operation == OOS_DEVICE_API_LIST_FILES ||
+            request.operation == OOS_DEVICE_API_PLATFORM_CALL) {
+          if (payload_size)
+            completion->response.assign(static_cast<const char *>(payload),
+                                        payload_size);
+        } else if (request.operation == OOS_DEVICE_API_READ_FILE) {
+          char *encoded = reinterpret_cast<char *>(g_base64_encode(
+              static_cast<const guchar *>(payload), payload_size));
+          completion->response = encoded ? encoded : "";
+          g_free(encoded);
+        } else if (request.operation == OOS_DEVICE_API_FREE_SPACE ||
+                   request.operation == OOS_DEVICE_API_USED_SPACE) {
+          if (payload_size != sizeof(uint64_t)) {
+            completion->result = -EPROTO;
+          } else {
+            uint64_t bytes = 0;
+            std::memcpy(&bytes, payload, sizeof(bytes));
+            completion->response = std::to_string(bytes);
+          }
+        }
+      }
+      oos_device_api_free(payload);
+      g_main_context_invoke(nullptr, finish, completion.release());
+    }
+  }
+
+  int socket_fd_ = -1;
+  std::mutex mutex_;
+  std::condition_variable ready_;
+  std::deque<Pending> pending_;
+  bool stopping_ = false;
+  std::thread worker_;
+};
+
 KaiOsApiBridge::KaiOsApiBridge(std::string app_id, std::string api_profile,
-                               int api_fd)
+                               std::vector<std::string> permissions, int api_fd)
     : app_id_(std::move(app_id)), api_profile_(std::move(api_profile)),
-      api_fd_(api_fd) {}
+      permissions_(std::move(permissions)), api_fd_(api_fd) {}
 
 KaiOsApiBridge::~KaiOsApiBridge() {
   if (manager_) {
@@ -29,6 +237,9 @@ KaiOsApiBridge::~KaiOsApiBridge() {
         manager_, "oosDeviceApi", nullptr);
     g_object_unref(manager_);
   }
+  api_client_.reset();
+  while (g_main_context_pending(nullptr))
+    g_main_context_iteration(nullptr, FALSE);
   if (api_fd_ >= 0)
     close(api_fd_);
 }
@@ -62,11 +273,13 @@ bool KaiOsApiBridge::initialize(CloseCallback close_callback,
     error_ = "cannot register OOS device API bridge";
     return false;
   }
+  api_client_ = std::make_unique<DeviceApiClient>(api_fd_);
 
   script_ = "(() => { 'use strict';"
-            "const runtime = Object.freeze({appId:'" +
-            app_id_ + "',apiProfile:'" + api_profile_ +
-            "',bridgeVersion:2,traceKeys:" +
+            "const runtime = Object.freeze({appId:" + jsonString(app_id_) +
+            ",apiProfile:" + jsonString(api_profile_) +
+            ",permissions:Object.freeze(" + jsonStrings(permissions_) +
+            "),bridgeVersion:3,traceKeys:" +
             (std::getenv("OOS_TRACE_KEYS") ? "true" : "false") +
             "});"
             "Object.defineProperty(globalThis,'__oosRuntime',"
@@ -379,91 +592,449 @@ const removableStorage = storage('sdcard1', 1, true, false);
 const getDeviceStorages = name => name === 'sdcard'
   ? [internalStorage, removableStorage] : [storage(name, 0, false, true)];
 const getDeviceStorage = name => getDeviceStorages(name)[0];
-const makeManager = (initial = {}) => new Proxy(eventTarget(initial), {
-  get(target, property) {
-    if (property in target) return target[property];
-    if (typeof property === 'symbol' || property === 'then') return undefined;
-    if (String(property).startsWith('on')) return null;
-    return () => null;
+const hasPermission = (...names) => runtime.permissions.some(permission =>
+  names.includes(permission));
+const hasPermissionPrefix = prefix => runtime.permissions.some(permission =>
+  permission.startsWith(prefix));
+const platformCall = (method, parameters = {}) =>
+  deviceCall('platform', 0, method, JSON.stringify(parameters)).then(encoded =>
+    JSON.parse(encoded));
+const makeWakeLock = topic => {
+  let released = false;
+  platformCall('power.acquire-wake-lock', { name: String(topic) })
+    .catch(() => { released = true; });
+  const release = () => {
+    if (released) return;
+    released = true;
+    platformCall('power.release-wake-lock', { name: String(topic) })
+      .catch(() => {});
+  };
+  return { topic, get released() { return released; }, unlock: release,
+    release };
+};
+const powerAllowed = hasPermission('power');
+const storageAllowed = hasPermissionPrefix('device-storage:');
+const wifiAllowed = hasPermission('wifi-manage', 'wifi');
+const bluetoothAllowed = hasPermission('bluetooth');
+const cameraAllowed = hasPermission('camera');
+const modemAllowed = hasPermission('mobileconnection', 'mobilenetwork');
+const powerSupplyAllowed = hasPermission('powersupply');
+const ownedDataStoreDefinitions = new Map();
+for (const permission of runtime.permissions) {
+  for (const [prefix, writable] of [
+    // The owner's access is always read/write. The declaration controls what
+    // future cross-application consumers may do.
+    ['datastore-owned:readonly:', true],
+    ['datastore-owned:readwrite:', true]
+  ]) {
+    if (permission.startsWith(prefix) && permission.length > prefix.length)
+      ownedDataStoreDefinitions.set(permission.slice(prefix.length), writable);
+  }
+}
+const dataStoreError = (message, name = 'InvalidStateError') => {
+  if (typeof DOMException === 'function') return new DOMException(message, name);
+  const error = new Error(message); error.name = name; return error;
+};
+const cloneDataStoreValue = value => {
+  if (value === undefined) throw new TypeError('DataStore cannot store undefined');
+  return JSON.parse(JSON.stringify(value));
+};
+const dataStoreKey = id => {
+  if (typeof id === 'number' && Number.isInteger(id) && id >= 0)
+    return `n:${id}`;
+  if (typeof id === 'string') return `s:${id}`;
+  throw new TypeError('DataStore id must be an unsigned integer or string');
+};
+const emptyDataStoreState = () => ({ revision: 0, nextId: 1,
+  records: {}, changes: [] });
+const loadDataStoreState = async name => {
+  const stored = await platformCall('datastore.get', { name });
+  if (!stored.found) return emptyDataStoreState();
+  const state = JSON.parse(stored.value);
+  if (!state || !Number.isSafeInteger(state.revision) ||
+      !Number.isSafeInteger(state.nextId) || !state.records ||
+      !Array.isArray(state.changes))
+    throw dataStoreError('DataStore state is corrupt', 'DataError');
+  return state;
+};
+class OosDataStore {
+  constructor(name, writable) {
+    this.name = name;
+    this.owner = `${globalThis.location.origin}/manifest.webapp`;
+    this.readOnly = !writable;
+    this.onchange = null;
+    this._state = loadDataStoreState(name);
+    this._serial = Promise.resolve();
+    this._revision = 0;
+    eventTarget(this);
+    this._state.then(state => { this._revision = state.revision; });
+  }
+  get revisionId() { return `${runtime.appId}:${this._revision}`; }
+  _checkRevision(revision) {
+    if (revision !== undefined && revision !== null &&
+        String(revision) !== this.revisionId)
+      throw dataStoreError('DataStore revision has changed', 'ConstraintError');
+  }
+  _mutate(operation) {
+    if (this.readOnly)
+      return Promise.reject(dataStoreError('DataStore is read-only',
+        'ReadOnlyError'));
+    const result = this._serial.then(async () => {
+      const state = await this._state;
+      const changed = operation(state);
+      state.revision += 1;
+      this._revision = state.revision;
+      const revisionId = this.revisionId;
+      const change = { revision: state.revision, revisionId,
+        operation: changed.operation, id: changed.id ?? null,
+        data: changed.data };
+      state.changes.push(change);
+      if (state.changes.length > 1024)
+        state.changes.splice(0, state.changes.length - 1024);
+      await platformCall('datastore.set', { name: this.name,
+        value: JSON.stringify(state) });
+      this.dispatchEvent({ type: 'change', target: this, revisionId,
+        operation: change.operation, id: change.id,
+        owner: this.owner });
+      return changed.result;
+    });
+    this._serial = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  async get(...ids) {
+    await this._serial;
+    const state = await this._state;
+    const values = ids.map(id => state.records[dataStoreKey(id)]?.value);
+    return ids.length === 1 ? values[0] : values;
+  }
+  add(value, id, revisionId) {
+    return this._mutate(state => {
+      this._checkRevision(revisionId);
+      if (id === undefined) {
+        while (state.records[`n:${state.nextId}`]) state.nextId += 1;
+        id = state.nextId++;
+      }
+      const key = dataStoreKey(id);
+      if (state.records[key])
+        throw dataStoreError('DataStore id already exists', 'ConstraintError');
+      const data = cloneDataStoreValue(value);
+      state.records[key] = { id, value: data };
+      return { operation: 'add', id, data, result: id };
+    });
+  }
+  put(value, id, revisionId) {
+    return this._mutate(state => {
+      this._checkRevision(revisionId);
+      const key = dataStoreKey(id);
+      const data = cloneDataStoreValue(value);
+      state.records[key] = { id, value: data };
+      return { operation: 'put', id, data, result: id };
+    });
+  }
+  remove(...ids) {
+    if (!ids.length)
+      return Promise.reject(new TypeError('DataStore.remove requires an id'));
+    let revisionId;
+    const candidate = ids.length > 1 ? ids[ids.length - 1] : undefined;
+    const revisionPrefix = `${runtime.appId}:`;
+    if (typeof candidate === 'string' && candidate.startsWith(revisionPrefix) &&
+        /^\d+$/.test(candidate.slice(revisionPrefix.length)))
+      revisionId = ids.pop();
+    return this._mutate(state => {
+      this._checkRevision(revisionId);
+      for (const id of ids) delete state.records[dataStoreKey(id)];
+      return { operation: 'remove', id: ids.length === 1 ? ids[0] : null,
+        result: true };
+    });
+  }
+  clear(revisionId) {
+    return this._mutate(state => {
+      this._checkRevision(revisionId);
+      state.records = {};
+      return { operation: 'clear', id: null, result: undefined };
+    });
+  }
+  async getLength() {
+    await this._serial;
+    return Object.keys((await this._state).records).length;
+  }
+  sync(revisionId) {
+    let index = 0;
+    const tasks = this._serial.then(async () => {
+      const state = await this._state;
+      if (revisionId === undefined || revisionId === null)
+        return Object.values(state.records).map(record => ({
+          operation: 'add', id: record.id,
+          data: cloneDataStoreValue(record.value) }));
+      const prefix = `${runtime.appId}:`;
+      const revision = String(revisionId).startsWith(prefix)
+        ? Number(String(revisionId).slice(prefix.length)) : -1;
+      return state.changes.filter(change => change.revision > revision);
+    });
+    return { next: async () => {
+      const changes = await tasks;
+      return index < changes.length ? changes[index++] : { operation: 'done' };
+    } };
+  }
+}
+const ownedDataStores = new Map();
+const getDataStores = async name => {
+  name = String(name);
+  const writable = ownedDataStoreDefinitions.get(name);
+  if (writable === undefined) return [];
+  if (!ownedDataStores.has(name))
+    ownedDataStores.set(name, new OosDataStore(String(name), writable));
+  return [ownedDataStores.get(name)];
+};
+
+let vibrationSequence = 0;
+define(nav, 'vibrate', pattern => {
+  const token = ++vibrationSequence;
+  const values = (Array.isArray(pattern) ? pattern : [pattern])
+    .slice(0, 128).map(value => Math.min(60000,
+      Math.max(0, Number(value) || 0)));
+  platformCall('vibrator.stop').catch(() => {});
+  let offset = 0;
+  for (let index = 0; index < values.length && offset < 60000; ++index) {
+    const durationMs = Math.min(values[index], 60000 - offset);
+    if (index % 2 === 0 && durationMs > 0)
+      setTimeout(() => {
+        if (token === vibrationSequence)
+          platformCall('vibrator.vibrate', { durationMs }).catch(() => {});
+      }, offset);
+    offset += durationMs;
+  }
+  return true;
+});
+
+let batterySnapshot = null;
+const batteryManager = eventTarget({
+  charging: false, level: 0, chargingTime: Infinity,
+  dischargingTime: Infinity, powerSupplyOnline: false,
+  onchargingchange: null, onlevelchange: null,
+  onpowersupplystatuschanged: null,
+  async refresh() {
+    const previousCharging = this.charging;
+    const previousLevel = this.level;
+    const previousPowerSupply = this.powerSupplyOnline;
+    batterySnapshot = await platformCall('power.battery');
+    this.charging = batterySnapshot.state === 'charging' ||
+      batterySnapshot.state === 'full';
+    this.powerSupplyOnline = !!batterySnapshot.usbOnline;
+    this.level = Math.max(0, Math.min(1,
+      batterySnapshot.capacityPercent / 100));
+    if (this.charging !== previousCharging)
+      this.dispatchEvent({ type: 'chargingchange', target: this });
+    if (this.level !== previousLevel)
+      this.dispatchEvent({ type: 'levelchange', target: this });
+    if (this.powerSupplyOnline !== previousPowerSupply)
+      this.dispatchEvent({ type: 'powersupplystatuschanged', target: this });
+    return this;
   }
 });
-const lock = topic => ({ topic, released: false, unlock() {
-  this.released = true;
-}, release() { this.unlock(); } });
-define(nav, 'requestWakeLock', topic => lock(topic));
-define(nav, 'wakeLock', { request: async topic => lock(topic) });
-define(nav, 'getDeviceStorage', getDeviceStorage);
-define(nav, 'getDeviceStorages', getDeviceStorages);
-define(nav, 'getDataStores', async () => []);
-define(nav, 'getFeature', async () => undefined);
-define(nav, 'hasFeature', async () => false);
-define(nav, 'mozHasPendingMessage', () => false);
-const systemMessageHandlers = new Map();
-define(nav, 'mozSetMessageHandler', (name, callback) => {
-  if (typeof callback === 'function') systemMessageHandlers.set(name, callback);
+define(nav, 'getBattery', () => batteryManager.refresh());
+batteryManager.refresh().catch(() => {});
+
+const wifiManager = eventTarget({
+  enabled: true, connection: { status: 'disconnected', network: null },
+  connectionInformation: { ipAddress: '', signalStrength: 0,
+    relSignalStrength: 0, linkSpeed: 0 },
+  onstatuschange: null, onconnectioninfoupdate: null,
+  getNetworks: () => domRequest(platformCall('wifi.scan').then(networks =>
+    networks.map(network => {
+      const flags = String(network.capabilities || '');
+      const security = /WPA-EAP/i.test(flags) ? ['WPA-EAP']
+        : /WPA/i.test(flags) ? ['WPA-PSK']
+        : /WEP/i.test(flags) ? ['WEP'] : [];
+      return { ...network, signalStrength: network.signalDbm,
+        relSignalStrength: Math.max(0, Math.min(100,
+          2 * (network.signalDbm + 100))), security,
+        capabilities: /WPS/i.test(flags) ? ['WPS'] : [],
+        connected: false, known: false };
+    }))),
+  getKnownNetworks: () => domRequest(platformCall('wifi.networks').then(
+    networks => networks.map(network => ({ ...network, known: true,
+      connected: /CURRENT/i.test(String(network.capabilities || '')) })))),
+  associate: network => domRequest(platformCall('wifi.connect', {
+    ssid: String(network?.ssid || ''),
+    security: /WPA/i.test(String(network?.capabilities ||
+      network?.security?.join?.('') || '')) ? 1 : 0,
+    credential: String(network?.psk || network?.password || '')
+  })),
+  forget: network => domRequest(platformCall('wifi.forget', {
+    networkId: Number(network?.networkId ?? network?.id ?? -1)
+  })),
+  disconnect: () => domRequest(platformCall('wifi.disconnect')),
+  reconnect: () => domRequest(platformCall('wifi.reconnect')),
+  setStaticIpMode: (_network, info) => domRequest(info?.enabled
+    ? platformCall('ip.static', {
+        interfaceName: String(info.ifname || 'wlan0'),
+        address: String(info.ipaddr || ''),
+        prefixLength: Number(info.maskLength || 0),
+        gateway: String(info.gateway || ''),
+        dns1: String(info.dns1 || ''), dns2: String(info.dns2 || '')
+      })
+    : platformCall('ip.dhcp', { timeoutMs: 15000 })),
+  async refresh() {
+    const status = await platformCall('wifi.status');
+    const state = String(status.state).toUpperCase();
+    this.connection.status = state === 'COMPLETED' ? 'connected'
+      : state === 'ASSOCIATING' ? 'connecting'
+      : state === 'ASSOCIATED' ? 'associated' : 'disconnected';
+    this.connection.network = status.ssid ? { ssid: status.ssid,
+      bssid: status.bssid, networkId: status.networkId } : null;
+    this.connectionInformation.ipAddress = status.ipAddress;
+    this.dispatchEvent({ type: 'statuschange', target: this });
+    return status;
+  },
+  getIpConfiguration: () => platformCall('ip.status'),
+  useDhcp: timeoutMs => platformCall('ip.dhcp', { timeoutMs })
 });
-define(nav, 'vibrate', () => false);
+const bluetoothAdapter = eventTarget({
+  state: 'disabled', discovering: false, ondevicefound: null,
+  enable: () => domRequest(platformCall('bluetooth.enable').then(() => {
+    bluetoothAdapter.state = 'enabled'; return true;
+  })),
+  disable: () => domRequest(platformCall('bluetooth.disable').then(() => {
+    bluetoothAdapter.state = 'disabled'; return true;
+  })),
+  startDiscovery: () => domRequest((async () => {
+    bluetoothAdapter.discovering = true;
+    const devices = await platformCall('bluetooth.classic-scan');
+    for (const device of devices)
+      bluetoothAdapter.dispatchEvent({ type: 'devicefound', target:
+        bluetoothAdapter, device });
+    bluetoothAdapter.discovering = false;
+    return devices;
+  })()),
+  stopDiscovery: () => domRequest(Promise.resolve().then(() => {
+    bluetoothAdapter.discovering = false; return true;
+  })),
+  pair: (address, transport = 0) => domRequest(platformCall('bluetooth.pair',
+    { address: String(address), transport: Number(transport) || 0 })),
+  unpair: address => domRequest(platformCall('bluetooth.unpair',
+    { address: String(address) })),
+  cancelPairing: address => domRequest(platformCall('bluetooth.cancel-pairing',
+    { address: String(address) })),
+  leScan: durationMs => platformCall('bluetooth.le-scan', { durationMs })
+});
+const bluetoothManager = eventTarget({ enabled: false,
+  defaultAdapter: bluetoothAdapter, onenabled: null, ondisabled: null });
+
+let cameraCache = [];
+const camerasManager = {
+  getListOfCameras: () => cameraCache.map(camera => camera.id),
+  getCameraInfo: id => cameraCache.find(camera => camera.id === id) || null,
+  refresh: () => platformCall('camera.enumerate').then(cameras => {
+    cameraCache = cameras; return cameras;
+  }),
+  setTorch: (cameraId, enabled) => domRequest(platformCall('camera.set-torch',
+    { cameraId: String(cameraId), enabled: !!enabled }))
+};
+const mobileConnection = eventTarget({
+  radioState: 'unknown', cardState: 'unknown', voice: null, data: null,
+  iccId: null, lastKnownNetwork: null, lastKnownHomeNetwork: null,
+  networkSelectionMode: 'automatic', onvoicechange: null,
+  ondatachange: null, onradiostatechange: null,
+  async refresh() {
+    const snapshot = await platformCall('modem.snapshot');
+    this.radioState = String(snapshot.radioState);
+    this.cardState = String(snapshot.sim.cardState);
+    this.lastKnownNetwork = snapshot.networkOperator.numeric || null;
+    this.lastKnownHomeNetwork = this.lastKnownNetwork;
+    this.voice = { connected: snapshot.voiceRegistration.state === 1,
+      state: snapshot.voiceRegistration.state,
+      type: snapshot.voiceRegistration.radioTechnology,
+      network: snapshot.networkOperator, signalStrength:
+        snapshot.signal.lteStrength };
+    this.data = { connected: snapshot.dataRegistration.state === 1,
+      state: snapshot.dataRegistration.state,
+      type: snapshot.dataRegistration.radioTechnology,
+      network: snapshot.networkOperator, signalStrength:
+        snapshot.signal.lteStrength };
+    this.dispatchEvent({ type: 'voicechange', target: this });
+    this.dispatchEvent({ type: 'datachange', target: this });
+    return snapshot;
+  },
+  setRadioEnabled: enabled => domRequest(platformCall('modem.radio-power',
+    { enabled: !!enabled }))
+});
+let deviceCapabilities = null;
+const getCapabilities = () => deviceCapabilities
+  ? Promise.resolve(deviceCapabilities)
+  : platformCall('device.capabilities').then(capabilities =>
+      deviceCapabilities = capabilities);
+const getFeature = feature => getCapabilities().then(capabilities =>
+  capabilities[String(feature)]);
+const hasFeature = feature => getFeature(feature).then(state =>
+  state === 'implemented' || state === 'validated');
+
+class OosDaemonSession {
+  constructor() { this.connected = false; this.state = null; }
+  open(_transport, _host, _token, state) {
+    this.connected = true;
+    this.state = state || {};
+    defer(() => this.state.onsessionconnected?.());
+  }
+  close() {
+    if (!this.connected) return;
+    this.connected = false;
+    defer(() => this.state?.onsessiondisconnected?.());
+  }
+}
+const deviceCapabilityService = Object.freeze({
+  service_id: 'devicecapability',
+  get: feature => getFeature(feature)
+});
+
 const appRecord = Object.freeze({
-  manifestURL: `${globalThis.location.origin}/manifest.webmanifest`,
+  manifestURL: `${globalThis.location.origin}/manifest.webapp`,
   origin: globalThis.location.origin,
   installOrigin: `${globalThis.location.protocol}//system.localhost${
     globalThis.location.port ? `:${globalThis.location.port}` : ''}`
 });
-define(nav, 'mozApps', makeManager({ getSelf: () => domRequest(appRecord),
-  getInstalled: () => domRequest([appRecord]), mgmt: makeManager() }));
-define(nav, 'mozContacts', makeManager({ find: () => domRequest([]),
-  getAll: () => emptyCursor(), save: () => failedRequest('Contacts.save'),
-  remove: () => failedRequest('Contacts.remove'), clear: () => failedRequest('Contacts.clear') }));
-define(nav, 'mozSettings', makeManager({ createLock: () => makeManager({
-  get: () => domRequest({}), set: () => domRequest(null),
-  clear: () => domRequest(null) }) }));
-define(nav, 'mozPower', makeManager());
-define(nav, 'volumeManager', makeManager({ requestVolume: () => domRequest(null) }));
-define(nav, 'powersupply', makeManager());
-define(nav, 'mozTCPSocket', makeManager({ open: () => null }));
-class OosWebActivity {
-  constructor(name, data = {}) { this.source = { name, data }; this.started = false; }
-  start() {
-    if (this.started) return Promise.reject(notSupported('WebActivity.start'));
-    this.started = true;
-    return Promise.reject(notSupported('WebActivity.start'));
-  }
-  cancel() {}
-}
-define(globalThis, 'WebActivity', OosWebActivity);
-define(globalThis, 'MozActivity', OosWebActivity);
-
-const managers = {
-  alarmManager: makeManager({ add: () => domRequest(null),
-    remove: () => domRequest(null), getAll: () => domRequest([]) }),
-  audioChannelManager: makeManager({ volumeControlChannel: 'normal' }),
-  bluetooth: makeManager({ enabled: false, defaultAdapter: null }),
-  cameras: makeManager({ getListOfCameras: () => [] }),
-  dataCallManager: makeManager(), externalapi: makeManager(),
-  fmRadio: makeManager({ enabled: false, frequency: null }),
-  inputMethod: makeManager(), mobileConnection: makeManager(),
-  virtualCursor: makeManager({ enabled: false }),
-  powerManager: nav.mozPower, settings: nav.mozSettings
-};
 if (runtime.apiProfile === 'kaios-v3') {
-  const b2g = makeManager({ ...managers, getDeviceStorage,
-    getDeviceStorages, AudioChannelClient: makeManager() });
+  define(globalThis, 'lib_session', { Session: OosDaemonSession });
+  define(globalThis, 'lib_devicecapability', {
+    DeviceCapabilityManager: Object.freeze({
+      get: _session => Promise.resolve(deviceCapabilityService)
+    })
+  });
+  const b2g = {};
+  if (storageAllowed) Object.assign(b2g, { getDeviceStorage,
+    getDeviceStorages });
+  if (powerSupplyAllowed) b2g.powerSupplyManager = batteryManager;
+  if (bluetoothAllowed) b2g.bluetooth = bluetoothManager;
+  if (cameraAllowed) b2g.cameras = camerasManager;
+  if (modemAllowed) b2g.mobileConnection = [mobileConnection];
   if (typeof globalThis.AudioContext === 'function')
     b2g.AudioContext = globalThis.AudioContext;
   if (typeof globalThis.HTMLMediaElement === 'function')
     b2g.HTMLMediaElement = globalThis.HTMLMediaElement;
   define(nav, 'b2g', b2g);
 } else {
-  define(nav, 'mozAlarms', managers.alarmManager);
-  define(nav, 'mozAudioChannelManager', managers.audioChannelManager);
-  define(nav, 'mozBluetooth', managers.bluetooth);
-  define(nav, 'mozCameras', managers.cameras);
-  define(nav, 'dataCallManager', managers.dataCallManager);
-  define(nav, 'externalapi', managers.externalapi);
-  define(nav, 'mozFMRadio', managers.fmRadio);
-  define(nav, 'mozInputMethod', managers.inputMethod);
-  define(nav, 'mozMobileConnection', managers.mobileConnection);
-  define(nav, 'spatialNavigationEnabled', false);
+  define(nav, 'getFeature', getFeature);
+  define(nav, 'hasFeature', hasFeature);
+  define(nav, 'mozApps', { getSelf: () => domRequest(appRecord) });
+  if (ownedDataStoreDefinitions.size)
+    define(nav, 'getDataStores', getDataStores);
+  if (storageAllowed) {
+    define(nav, 'getDeviceStorage', getDeviceStorage);
+    define(nav, 'getDeviceStorages', getDeviceStorages);
+  }
+  if (powerAllowed) {
+    define(nav, 'requestWakeLock', makeWakeLock);
+    define(nav, 'mozPower', { requestWakeLock: makeWakeLock });
+  }
+  define(nav, 'mozBattery', batteryManager);
+  if (powerSupplyAllowed) define(nav, 'powersupply', batteryManager);
+  if (wifiAllowed) define(nav, 'mozWifiManager', wifiManager);
+  if (bluetoothAllowed) define(nav, 'mozBluetooth', bluetoothManager);
+  if (cameraAllowed) define(nav, 'mozCameras', camerasManager);
+  if (modemAllowed) {
+    define(nav, 'mozMobileConnection', mobileConnection);
+    define(nav, 'mozMobileConnections', [mobileConnection]);
+  }
 }
 })();
 )JS";
@@ -542,6 +1113,8 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
     request_operation = OOS_DEVICE_API_FREE_SPACE;
   else if (operation->stringValue() == "used-space")
     request_operation = OOS_DEVICE_API_USED_SPACE;
+  else if (operation->stringValue() == "platform")
+    request_operation = OOS_DEVICE_API_PLATFORM_CALL;
   else {
     webkit_script_message_reply_return_error_message(
         reply, "unknown OOS API operation");
@@ -550,10 +1123,13 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
   const char *request_path = "";
   if (request_operation == OOS_DEVICE_API_READ_FILE ||
       request_operation == OOS_DEVICE_API_WRITE_FILE ||
-      request_operation == OOS_DEVICE_API_DELETE_FILE) {
+      request_operation == OOS_DEVICE_API_DELETE_FILE ||
+      request_operation == OOS_DEVICE_API_PLATFORM_CALL) {
     if (!path || !path->isString() || path->stringValue().empty()) {
       webkit_script_message_reply_return_error_message(
-          reply, "device storage path is required");
+          reply, request_operation == OOS_DEVICE_API_PLATFORM_CALL
+                     ? "platform method is required"
+                     : "device storage path is required");
       return TRUE;
     }
     request_path = path->stringValue().c_str();
@@ -562,7 +1138,17 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
   uint16_t request_flags = 0;
   gsize request_payload_size = 0;
   guchar *request_payload = nullptr;
-  if (request_operation == OOS_DEVICE_API_WRITE_FILE) {
+  if (request_operation == OOS_DEVICE_API_PLATFORM_CALL) {
+    if (!data_value || !data_value->isString() ||
+        data_value->stringValue().size() > 256 * 1024) {
+      webkit_script_message_reply_return_error_message(
+          reply, "platform arguments must be a bounded JSON string");
+      return TRUE;
+    }
+    request_payload_size = data_value->stringValue().size();
+    request_payload = reinterpret_cast<guchar *>(
+        g_memdup2(data_value->stringValue().data(), request_payload_size));
+  } else if (request_operation == OOS_DEVICE_API_WRITE_FILE) {
     if (!data_value || !data_value->isString() || !mode || !mode->isString()) {
       webkit_script_message_reply_return_error_message(
           reply, "device storage write data and mode are required");
@@ -589,51 +1175,16 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
     }
   }
 
-  void *payload = nullptr;
-  uint32_t payload_size = 0;
-  const int result = oos_device_api_request_with_payload(
-      bridge->api_fd_, request_operation,
-      static_cast<uint16_t>(volume->integerValue()), request_flags,
-      request_path, request_payload,
-      static_cast<uint32_t>(request_payload_size), &payload, &payload_size,
-      30000);
+  const bool queued = bridge->api_client_ && bridge->api_client_->enqueue(
+      request_operation, static_cast<uint16_t>(volume->integerValue()),
+      request_flags, request_path, request_payload,
+      static_cast<uint32_t>(request_payload_size), message, reply);
   g_free(request_payload);
-  if (result != 0) {
+  if (!queued) {
     webkit_script_message_reply_return_error_message(
-        reply, result < 0 ? std::strerror(-result) : "OOS device API failed");
+        reply, "OOS device API client is busy or shutting down");
     return TRUE;
   }
-
-  char *response = nullptr;
-  if (request_operation == OOS_DEVICE_API_LIST_FILES) {
-    response = static_cast<char *>(g_malloc(payload_size + 1));
-    if (payload_size)
-      std::memcpy(response, payload, payload_size);
-    response[payload_size] = '\0';
-  } else if (request_operation == OOS_DEVICE_API_READ_FILE) {
-    response = reinterpret_cast<char *>(
-        g_base64_encode(static_cast<const guchar *>(payload), payload_size));
-  } else if (request_operation == OOS_DEVICE_API_FREE_SPACE ||
-             request_operation == OOS_DEVICE_API_USED_SPACE) {
-    if (payload_size == sizeof(uint64_t)) {
-      uint64_t bytes = 0;
-      std::memcpy(&bytes, payload, sizeof(bytes));
-      response = g_strdup(std::to_string(bytes).c_str());
-    }
-  } else {
-    response = g_strdup("");
-  }
-  oos_device_api_free(payload);
-  if (!response) {
-    webkit_script_message_reply_return_error_message(reply,
-                                                     "encode OOS API response");
-    return TRUE;
-  }
-  JSCValue *value =
-      jsc_value_new_string(jsc_value_get_context(message), response);
-  g_free(response);
-  webkit_script_message_reply_return_value(reply, value);
-  g_object_unref(value);
   return TRUE;
 }
 

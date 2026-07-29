@@ -13,19 +13,22 @@
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <tuple>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
 #include "oos/apps/zip_archive.h"
+#include "oos/apps/permissions.h"
 #include "oos/device/device.h"
+#include "oos/device/service_provider.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 
 namespace oos::runtime {
 namespace {
+
+using WasmServicePermission = apps::DeviceServicePermission;
 
 constexpr size_t kErrorBufferSize = 512;
 constexpr uint32_t kMaxLogBytes = 4096;
@@ -103,8 +106,11 @@ T *appMutableArray(wasm_exec_env_t environment, uint32_t offset, uint32_t count,
 struct AppHostContext {
   GraphicsHost *graphics = nullptr;
   device::Device *device = nullptr;
+  std::unique_ptr<device::ServiceProvider> *services = nullptr;
   storage::AppStorage *storage = nullptr;
   storage::DeviceStorageService *device_storage = nullptr;
+  uint32_t service_permission_mask = 0;
+  bool enforce_service_permissions = false;
 };
 
 AppHostContext *hostFor(wasm_exec_env_t environment) {
@@ -122,9 +128,68 @@ storage::AppStorage *storageFor(wasm_exec_env_t environment) {
   return host ? host->storage : nullptr;
 }
 
+constexpr uintptr_t kServiceErrorOffsetMask = 0xff;
+constexpr unsigned kServicePermissionShift = 8;
+
+void *serviceAttachment(size_t error_offset,
+                        apps::DeviceServicePermission permission) {
+  return reinterpret_cast<void *>(
+      static_cast<uintptr_t>(error_offset) |
+      (static_cast<uintptr_t>(apps::permissionBit(permission))
+       << kServicePermissionShift));
+}
+
+uint32_t attachedServicePermission(wasm_exec_env_t environment) {
+  return static_cast<uint32_t>(
+      reinterpret_cast<uintptr_t>(
+          wasm_runtime_get_function_attachment(environment)) >>
+      kServicePermissionShift);
+}
+
+bool servicePermissionGranted(wasm_exec_env_t environment,
+                              uint32_t required_permission) {
+  const AppHostContext *host = hostFor(environment);
+  return host &&
+         (!host->enforce_service_permissions || required_permission == 0 ||
+          (host->service_permission_mask & required_permission) != 0);
+}
+
+bool servicePermissionGranted(wasm_exec_env_t environment,
+                              apps::DeviceServicePermission required_permission) {
+  return servicePermissionGranted(environment,
+                                  apps::permissionBit(required_permission));
+}
+
+WitError serviceAccessError(wasm_exec_env_t environment) {
+  const uint32_t permission = attachedServicePermission(environment);
+  return servicePermissionGranted(environment, permission)
+             ? WitError::Unavailable
+             : WitError::PermissionDenied;
+}
+
+WitError deviceStorageAccessError(wasm_exec_env_t environment) {
+  return servicePermissionGranted(environment,
+                                  apps::DeviceServicePermission::DeviceStorage)
+             ? WitError::Unavailable
+             : WitError::PermissionDenied;
+}
+
 storage::DeviceStorageService *deviceStorageFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  return host ? host->device_storage : nullptr;
+  return host && servicePermissionGranted(
+                     environment, apps::DeviceServicePermission::DeviceStorage)
+             ? host->device_storage
+             : nullptr;
+}
+
+device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  if (!host || !host->device || !host->services ||
+      !servicePermissionGranted(environment, attachedServicePermission(environment)))
+    return nullptr;
+  if (!*host->services)
+    *host->services = std::make_unique<device::ServiceProvider>(*host->device);
+  return host->services->get();
 }
 
 void trapInvalidReturnArea(wasm_exec_env_t environment) {
@@ -467,7 +532,9 @@ uint32_t nativeDeviceCapability(wasm_exec_env_t environment, uint32_t feature) {
 
 void writeUnavailable(wasm_exec_env_t environment, uint32_t result_offset) {
   const size_t error_offset = reinterpret_cast<uintptr_t>(
-      wasm_runtime_get_function_attachment(environment));
+                                  wasm_runtime_get_function_attachment(
+                                      environment)) &
+                              kServiceErrorOffsetMask;
   if (error_offset > 64) {
     trapInvalidReturnArea(environment);
     return;
@@ -479,12 +546,7 @@ void writeUnavailable(wasm_exec_env_t environment, uint32_t result_offset) {
     return;
   }
   result[0] = 1;
-  result[error_offset] = static_cast<uint8_t>(WitError::Unavailable);
-}
-
-bool mockHardwareFor(wasm_exec_env_t environment) {
-  const AppHostContext *host = hostFor(environment);
-  return host && host->device && host->device->services().mock_hardware;
+  result[error_offset] = static_cast<uint8_t>(serviceAccessError(environment));
 }
 
 template <typename T>
@@ -492,9 +554,9 @@ void storeCanonical(uint8_t *area, size_t offset, T value) {
   std::memcpy(area + offset, &value, sizeof(value));
 }
 
-uint8_t *mockResultArea(wasm_exec_env_t environment, uint32_t result_offset,
-                        uint32_t size) {
-  if (!mockHardwareFor(environment)) {
+uint8_t *serviceResultArea(wasm_exec_env_t environment, uint32_t result_offset,
+                           uint32_t size) {
+  if (!servicesFor(environment)) {
     writeUnavailable(environment, result_offset);
     return nullptr;
   }
@@ -515,11 +577,26 @@ uint8_t *allocateGuestRecord(wasm_exec_env_t environment, uint32_t size,
       appMutableArray<uint8_t>(environment, pointer, size, 16 * 1024);
   if (!pointer || !record) {
     wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
-                               "failed to allocate WIT mock result");
+                               "failed to allocate WIT service result");
     return nullptr;
   }
   std::memset(record, 0, size);
   return record;
+}
+
+void failServiceResult(uint8_t *result, size_t error_offset,
+                       WitError error = WitError::Io) {
+  result[0] = 1;
+  result[error_offset] = static_cast<uint8_t>(error);
+}
+
+void lowerBattery(const hardware::BatterySnapshot &snapshot, uint8_t *record) {
+  record[0] = static_cast<uint8_t>(snapshot.state);
+  storeCanonical<int32_t>(record, 4, snapshot.capacity_percent);
+  storeCanonical<int32_t>(record, 8, snapshot.voltage_microvolts);
+  storeCanonical<int32_t>(record, 12, snapshot.current_microamps);
+  storeCanonical<int32_t>(record, 16, snapshot.temperature_tenths_celsius);
+  record[20] = snapshot.usb_online;
 }
 
 bool lowerStringAt(wasm_exec_env_t environment, const char *value,
@@ -567,7 +644,7 @@ void nativeDeviceStorageEnumerate(wasm_exec_env_t environment, uint32_t volume,
   storage::DeviceStorageService *service = deviceStorageFor(environment);
   if (!service) {
     result[0] = 1;
-    result[4] = static_cast<uint8_t>(WitError::Unavailable);
+    result[4] = static_cast<uint8_t>(deviceStorageAccessError(environment));
     return;
   }
   if (volume > static_cast<uint32_t>(storage::DeviceStorageVolume::Removable)) {
@@ -636,7 +713,8 @@ void nativeDeviceStorageRead(wasm_exec_env_t environment, uint32_t volume,
   if (!service || !arguments) {
     result[0] = 1;
     result[4] = static_cast<uint8_t>(service ? WitError::InvalidArgument
-                                             : WitError::Unavailable);
+                                             : deviceStorageAccessError(
+                                                   environment));
     return;
   }
   uint64_t native_size = 0;
@@ -694,7 +772,7 @@ void nativeDeviceStorageWrite(wasm_exec_env_t environment, uint32_t volume,
                       static_cast<storage::DeviceStorageWriteMode>(mode),
                       bytes_length ? bytes : nullptr, bytes_length),
               service ? (arguments ? WitError::Io : WitError::InvalidArgument)
-                      : WitError::Unavailable);
+                      : deviceStorageAccessError(environment));
 }
 
 void nativeDeviceStorageDelete(wasm_exec_env_t environment, uint32_t volume,
@@ -720,7 +798,7 @@ void nativeDeviceStorageDelete(wasm_exec_env_t environment, uint32_t volume,
           ? static_cast<uint8_t>(removed)
           : static_cast<uint8_t>(
                 service ? (arguments ? WitError::Io : WitError::InvalidArgument)
-                        : WitError::Unavailable);
+                        : deviceStorageAccessError(environment));
 }
 
 void nativeDeviceStorageSpace(wasm_exec_env_t environment, uint32_t volume,
@@ -750,7 +828,7 @@ void nativeDeviceStorageSpace(wasm_exec_env_t environment, uint32_t volume,
   } else {
     result[8] = static_cast<uint8_t>(
         service ? (arguments ? WitError::Io : WitError::InvalidArgument)
-                : WitError::Unavailable);
+                : deviceStorageAccessError(environment));
   }
 }
 
@@ -1114,306 +1192,849 @@ void nativeStatementFinish(wasm_exec_env_t environment, uint32_t statement,
               app_storage ? WitError::Io : WitError::Unavailable);
 }
 
-template <typename... Args>
-void nativeMockUnit(wasm_exec_env_t environment, Args... arguments) {
-  static_assert(sizeof...(Args) > 0);
-  const auto values = std::make_tuple(arguments...);
-  const uint32_t result_offset =
-      static_cast<uint32_t>(std::get<sizeof...(Args) - 1>(values));
-  if (mockHardwareFor(environment))
-    writeResult(environment, result_offset, true);
-  else
-    writeUnavailable(environment, result_offset);
-}
-
 void nativeServiceMessage(wasm_exec_env_t environment, uint32_t result_offset) {
   uint32_t *result =
       appMutableArray<uint32_t>(environment, result_offset, 2, 2);
-  const char *message = mockHardwareFor(environment) ? "mock service ready"
-                                                     : "service unavailable";
-  if (!result || !lowerString(environment, message, result[0], result[1])) {
+  const bool permission_granted = servicePermissionGranted(
+      environment, attachedServicePermission(environment));
+  device::ServiceProvider *services =
+      permission_granted ? servicesFor(environment) : nullptr;
+  const std::string message =
+      !permission_granted     ? "permission denied"
+      : !services             ? "service unavailable"
+      : services->lastError().empty() ? "service ready"
+                                      : services->lastError();
+  if (!result ||
+      !lowerString(environment, message.c_str(), result[0], result[1])) {
     trapInvalidReturnArea(environment);
   }
 }
 
-void nativeMockAudioPlayTone(wasm_exec_env_t environment, double,
-                             uint32_t duration_ms, float, uint32_t,
-                             uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 32);
+void nativeAudioPlayTone(wasm_exec_env_t environment, double frequency_hz,
+                         uint32_t duration_ms, float volume, uint32_t usage,
+                         uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 32);
   if (!result)
     return;
-  storeCanonical<int32_t>(result, 8, 48000);
-  storeCanonical<int32_t>(result, 12, 2);
-  storeCanonical<int32_t>(result, 16, 1);
-  storeCanonical<int64_t>(result, 24, static_cast<int64_t>(duration_ms) * 48);
-}
-
-void nativeMockAudioRecord(wasm_exec_env_t environment, uint32_t, uint32_t,
-                           uint32_t duration_ms, uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 56);
-  if (!result)
-    return;
-  storeCanonical<int32_t>(result, 8, 16000);
-  storeCanonical<int32_t>(result, 12, 1);
-  storeCanonical<int32_t>(result, 16, 2);
-  storeCanonical<int64_t>(result, 24, static_cast<int64_t>(duration_ms) * 16);
-  storeCanonical<double>(result, 32, 0.5);
-  storeCanonical<double>(result, 40, 0.25);
-  if (!lowerStringAt(environment, "/tmp/oos-local-recording.wav", result, 48))
-    trapInvalidReturnArea(environment);
-}
-
-void nativeMockCameraEnumerate(wasm_exec_env_t environment,
-                               uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 12);
-  if (!result)
-    return;
-  uint32_t pointer = 0;
-  uint8_t *camera = allocateGuestRecord(environment, 32, 4, pointer);
-  if (!camera)
-    return;
-  if (!lowerStringAt(environment, "mock-camera-0", camera, 0)) {
-    trapInvalidReturnArea(environment);
+  device::ServiceProvider *services = servicesFor(environment);
+  hardware::AudioStreamInfo info;
+  if (usage > static_cast<uint32_t>(hardware::AudioUsage::Notification)) {
+    failServiceResult(result, 8, WitError::InvalidArgument);
     return;
   }
-  camera[8] = 2; // back
-  storeCanonical<int32_t>(camera, 12, 90);
-  storeCanonical<int32_t>(camera, 16, 3);
-  camera[20] = 1;
-  storeCanonical<int32_t>(camera, 24, 1920);
-  storeCanonical<int32_t>(camera, 28, 1080);
-  storeCanonical(result, 4, pointer);
-  storeCanonical<uint32_t>(result, 8, 1);
-}
-
-void nativeMockCameraCapture(wasm_exec_env_t environment, uint32_t, uint32_t,
-                             uint32_t, uint32_t, uint32_t width,
-                             uint32_t height, uint32_t, uint32_t,
-                             uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 32);
-  if (!result)
-    return;
-  if (!lowerStringAt(environment, "/tmp/oos-local-photo.jpg", result, 8)) {
-    trapInvalidReturnArea(environment);
+  if (!services->playTone(frequency_hz, static_cast<int>(duration_ms), volume,
+                          static_cast<hardware::AudioUsage>(usage), info)) {
+    failServiceResult(result, 8);
     return;
   }
-  storeCanonical<int32_t>(result, 16, static_cast<int32_t>(width));
-  storeCanonical<int32_t>(result, 20, static_cast<int32_t>(height));
-  storeCanonical<uint64_t>(result, 24, 4096);
+  storeCanonical<int32_t>(result, 8, info.sample_rate);
+  storeCanonical<int32_t>(result, 12, info.channel_count);
+  storeCanonical<int32_t>(result, 16, info.device_id);
+  storeCanonical<int64_t>(result, 24, info.frames_transferred);
 }
 
-void writeMockBattery(wasm_exec_env_t environment, uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 28);
+void nativeAudioRecord(wasm_exec_env_t environment, uint32_t path_offset,
+                       uint32_t path_length, uint32_t duration_ms,
+                       uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 56);
   if (!result)
     return;
-  result[4] = 1; // charging
-  storeCanonical<int32_t>(result, 8, 82);
-  storeCanonical<int32_t>(result, 12, 4'050'000);
-  storeCanonical<int32_t>(result, 16, 350'000);
-  storeCanonical<int32_t>(result, 20, 250);
-  result[24] = 1;
-}
-
-void nativeMockBattery(wasm_exec_env_t environment, uint32_t result_offset) {
-  writeMockBattery(environment, result_offset);
-}
-
-void nativeMockBatteryEvent(wasm_exec_env_t environment, uint32_t,
-                            uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 8);
-  if (result)
-    result[4] = 0; // ok(none)
-}
-
-void nativeMockFlipState(wasm_exec_env_t environment, uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 2);
-  if (result)
-    result[1] = 1; // open
-}
-
-uint32_t nativeMockAmplitude(wasm_exec_env_t environment) {
-  return mockHardwareFor(environment) ? 1 : 0;
-}
-
-void nativeMockWifiStatus(wasm_exec_env_t environment, uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 40);
-  if (!result)
-    return;
-  if (!lowerStringAt(environment, "COMPLETED", result, 4) ||
-      !lowerStringAt(environment, "OOS Mock Network", result, 12) ||
-      !lowerStringAt(environment, "02:00:00:00:00:01", result, 20) ||
-      !lowerStringAt(environment, "192.0.2.2", result, 28)) {
-    trapInvalidReturnArea(environment);
+  std::string path;
+  if (!guestString(environment, path_offset, path_length, path, 4096)) {
+    failServiceResult(result, 8, WitError::InvalidArgument);
     return;
   }
-  storeCanonical<int32_t>(result, 36, 1);
-}
-
-void nativeMockWifiScan(wasm_exec_env_t environment, uint32_t,
-                        uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 12);
-  if (!result)
-    return;
-  uint32_t pointer = 0;
-  uint8_t *access_point = allocateGuestRecord(environment, 32, 4, pointer);
-  if (!access_point)
-    return;
-  if (!lowerStringAt(environment, "02:00:00:00:00:01", access_point, 0) ||
-      !lowerStringAt(environment, "[WPA2-PSK-CCMP][ESS]", access_point, 16) ||
-      !lowerStringAt(environment, "OOS Mock Network", access_point, 24)) {
-    trapInvalidReturnArea(environment);
+  hardware::RecordingResult recording;
+  if (!servicesFor(environment)->recordWav(path, static_cast<int>(duration_ms),
+                                           recording)) {
+    failServiceResult(result, 8);
     return;
   }
-  storeCanonical<int32_t>(access_point, 8, 2412);
-  storeCanonical<int32_t>(access_point, 12, -42);
-  storeCanonical(result, 4, pointer);
-  storeCanonical<uint32_t>(result, 8, 1);
-}
-
-void nativeMockWifiNetworks(wasm_exec_env_t environment,
-                            uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 12);
-  if (!result)
-    return;
-  uint32_t pointer = 0;
-  uint8_t *network = allocateGuestRecord(environment, 28, 4, pointer);
-  if (!network)
-    return;
-  storeCanonical<int32_t>(network, 0, 1);
-  if (!lowerStringAt(environment, "OOS Mock Network", network, 4) ||
-      !lowerStringAt(environment, "02:00:00:00:00:01", network, 12) ||
-      !lowerStringAt(environment, "[CURRENT]", network, 20)) {
+  storeCanonical<int32_t>(result, 8, recording.stream.sample_rate);
+  storeCanonical<int32_t>(result, 12, recording.stream.channel_count);
+  storeCanonical<int32_t>(result, 16, recording.stream.device_id);
+  storeCanonical<int64_t>(result, 24, recording.stream.frames_transferred);
+  storeCanonical<double>(result, 32, recording.peak);
+  storeCanonical<double>(result, 40, recording.rms);
+  if (!lowerStringAt(environment, recording.path.c_str(), result, 48))
     trapInvalidReturnArea(environment);
-    return;
-  }
-  storeCanonical(result, 4, pointer);
-  storeCanonical<uint32_t>(result, 8, 1);
 }
 
-void nativeMockWifiConnect(wasm_exec_env_t environment, uint32_t, uint32_t,
-                           uint32_t, uint32_t, uint32_t,
+void nativeCameraEnumerate(wasm_exec_env_t environment,
                            uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 8);
-  if (result)
-    storeCanonical<int32_t>(result, 4, 1);
-}
-
-void nativeMockIpStatus(wasm_exec_env_t environment, uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 48);
+  uint8_t *result = serviceResultArea(environment, result_offset, 12);
   if (!result)
     return;
-  if (!lowerStringAt(environment, "wlan0", result, 4) ||
-      !lowerStringAt(environment, "192.0.2.2", result, 12) ||
-      !lowerStringAt(environment, "192.0.2.1", result, 24) ||
-      !lowerStringAt(environment, "192.0.2.53", result, 32) ||
-      !lowerStringAt(environment, "198.51.100.53", result, 40)) {
-    trapInvalidReturnArea(environment);
+  std::vector<hardware::CameraInfo> cameras;
+  if (!servicesFor(environment)->enumerateCameras(cameras) ||
+      cameras.size() > 32) {
+    failServiceResult(result, 4);
     return;
   }
-  storeCanonical<uint32_t>(result, 20, 24);
-}
-
-void nativeMockBluetoothScan(wasm_exec_env_t environment, uint32_t,
-                             uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 12);
-  if (!result)
-    return;
-  uint32_t pointer = 0;
-  uint8_t *device = allocateGuestRecord(environment, 36, 4, pointer);
-  if (!device)
-    return;
-  if (!lowerStringAt(environment, "02:00:00:00:00:02", device, 0) ||
-      !lowerStringAt(environment, "OOS Mock Headset", device, 8)) {
-    trapInvalidReturnArea(environment);
-    return;
+  const uint32_t count = static_cast<uint32_t>(cameras.size());
+  uint32_t pointer = 4;
+  uint8_t *records = reinterpret_cast<uint8_t *>(1);
+  if (count) {
+    records = allocateGuestRecord(environment, count * 32, 4, pointer);
+    if (!records)
+      return;
   }
-  storeCanonical<int32_t>(device, 16, -38);
-  storeCanonical<uint32_t>(device, 20, 0x240404);
-  storeCanonical<int32_t>(device, 24, 3);
-  storeCanonical<uint32_t>(device, 28, 1);
-  storeCanonical<uint32_t>(device, 32, 0);
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *camera = records + index * 32;
+    if (!lowerStringAt(environment, cameras[index].id.c_str(), camera, 0)) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+    camera[8] = static_cast<uint8_t>(cameras[index].facing);
+    storeCanonical<int32_t>(camera, 12, cameras[index].sensor_orientation);
+    storeCanonical<int32_t>(camera, 16, cameras[index].hardware_level);
+    camera[20] = cameras[index].flash_available;
+    storeCanonical<int32_t>(camera, 24, cameras[index].max_jpeg_width);
+    storeCanonical<int32_t>(camera, 28, cameras[index].max_jpeg_height);
+  }
   storeCanonical(result, 4, pointer);
-  storeCanonical<uint32_t>(result, 8, 1);
+  storeCanonical(result, 8, count);
 }
 
-void nativeMockModemSnapshot(wasm_exec_env_t environment, uint32_t,
-                             uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 216);
-  if (!result)
-    return;
-  uint8_t *snapshot = result + 4;
-  snapshot[0] = 1;
-  storeCanonical<int32_t>(snapshot, 4, 1);
-  if (!lowerStringAt(environment, "OOS-MOCK-1.0", snapshot, 8) ||
-      !lowerStringAt(environment, "000000000000000", snapshot, 16) ||
-      !lowerStringAt(environment, "00", snapshot, 24) ||
-      !lowerStringAt(environment, "00000000", snapshot, 32) ||
-      !lowerStringAt(environment, "00000000000000", snapshot, 40) ||
-      !lowerStringAt(environment, "OOS Mock Carrier", snapshot, 148) ||
-      !lowerStringAt(environment, "OOS", snapshot, 156) ||
-      !lowerStringAt(environment, "00101", snapshot, 164) ||
-      !lowerStringAt(environment, "00000000-0000-0000-0000-000000000001",
-                     snapshot, 196)) {
-    trapInvalidReturnArea(environment);
-    return;
-  }
-  storeCanonical<int32_t>(snapshot, 48, 1);
-  storeCanonical<int32_t>(snapshot, 52, 0);
-  storeCanonical<int32_t>(snapshot, 56, 1);
-  storeCanonical<int32_t>(snapshot, 60, 20);
-  storeCanonical<int32_t>(snapshot, 64, 0);
-  storeCanonical<int32_t>(snapshot, 88, 30);
-  storeCanonical<int32_t>(snapshot, 92, -95);
-  storeCanonical<int32_t>(snapshot, 96, -10);
-  storeCanonical<int32_t>(snapshot, 100, 45);
-  storeCanonical<int32_t>(snapshot, 104, 12);
-  storeCanonical<int32_t>(snapshot, 116, 1);
-  storeCanonical<int32_t>(snapshot, 120, 14);
-  storeCanonical<int32_t>(snapshot, 128, 1);
-  storeCanonical<int32_t>(snapshot, 132, 1);
-  storeCanonical<int32_t>(snapshot, 136, 14);
-  storeCanonical<int32_t>(snapshot, 144, 1);
-  storeCanonical<int32_t>(snapshot, 172, 9);
-  storeCanonical<int32_t>(snapshot, 176, 14);
-  storeCanonical<int32_t>(snapshot, 180, 0);
-  storeCanonical<int32_t>(snapshot, 184, 0);
-  storeCanonical<int32_t>(snapshot, 188, 1);
-  storeCanonical<uint32_t>(snapshot, 192, 0x1000);
-  storeCanonical<uint32_t>(snapshot, 204, 1);
-  storeCanonical<uint32_t>(snapshot, 208, 0);
-}
-
-void nativeMockRadioPower(wasm_exec_env_t environment, uint32_t, uint32_t,
+void nativeCameraSetTorch(wasm_exec_env_t environment, uint32_t id_offset,
+                          uint32_t id_length, uint32_t enabled,
                           uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 20);
-  if (!result)
-    return;
-  if (!lowerStringAt(environment, "set-radio-power", result, 4)) {
-    trapInvalidReturnArea(environment);
-    return;
-  }
-  storeCanonical<int32_t>(result, 12, 0);
-  result[16] = 0;
+  std::string id;
+  const bool arguments = guestString(environment, id_offset, id_length, id, 128);
+  writeResult(environment, result_offset,
+              arguments && servicesFor(environment) &&
+                  servicesFor(environment)->setTorch(id, enabled != 0),
+              !servicesFor(environment) ? serviceAccessError(environment)
+              : arguments               ? WitError::Io
+                                        : WitError::InvalidArgument);
 }
 
-void nativeMockCodec(wasm_exec_env_t environment, uint32_t width,
-                     uint32_t height, uint32_t frame_count, uint32_t,
-                     uint32_t result_offset) {
-  uint8_t *result = mockResultArea(environment, result_offset, 56);
+void nativeCameraCapture(wasm_exec_env_t environment, uint32_t id_offset,
+                         uint32_t id_length, uint32_t path_offset,
+                         uint32_t path_length, uint32_t width, uint32_t height,
+                         uint32_t flash, uint32_t timeout_ms,
+                         uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 32);
   if (!result)
     return;
-  if (!lowerStringAt(environment, "mock.h264.encoder", result, 8) ||
-      !lowerStringAt(environment, "mock.h264.decoder", result, 16)) {
+  std::string id;
+  std::string path;
+  if (!guestString(environment, id_offset, id_length, id, 128) ||
+      !guestString(environment, path_offset, path_length, path, 4096)) {
+    failServiceResult(result, 8, WitError::InvalidArgument);
+    return;
+  }
+  hardware::PhotoResult photo;
+  if (!servicesFor(environment)->captureJpeg(
+          id, path, photo, static_cast<int>(width), static_cast<int>(height),
+          flash != 0, static_cast<int>(timeout_ms))) {
+    failServiceResult(result, 8);
+    return;
+  }
+  if (!lowerStringAt(environment, photo.path.c_str(), result, 8)) {
     trapInvalidReturnArea(environment);
     return;
   }
-  storeCanonical<int32_t>(result, 28, static_cast<int32_t>(width));
-  storeCanonical<int32_t>(result, 32, static_cast<int32_t>(height));
-  storeCanonical<int32_t>(result, 36, static_cast<int32_t>(frame_count));
-  storeCanonical<int32_t>(result, 40, static_cast<int32_t>(frame_count));
-  storeCanonical<int32_t>(result, 44, static_cast<int32_t>(frame_count));
-  storeCanonical<uint64_t>(result, 48,
-                           static_cast<uint64_t>(frame_count) * 1024);
+  storeCanonical<int32_t>(result, 16, photo.width);
+  storeCanonical<int32_t>(result, 20, photo.height);
+  storeCanonical<uint64_t>(result, 24, photo.byte_count);
+}
+
+void nativeBattery(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 28);
+  if (!result)
+    return;
+  hardware::BatterySnapshot snapshot;
+  if (!servicesFor(environment)->queryBattery(snapshot)) {
+    failServiceResult(result, 4);
+    return;
+  }
+  lowerBattery(snapshot, result + 4);
+}
+
+void nativeBatteryEvent(wasm_exec_env_t environment, uint32_t timeout_ms,
+                        uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 32);
+  if (!result)
+    return;
+  hardware::BatterySnapshot snapshot;
+  const int changed = servicesFor(environment)->waitForBatteryEvent(
+      static_cast<int>(timeout_ms), snapshot);
+  if (changed < 0) {
+    failServiceResult(result, 4);
+  } else if (changed > 0) {
+    result[4] = 1;
+    lowerBattery(snapshot, result + 8);
+  }
+}
+
+void nativePowerSetInteractive(wasm_exec_env_t environment, uint32_t enabled,
+                               uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->setInteractive(enabled != 0),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativePowerAcquireWakeLock(wasm_exec_env_t environment,
+                                uint32_t name_offset, uint32_t name_length,
+                                uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  std::string name;
+  const bool arguments =
+      guestString(environment, name_offset, name_length, name, 128);
+  writeResult(environment, result_offset,
+              services && arguments && services->acquireWakeLock(name),
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
+}
+
+void nativePowerReleaseWakeLock(wasm_exec_env_t environment,
+                                uint32_t name_offset, uint32_t name_length,
+                                uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  std::string name;
+  const bool arguments =
+      guestString(environment, name_offset, name_length, name, 128);
+  writeResult(environment, result_offset,
+              services && arguments && services->releaseWakeLock(name),
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
+}
+
+void nativePowerEnableAutoSuspend(wasm_exec_env_t environment,
+                                  uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->enableAutoSuspend(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativePowerDisableAutoSuspend(wasm_exec_env_t environment,
+                                   uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->disableAutoSuspend(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativePowerScheduleRtcWake(wasm_exec_env_t environment,
+                                uint32_t delay_seconds,
+                                uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->scheduleRtcWake(delay_seconds),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativePowerClearRtcWake(wasm_exec_env_t environment,
+                             uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->clearRtcWake(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativePowerSuspend(wasm_exec_env_t environment, uint32_t timeout_ms,
+                        uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->suspend(timeout_ms),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeFlipState(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 2);
+  if (result)
+    result[1] = static_cast<uint8_t>(servicesFor(environment)->queryFlipState());
+}
+
+void nativeVibrate(wasm_exec_env_t environment, uint32_t duration_ms,
+                   uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->vibrate(duration_ms),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeVibrationStop(wasm_exec_env_t environment, uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->stopVibration(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+uint32_t nativeAmplitudeControl(wasm_exec_env_t environment) {
+  device::ServiceProvider *services = servicesFor(environment);
+  return services && services->supportsAmplitudeControl();
+}
+
+void nativeVibrationSetAmplitude(wasm_exec_env_t environment,
+                                 uint32_t amplitude,
+                                 uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && amplitude <= 255 &&
+                  services->setVibrationAmplitude(amplitude),
+              !services      ? serviceAccessError(environment)
+              : amplitude > 255 ? WitError::InvalidArgument
+                                : WitError::Io);
+}
+
+void nativeWifiStatus(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 40);
+  if (!result)
+    return;
+  network::WifiStatus status;
+  if (!servicesFor(environment)->wifiStatus(status)) {
+    failServiceResult(result, 4);
+    return;
+  }
+  if (!lowerStringAt(environment, status.state.c_str(), result, 4) ||
+      !lowerStringAt(environment, status.ssid.c_str(), result, 12) ||
+      !lowerStringAt(environment, status.bssid.c_str(), result, 20) ||
+      !lowerStringAt(environment, status.ip_address.c_str(), result, 28)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(result, 36, status.network_id);
+}
+
+void nativeWifiScan(wasm_exec_env_t environment, uint32_t wait_ms,
+                    uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  std::vector<network::WifiAccessPoint> access_points;
+  if (!servicesFor(environment)->wifiScan(access_points,
+                                          static_cast<int>(wait_ms)) ||
+      access_points.size() > 256) {
+    failServiceResult(result, 4);
+    return;
+  }
+  const uint32_t count = static_cast<uint32_t>(access_points.size());
+  uint32_t pointer = 4;
+  uint8_t *records = reinterpret_cast<uint8_t *>(1);
+  if (count) {
+    records = allocateGuestRecord(environment, count * 32, 4, pointer);
+    if (!records)
+      return;
+  }
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *access_point = records + index * 32;
+    if (!lowerStringAt(environment, access_points[index].bssid.c_str(),
+                       access_point, 0) ||
+        !lowerStringAt(environment, access_points[index].flags.c_str(),
+                       access_point, 16) ||
+        !lowerStringAt(environment, access_points[index].ssid.c_str(),
+                       access_point, 24)) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+    storeCanonical<int32_t>(access_point, 8,
+                            access_points[index].frequency_mhz);
+    storeCanonical<int32_t>(access_point, 12,
+                            access_points[index].signal_dbm);
+  }
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, count);
+}
+
+void nativeWifiNetworks(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  std::vector<network::WifiNetwork> networks;
+  if (!servicesFor(environment)->wifiListNetworks(networks) ||
+      networks.size() > 256) {
+    failServiceResult(result, 4);
+    return;
+  }
+  const uint32_t count = static_cast<uint32_t>(networks.size());
+  uint32_t pointer = 4;
+  uint8_t *records = reinterpret_cast<uint8_t *>(1);
+  if (count) {
+    records = allocateGuestRecord(environment, count * 28, 4, pointer);
+    if (!records)
+      return;
+  }
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *network = records + index * 28;
+    storeCanonical<int32_t>(network, 0, networks[index].id);
+    if (!lowerStringAt(environment, networks[index].ssid.c_str(), network, 4) ||
+        !lowerStringAt(environment, networks[index].bssid.c_str(), network,
+                       12) ||
+        !lowerStringAt(environment, networks[index].flags.c_str(), network,
+                       20)) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+  }
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, count);
+}
+
+void nativeWifiConnect(wasm_exec_env_t environment, uint32_t ssid_offset,
+                       uint32_t ssid_length, uint32_t security,
+                       uint32_t credential_offset, uint32_t credential_length,
+                       uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 8);
+  if (!result)
+    return;
+  std::string ssid;
+  std::string credential;
+  if (security > static_cast<uint32_t>(network::WifiSecurity::WpaPsk) ||
+      !guestString(environment, ssid_offset, ssid_length, ssid, 32) ||
+      !guestString(environment, credential_offset, credential_length,
+                   credential, 64)) {
+    failServiceResult(result, 4, WitError::InvalidArgument);
+    return;
+  }
+  int network_id = -1;
+  if (!servicesFor(environment)->wifiConnect(
+          ssid, static_cast<network::WifiSecurity>(security), credential,
+          network_id)) {
+    failServiceResult(result, 4);
+    return;
+  }
+  storeCanonical<int32_t>(result, 4, network_id);
+}
+
+void nativeWifiDisconnect(wasm_exec_env_t environment, uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->wifiDisconnect(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeWifiReconnect(wasm_exec_env_t environment, uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->wifiReconnect(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeWifiForget(wasm_exec_env_t environment, uint32_t network_id,
+                      uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->wifiForget(static_cast<int>(network_id)),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeWifiSaveConfiguration(wasm_exec_env_t environment,
+                                 uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->wifiSaveConfiguration(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeIpStatus(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 48);
+  if (!result)
+    return;
+  network::IpConfiguration configuration;
+  if (!servicesFor(environment)->ipStatus(configuration)) {
+    failServiceResult(result, 4);
+    return;
+  }
+  if (!lowerStringAt(environment, configuration.interface_name.c_str(), result,
+                     4) ||
+      !lowerStringAt(environment, configuration.address.c_str(), result, 12) ||
+      !lowerStringAt(environment, configuration.gateway.c_str(), result, 24) ||
+      !lowerStringAt(environment, configuration.dns1.c_str(), result, 32) ||
+      !lowerStringAt(environment, configuration.dns2.c_str(), result, 40)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<uint32_t>(result, 20, configuration.prefix_length);
+}
+
+void nativeIpUseDhcp(wasm_exec_env_t environment, uint32_t timeout_ms,
+                     uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->ipUseDhcp(static_cast<int>(timeout_ms)),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeIpUseStatic(wasm_exec_env_t environment,
+                       uint32_t interface_offset, uint32_t interface_length,
+                       uint32_t address_offset, uint32_t address_length,
+                       uint32_t prefix_length, uint32_t gateway_offset,
+                       uint32_t gateway_length, uint32_t dns1_offset,
+                       uint32_t dns1_length, uint32_t dns2_offset,
+                       uint32_t dns2_length, uint32_t result_offset) {
+  network::IpConfiguration configuration;
+  configuration.prefix_length = prefix_length;
+  const bool arguments =
+      guestString(environment, interface_offset, interface_length,
+                  configuration.interface_name, 64) &&
+      guestString(environment, address_offset, address_length,
+                  configuration.address, 64) &&
+      guestString(environment, gateway_offset, gateway_length,
+                  configuration.gateway, 64) &&
+      guestString(environment, dns1_offset, dns1_length, configuration.dns1,
+                  64) &&
+      guestString(environment, dns2_offset, dns2_length, configuration.dns2,
+                  64);
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && arguments && services->ipUseStatic(configuration),
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
+}
+
+void lowerBluetoothScan(wasm_exec_env_t environment, uint32_t duration_ms,
+                        uint32_t result_offset, bool low_energy) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 12);
+  if (!result)
+    return;
+  std::vector<network::BluetoothDevice> devices;
+  const bool success =
+      low_energy
+          ? servicesFor(environment)->bluetoothLeScan(
+                devices, static_cast<int>(duration_ms))
+          : servicesFor(environment)->bluetoothClassicScan(
+                devices, static_cast<int>(duration_ms));
+  if (!success || devices.size() > 256) {
+    failServiceResult(result, 4);
+    return;
+  }
+  const uint32_t count = static_cast<uint32_t>(devices.size());
+  uint32_t pointer = 4;
+  uint8_t *records = reinterpret_cast<uint8_t *>(1);
+  if (count) {
+    records = allocateGuestRecord(environment, count * 36, 4, pointer);
+    if (!records)
+      return;
+  }
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *record = records + index * 36;
+    if (!lowerStringAt(environment, devices[index].address.c_str(), record, 0) ||
+        !lowerStringAt(environment, devices[index].name.c_str(), record, 8)) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+    storeCanonical<int32_t>(record, 16, devices[index].rssi);
+    storeCanonical<uint32_t>(record, 20, devices[index].device_class);
+    storeCanonical<int32_t>(record, 24, devices[index].device_type);
+    uint32_t advertising_pointer = 1;
+    if (!devices[index].advertising_data.empty()) {
+      advertising_pointer = guestRealloc(
+          environment, 0, 0, 1,
+          static_cast<uint32_t>(devices[index].advertising_data.size()));
+      uint8_t *advertising = appMutableArray<uint8_t>(
+          environment, advertising_pointer,
+          static_cast<uint32_t>(devices[index].advertising_data.size()), 65536);
+      if (!advertising_pointer || !advertising) {
+        trapInvalidReturnArea(environment);
+        return;
+      }
+      std::memcpy(advertising, devices[index].advertising_data.data(),
+                  devices[index].advertising_data.size());
+    }
+    storeCanonical(record, 28, advertising_pointer);
+    storeCanonical<uint32_t>(
+        record, 32,
+        static_cast<uint32_t>(devices[index].advertising_data.size()));
+  }
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, count);
+}
+
+void nativeBluetoothClassicScan(wasm_exec_env_t environment,
+                                uint32_t duration_ms,
+                                uint32_t result_offset) {
+  lowerBluetoothScan(environment, duration_ms, result_offset, false);
+}
+
+void nativeBluetoothLeScan(wasm_exec_env_t environment, uint32_t duration_ms,
+                           uint32_t result_offset) {
+  lowerBluetoothScan(environment, duration_ms, result_offset, true);
+}
+
+void nativeBluetoothEnable(wasm_exec_env_t environment, uint32_t timeout_ms,
+                           uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->bluetoothEnable(timeout_ms),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeBluetoothDisable(wasm_exec_env_t environment, uint32_t timeout_ms,
+                            uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->bluetoothDisable(timeout_ms),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeBluetoothPair(wasm_exec_env_t environment, uint32_t address_offset,
+                         uint32_t address_length, uint32_t transport,
+                         uint32_t result_offset) {
+  std::string address;
+  const bool arguments =
+      guestString(environment, address_offset, address_length, address, 32) &&
+      transport <= static_cast<uint32_t>(network::BluetoothTransport::LowEnergy);
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(
+      environment, result_offset,
+      services && arguments &&
+          services->bluetoothPair(
+              address, static_cast<network::BluetoothTransport>(transport)),
+      !services   ? serviceAccessError(environment)
+      : arguments ? WitError::Io
+                  : WitError::InvalidArgument);
+}
+
+void nativeBluetoothUnpair(wasm_exec_env_t environment,
+                           uint32_t address_offset, uint32_t address_length,
+                           uint32_t result_offset) {
+  std::string address;
+  const bool arguments =
+      guestString(environment, address_offset, address_length, address, 32);
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && arguments && services->bluetoothUnpair(address),
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
+}
+
+void nativeBluetoothCancelPairing(wasm_exec_env_t environment,
+                                  uint32_t address_offset,
+                                  uint32_t address_length,
+                                  uint32_t result_offset) {
+  std::string address;
+  const bool arguments =
+      guestString(environment, address_offset, address_length, address, 32);
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(
+      environment, result_offset,
+      services && arguments && services->bluetoothCancelPairing(address),
+      !services   ? serviceAccessError(environment)
+      : arguments ? WitError::Io
+                  : WitError::InvalidArgument);
+}
+
+void nativeBluetoothProfile(wasm_exec_env_t environment,
+                            uint32_t address_offset, uint32_t address_length,
+                            uint32_t profile, uint32_t result_offset,
+                            bool connect) {
+  std::string address;
+  const bool arguments =
+      guestString(environment, address_offset, address_length, address, 32) &&
+      profile <= 2;
+  device::ServiceProvider *services = servicesFor(environment);
+  const auto native_profile = static_cast<network::BluetoothProfile>(
+      profile == 0 ? 0x03 : profile == 1 ? 0x05 : 0x06);
+  const bool success =
+      services && arguments &&
+      (connect ? services->bluetoothProfileConnect(address, native_profile)
+               : services->bluetoothProfileDisconnect(address, native_profile));
+  writeResult(environment, result_offset, success,
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
+}
+
+void nativeBluetoothProfileConnect(wasm_exec_env_t environment,
+                                   uint32_t address_offset,
+                                   uint32_t address_length, uint32_t profile,
+                                   uint32_t result_offset) {
+  nativeBluetoothProfile(environment, address_offset, address_length, profile,
+                         result_offset, true);
+}
+
+void nativeBluetoothProfileDisconnect(wasm_exec_env_t environment,
+                                      uint32_t address_offset,
+                                      uint32_t address_length,
+                                      uint32_t profile,
+                                      uint32_t result_offset) {
+  nativeBluetoothProfile(environment, address_offset, address_length, profile,
+                         result_offset, false);
+}
+
+void nativeBluetoothProfileCycle(wasm_exec_env_t environment,
+                                 uint32_t address_offset,
+                                 uint32_t address_length, uint32_t profile,
+                                 uint32_t hold_ms, uint32_t result_offset) {
+  std::string address;
+  const bool arguments =
+      guestString(environment, address_offset, address_length, address, 32) &&
+      profile <= 2;
+  device::ServiceProvider *services = servicesFor(environment);
+  const auto native_profile = static_cast<network::BluetoothProfile>(
+      profile == 0 ? 0x03 : profile == 1 ? 0x05 : 0x06);
+  writeResult(
+      environment, result_offset,
+      services && arguments && services->bluetoothProfileConnectionCycle(
+                                  address, native_profile, hold_ms),
+      !services   ? serviceAccessError(environment)
+      : arguments ? WitError::Io
+                  : WitError::InvalidArgument);
+}
+
+void nativeBluetoothLeCycle(wasm_exec_env_t environment,
+                            uint32_t address_offset, uint32_t address_length,
+                            uint32_t hold_ms, uint32_t timeout_ms,
+                            uint32_t result_offset) {
+  std::string address;
+  const bool arguments =
+      guestString(environment, address_offset, address_length, address, 32);
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(
+      environment, result_offset,
+      services && arguments && services->bluetoothLeConnectionCycle(
+                                  address, hold_ms, timeout_ms),
+      !services   ? serviceAccessError(environment)
+      : arguments ? WitError::Io
+                  : WitError::InvalidArgument);
+}
+
+void nativeModemSnapshot(wasm_exec_env_t environment, uint32_t timeout_ms,
+                         uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 216);
+  if (!result)
+    return;
+  modem::ModemSnapshot value;
+  if (!servicesFor(environment)->modemSnapshot(value, timeout_ms) ||
+      value.requests.size() > 256) {
+    failServiceResult(result, 4);
+    return;
+  }
+  uint8_t *snapshot = result + 4;
+  snapshot[0] = value.service_connected;
+  storeCanonical<int32_t>(snapshot, 4, value.radio_state);
+  if (!lowerStringAt(environment, value.baseband_version.c_str(), snapshot, 8) ||
+      !lowerStringAt(environment, value.identity.imei.c_str(), snapshot, 16) ||
+      !lowerStringAt(environment, value.identity.imei_software_version.c_str(),
+                     snapshot, 24) ||
+      !lowerStringAt(environment, value.identity.esn.c_str(), snapshot, 32) ||
+      !lowerStringAt(environment, value.identity.meid.c_str(), snapshot, 40) ||
+      !lowerStringAt(environment, value.network_operator.long_name.c_str(),
+                     snapshot, 148) ||
+      !lowerStringAt(environment, value.network_operator.short_name.c_str(),
+                     snapshot, 156) ||
+      !lowerStringAt(environment, value.network_operator.numeric.c_str(),
+                     snapshot, 164) ||
+      !lowerStringAt(environment, value.logical_modem_uuid.c_str(), snapshot,
+                     196)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(snapshot, 48, value.sim.card_state);
+  storeCanonical<int32_t>(snapshot, 52, value.sim.universal_pin_state);
+  storeCanonical<int32_t>(snapshot, 56, value.sim.application_count);
+  const int signal[] = {
+      value.signal.gsm_strength,
+      value.signal.gsm_bit_error_rate,
+      value.signal.cdma_dbm,
+      value.signal.cdma_ecio,
+      value.signal.evdo_dbm,
+      value.signal.evdo_ecio,
+      value.signal.evdo_snr,
+      value.signal.lte_strength,
+      value.signal.lte_rsrp,
+      value.signal.lte_rsrq,
+      value.signal.lte_rssnr,
+      value.signal.lte_cqi,
+      value.signal.lte_timing_advance,
+      value.signal.tdscdma_rscp,
+  };
+  for (size_t index = 0; index < std::size(signal); ++index)
+    storeCanonical<int32_t>(snapshot, 60 + index * 4, signal[index]);
+  const modem::RegistrationStatus registrations[] = {
+      value.voice_registration, value.data_registration};
+  for (size_t index = 0; index < std::size(registrations); ++index) {
+    const size_t offset = 116 + index * 16;
+    storeCanonical<int32_t>(snapshot, offset, registrations[index].state);
+    storeCanonical<int32_t>(snapshot, offset + 4,
+                            registrations[index].radio_technology);
+    storeCanonical<int32_t>(snapshot, offset + 8,
+                            registrations[index].denial_reason);
+    storeCanonical<int32_t>(snapshot, offset + 12,
+                            registrations[index].max_data_calls);
+  }
+  storeCanonical<int32_t>(snapshot, 172, value.preferred_network_type);
+  storeCanonical<int32_t>(snapshot, 176, value.voice_radio_technology);
+  storeCanonical<int32_t>(snapshot, 180, value.current_call_count);
+  storeCanonical<int32_t>(snapshot, 184, value.data_call_count);
+  storeCanonical<int32_t>(snapshot, 188, value.hardware_config_count);
+  storeCanonical<uint32_t>(snapshot, 192, value.radio_access_family);
+  const uint32_t request_count = static_cast<uint32_t>(value.requests.size());
+  uint32_t request_pointer = 4;
+  uint8_t *requests = reinterpret_cast<uint8_t *>(1);
+  if (request_count) {
+    requests =
+        allocateGuestRecord(environment, request_count * 16, 4, request_pointer);
+    if (!requests)
+      return;
+  }
+  for (uint32_t index = 0; index < request_count; ++index) {
+    uint8_t *record = requests + index * 16;
+    if (!lowerStringAt(environment, value.requests[index].operation.c_str(),
+                       record, 0)) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+    storeCanonical<int32_t>(record, 8, value.requests[index].error);
+    record[12] = value.requests[index].timed_out;
+  }
+  storeCanonical(snapshot, 204, request_pointer);
+  storeCanonical(snapshot, 208, request_count);
+}
+
+void nativeRadioPower(wasm_exec_env_t environment, uint32_t enabled,
+                      uint32_t timeout_ms, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 20);
+  if (!result)
+    return;
+  modem::ModemRequestStatus status;
+  if (!servicesFor(environment)->setRadioPower(enabled != 0, status,
+                                               timeout_ms)) {
+    failServiceResult(result, 4);
+    return;
+  }
+  if (!lowerStringAt(environment, status.operation.c_str(), result, 4)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<int32_t>(result, 12, status.error);
+  result[16] = status.timed_out;
+}
+
+void nativeCodec(wasm_exec_env_t environment, uint32_t width, uint32_t height,
+                 uint32_t frame_count, uint32_t timeout_ms,
+                 uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 56);
+  if (!result)
+    return;
+  hardware::CodecResult codec;
+  if (!servicesFor(environment)->testH264RoundTrip(
+          static_cast<int>(width), static_cast<int>(height),
+          static_cast<int>(frame_count), codec, static_cast<int>(timeout_ms))) {
+    failServiceResult(result, 8);
+    return;
+  }
+  if (!lowerStringAt(environment, codec.encoder_name.c_str(), result, 8) ||
+      !lowerStringAt(environment, codec.decoder_name.c_str(), result, 16)) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[24] = codec.encoder_hardware_accelerated;
+  result[25] = codec.decoder_hardware_accelerated;
+  storeCanonical<int32_t>(result, 28, codec.width);
+  storeCanonical<int32_t>(result, 32, codec.height);
+  storeCanonical<int32_t>(result, 36, codec.input_frames);
+  storeCanonical<int32_t>(result, 40, codec.output_buffers);
+  storeCanonical<int32_t>(result, 44, codec.decoded_frames);
+  storeCanonical<uint64_t>(result, 48, codec.encoded_bytes);
 }
 
 NativeSymbol kRuntimeSymbols[] = {
@@ -1471,158 +2092,146 @@ NativeSymbol kDeviceSymbols[] = {
 };
 
 NativeSymbol kAudioSymbols[] = {
-    {"play-tone", reinterpret_cast<void *>(nativeMockAudioPlayTone), "(Fifii)",
+    {"play-tone", reinterpret_cast<void *>(nativeAudioPlayTone), "(Fifii)",
      reinterpret_cast<void *>(8)},
-    {"record-wav", reinterpret_cast<void *>(nativeMockAudioRecord), "(iiii)",
-     reinterpret_cast<void *>(8)},
+    {"record-wav", reinterpret_cast<void *>(nativeAudioRecord), "(iiii)",
+     serviceAttachment(8, WasmServicePermission::AudioCapture)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kCameraSymbols[] = {
-    {"enumerate", reinterpret_cast<void *>(nativeMockCameraEnumerate), "(i)",
-     reinterpret_cast<void *>(4)},
-    {"set-torch",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiii)", reinterpret_cast<void *>(1)},
-    {"capture-jpeg", reinterpret_cast<void *>(nativeMockCameraCapture),
-     "(iiiiiiiii)", reinterpret_cast<void *>(8)},
+    {"enumerate", reinterpret_cast<void *>(nativeCameraEnumerate), "(i)",
+     serviceAttachment(4, WasmServicePermission::Camera)},
+    {"set-torch", reinterpret_cast<void *>(nativeCameraSetTorch), "(iiii)",
+     serviceAttachment(1, WasmServicePermission::Camera)},
+    {"capture-jpeg", reinterpret_cast<void *>(nativeCameraCapture),
+     "(iiiiiiiii)", serviceAttachment(8, WasmServicePermission::Camera)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
-     nullptr},
+     serviceAttachment(0, WasmServicePermission::Camera)},
 };
 
 NativeSymbol kPowerSymbols[] = {
-    {"query-battery", reinterpret_cast<void *>(nativeMockBattery), "(i)",
+    {"query-battery", reinterpret_cast<void *>(nativeBattery), "(i)",
      reinterpret_cast<void *>(4)},
-    {"wait-for-battery-event", reinterpret_cast<void *>(nativeMockBatteryEvent),
+    {"wait-for-battery-event", reinterpret_cast<void *>(nativeBatteryEvent),
      "(ii)", reinterpret_cast<void *>(4)},
-    {"set-interactive",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>), "(ii)",
-     reinterpret_cast<void *>(1)},
+    {"set-interactive", reinterpret_cast<void *>(nativePowerSetInteractive),
+     "(ii)",
+     serviceAttachment(1, WasmServicePermission::Power)},
     {"acquire-wake-lock",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
-     "(iii)", reinterpret_cast<void *>(1)},
+     reinterpret_cast<void *>(nativePowerAcquireWakeLock),
+     "(iii)", serviceAttachment(1, WasmServicePermission::Power)},
     {"release-wake-lock",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
-     "(iii)", reinterpret_cast<void *>(1)},
-    {"enable-auto-suspend", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
-     "(i)", reinterpret_cast<void *>(1)},
-    {"disable-auto-suspend", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
-     "(i)", reinterpret_cast<void *>(1)},
+     reinterpret_cast<void *>(nativePowerReleaseWakeLock),
+     "(iii)", serviceAttachment(1, WasmServicePermission::Power)},
+    {"enable-auto-suspend",
+     reinterpret_cast<void *>(nativePowerEnableAutoSuspend),
+     "(i)", serviceAttachment(1, WasmServicePermission::Power)},
+    {"disable-auto-suspend",
+     reinterpret_cast<void *>(nativePowerDisableAutoSuspend),
+     "(i)", serviceAttachment(1, WasmServicePermission::Power)},
     {"schedule-rtc-wake",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>), "(ii)",
-     reinterpret_cast<void *>(1)},
-    {"clear-rtc-wake", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
-     "(i)", reinterpret_cast<void *>(1)},
-    {"suspend", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(1)},
-    {"query-flip-state", reinterpret_cast<void *>(nativeMockFlipState), "(i)",
-     reinterpret_cast<void *>(1)},
+     reinterpret_cast<void *>(nativePowerScheduleRtcWake), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Power)},
+    {"clear-rtc-wake", reinterpret_cast<void *>(nativePowerClearRtcWake),
+     "(i)", serviceAttachment(1, WasmServicePermission::Power)},
+    {"suspend", reinterpret_cast<void *>(nativePowerSuspend),
+     "(ii)", serviceAttachment(1, WasmServicePermission::Power)},
+    {"query-flip-state", reinterpret_cast<void *>(nativeFlipState), "(i)",
+     serviceAttachment(1, WasmServicePermission::Power)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kVibratorSymbols[] = {
-    {"vibrate", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
+    {"vibrate", reinterpret_cast<void *>(nativeVibrate),
      "(ii)", reinterpret_cast<void *>(1)},
-    {"stop", reinterpret_cast<void *>(nativeMockUnit<uint32_t>), "(i)",
+    {"stop", reinterpret_cast<void *>(nativeVibrationStop), "(i)",
      reinterpret_cast<void *>(1)},
     {"supports-amplitude-control",
-     reinterpret_cast<void *>(nativeMockAmplitude), "()i", nullptr},
-    {"set-amplitude",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>), "(ii)",
+     reinterpret_cast<void *>(nativeAmplitudeControl), "()i", nullptr},
+    {"set-amplitude", reinterpret_cast<void *>(nativeVibrationSetAmplitude),
+     "(ii)",
      reinterpret_cast<void *>(1)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
 
 NativeSymbol kWifiSymbols[] = {
-    {"get-status", reinterpret_cast<void *>(nativeMockWifiStatus), "(i)",
-     reinterpret_cast<void *>(4)},
-    {"scan", reinterpret_cast<void *>(nativeMockWifiScan), "(ii)",
-     reinterpret_cast<void *>(4)},
-    {"list-networks", reinterpret_cast<void *>(nativeMockWifiNetworks), "(i)",
-     reinterpret_cast<void *>(4)},
-    {"connect", reinterpret_cast<void *>(nativeMockWifiConnect), "(iiiiii)",
-     reinterpret_cast<void *>(4)},
-    {"disconnect", reinterpret_cast<void *>(nativeMockUnit<uint32_t>), "(i)",
-     reinterpret_cast<void *>(1)},
-    {"reconnect", reinterpret_cast<void *>(nativeMockUnit<uint32_t>), "(i)",
-     reinterpret_cast<void *>(1)},
-    {"forget", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(1)},
-    {"save-configuration", reinterpret_cast<void *>(nativeMockUnit<uint32_t>),
-     "(i)", reinterpret_cast<void *>(1)},
+    {"get-status", reinterpret_cast<void *>(nativeWifiStatus), "(i)",
+     serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"scan", reinterpret_cast<void *>(nativeWifiScan), "(ii)",
+     serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"list-networks", reinterpret_cast<void *>(nativeWifiNetworks), "(i)",
+     serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"connect", reinterpret_cast<void *>(nativeWifiConnect), "(iiiiii)",
+     serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"disconnect", reinterpret_cast<void *>(nativeWifiDisconnect), "(i)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"reconnect", reinterpret_cast<void *>(nativeWifiReconnect), "(i)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"forget", reinterpret_cast<void *>(nativeWifiForget),
+     "(ii)", serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"save-configuration",
+     reinterpret_cast<void *>(nativeWifiSaveConfiguration),
+     "(i)", serviceAttachment(1, WasmServicePermission::Wifi)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
-     nullptr},
+     serviceAttachment(0, WasmServicePermission::Wifi)},
 };
 
 NativeSymbol kIpSymbols[] = {
-    {"get-status", reinterpret_cast<void *>(nativeMockIpStatus), "(i)",
-     reinterpret_cast<void *>(4)},
-    {"use-dhcp", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(1)},
-    {"use-static",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                        uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-                        uint32_t, uint32_t>),
-     "(iiiiiiiiiiii)", reinterpret_cast<void *>(1)},
+    {"get-status", reinterpret_cast<void *>(nativeIpStatus), "(i)",
+     serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"use-dhcp", reinterpret_cast<void *>(nativeIpUseDhcp),
+     "(ii)", serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"use-static", reinterpret_cast<void *>(nativeIpUseStatic),
+     "(iiiiiiiiiiii)", serviceAttachment(1, WasmServicePermission::Wifi)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
-     nullptr},
+     serviceAttachment(0, WasmServicePermission::Wifi)},
 };
 
 NativeSymbol kBluetoothSymbols[] = {
-    {"enable", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(1)},
-    {"disable", reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t>),
-     "(ii)", reinterpret_cast<void *>(1)},
-    {"classic-scan", reinterpret_cast<void *>(nativeMockBluetoothScan), "(ii)",
-     reinterpret_cast<void *>(4)},
-    {"le-scan", reinterpret_cast<void *>(nativeMockBluetoothScan), "(ii)",
-     reinterpret_cast<void *>(4)},
-    {"pair",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiii)", reinterpret_cast<void *>(1)},
-    {"unpair",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
-     "(iii)", reinterpret_cast<void *>(1)},
-    {"cancel-pairing",
-     reinterpret_cast<void *>(nativeMockUnit<uint32_t, uint32_t, uint32_t>),
-     "(iii)", reinterpret_cast<void *>(1)},
-    {"profile-connect",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiii)", reinterpret_cast<void *>(1)},
+    {"enable", reinterpret_cast<void *>(nativeBluetoothEnable),
+     "(ii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"disable", reinterpret_cast<void *>(nativeBluetoothDisable),
+     "(ii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"classic-scan", reinterpret_cast<void *>(nativeBluetoothClassicScan),
+     "(ii)", serviceAttachment(4, WasmServicePermission::Bluetooth)},
+    {"le-scan", reinterpret_cast<void *>(nativeBluetoothLeScan), "(ii)",
+     serviceAttachment(4, WasmServicePermission::Bluetooth)},
+    {"pair", reinterpret_cast<void *>(nativeBluetoothPair),
+     "(iiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"unpair", reinterpret_cast<void *>(nativeBluetoothUnpair),
+     "(iii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"cancel-pairing", reinterpret_cast<void *>(nativeBluetoothCancelPairing),
+     "(iii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"profile-connect", reinterpret_cast<void *>(nativeBluetoothProfileConnect),
+     "(iiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"profile-disconnect",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiii)", reinterpret_cast<void *>(1)},
+     reinterpret_cast<void *>(nativeBluetoothProfileDisconnect),
+     "(iiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"profile-connection-cycle",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiiii)", reinterpret_cast<void *>(1)},
+     reinterpret_cast<void *>(nativeBluetoothProfileCycle),
+     "(iiiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"le-connection-cycle",
-     reinterpret_cast<void *>(
-         nativeMockUnit<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>),
-     "(iiiii)", reinterpret_cast<void *>(1)},
+     reinterpret_cast<void *>(nativeBluetoothLeCycle),
+     "(iiiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
-     nullptr},
+     serviceAttachment(0, WasmServicePermission::Bluetooth)},
 };
 
 NativeSymbol kModemSymbols[] = {
-    {"query-snapshot", reinterpret_cast<void *>(nativeMockModemSnapshot),
-     "(ii)", reinterpret_cast<void *>(4)},
-    {"set-radio-power", reinterpret_cast<void *>(nativeMockRadioPower), "(iii)",
-     reinterpret_cast<void *>(4)},
+    {"query-snapshot", reinterpret_cast<void *>(nativeModemSnapshot),
+     "(ii)", serviceAttachment(4, WasmServicePermission::Modem)},
+    {"set-radio-power", reinterpret_cast<void *>(nativeRadioPower), "(iii)",
+     serviceAttachment(4, WasmServicePermission::Modem)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
-     nullptr},
+     serviceAttachment(0, WasmServicePermission::Modem)},
 };
 
 NativeSymbol kCodecSymbols[] = {
-    {"test-h264-round-trip", reinterpret_cast<void *>(nativeMockCodec),
+    {"test-h264-round-trip", reinterpret_cast<void *>(nativeCodec),
      "(iiiii)", reinterpret_cast<void *>(8)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
@@ -2082,7 +2691,13 @@ public:
           this->options.internal_media_directory,
           this->options.removable_media_directory);
     }
-    host = {&this->graphics, device, app_storage.get(), device_storage.get()};
+    host = {&this->graphics,
+            device,
+            &services,
+            app_storage.get(),
+            device_storage.get(),
+            this->options.service_permission_mask,
+            this->options.enforce_service_permissions};
   }
 
   ~Impl() { shutdown(); }
@@ -2156,6 +2771,7 @@ public:
   }
 
   NamespacedGraphicsHost graphics;
+  std::unique_ptr<device::ServiceProvider> services;
   std::unique_ptr<storage::AppStorage> app_storage;
   std::unique_ptr<storage::DeviceStorageService> device_storage;
   AppHostContext host;

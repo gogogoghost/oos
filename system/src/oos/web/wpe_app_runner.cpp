@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 extern "C" {
 typedef struct _WebKitWebViewBackend WebKitWebViewBackend;
@@ -43,13 +44,14 @@ struct RunnerOptions {
   int api_fd = -1;
   uint32_t width = 0;
   uint32_t height = 0;
+  std::vector<std::string> permissions;
 };
 
 void printUsage(const char *program) {
   std::fprintf(stderr,
                "usage: %s --id ID --package APP.zip --entrypoint PATH "
                "--api-profile PROFILE --data DIR --cache DIR --socket PATH "
-               "--api-fd FD "
+               "--api-fd FD [--permission NAME ...] "
                "--width PIXELS --height PIXELS\n",
                program);
 }
@@ -93,6 +95,8 @@ bool parseOptions(int argc, char **argv, RunnerOptions &options) {
       options.entrypoint = value;
     else if (std::strcmp(name, "--api-profile") == 0)
       options.api_profile = value;
+    else if (std::strcmp(name, "--permission") == 0)
+      options.permissions.emplace_back(value);
     else if (std::strcmp(name, "--data") == 0)
       options.data_directory = value;
     else if (std::strcmp(name, "--cache") == 0)
@@ -187,10 +191,15 @@ void loadChanged(WebKitWebView *view, WebKitLoadEvent event, gpointer data) {
   auto *state = static_cast<RunnerState *>(data);
   constexpr const char *check =
       "JSON.stringify({ready:!!globalThis.__oosRuntime&&"
-      "__oosRuntime.bridgeVersion===2&&typeof WebAssembly==='object'&&"
+      "__oosRuntime.bridgeVersion===3&&typeof WebAssembly==='object'&&"
       "typeof indexedDB==='object'&&"
-      "(__oosRuntime.apiProfile!=='kaios-v3'||!!navigator.b2g)&&"
-      "typeof navigator.getDeviceStorage==='function',"
+      "(__oosRuntime.apiProfile!=='kaios-v3'||(!!navigator.b2g&&"
+      "typeof globalThis.lib_devicecapability?.DeviceCapabilityManager?.get==="
+      "'function'))&&"
+      "(!__oosRuntime.permissions.some(p=>p.startsWith('device-storage:'))||"
+      "(__oosRuntime.apiProfile==='kaios-v3'"
+      "?typeof navigator.b2g?.getDeviceStorage==='function'"
+      ":typeof navigator.getDeviceStorage==='function')),"
       "profile:globalThis.__oosRuntime&&__oosRuntime.apiProfile,"
       "b2g:!!navigator.b2g,wasm:typeof WebAssembly,"
       "indexedDB:typeof indexedDB,audioContext:typeof AudioContext})";
@@ -281,6 +290,7 @@ int main(int argc, char **argv) {
 
   GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
   oos::web::KaiOsApiBridge bridge(options.app_id, options.api_profile,
+                                  std::move(options.permissions),
                                   options.api_fd);
   if (!bridge.initialize(closeFromWeb, loop)) {
     std::fprintf(stderr, "initialize KaiOS API bridge failed: %s\n",

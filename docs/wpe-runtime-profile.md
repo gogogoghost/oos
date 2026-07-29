@@ -62,10 +62,21 @@ app receives a persistent `WebKitNetworkSession` rooted at
 `/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3`.
 The HTTP listener serves only package resources. Privileged KaiOS calls use an
 injected WebKit message handler and a separate inherited control socket to the
-OOS host. DeviceStorage file operations and space queries use this path; future
+OOS host. DeviceStorage, power, vibration, Wi-Fi/IP, Bluetooth, camera,
+mobile-network, device-capability, and KaiOS 2.5 application-owned DataStore
+operations use this path; future
 capabilities must follow the same pattern instead of adding HTTP endpoints.
+The bridge preserves the API-version boundary: 2.5 uses the legacy navigator
+names, 3.0 uses `navigator.b2g` where KaiOS defines it, and 3.0
+DeviceCapability is exposed through its documented daemon-service factory.
+KaiOS 2.5 DataStore records reuse the application-private WIT storage backend;
+KaiOS 3 does not receive the legacy `getDataStores` entry point.
 The native service contract is also represented in WIT so WPE adapters and
 WAMR imports converge on the same host implementation.
+
+The runner serializes requests on a worker thread and completes WebKit replies
+on the GLib main context. The OOS process services the channel on its own thread.
+Long device discovery calls cannot stall key dispatch or frame composition.
 
 On Android the formal process boundary is `oos` plus one foreground
 `oos-wpe`. The host creates the surface socket, launches the producer from the
@@ -164,17 +175,11 @@ Both current profiles retain and verify:
 - accelerated compositing, EGL, GLES, and WebGL;
 - WPE's Android GPU-buffer producer backend.
 
-OOS runs WebAssembly in a performance-first mode on every WPE platform. Before
-an instance becomes visible to application code, JavaScriptCore compiles and
-installs every function with the BBQ JIT. The IPInt interpreter and
-IPInt-to-BBQ OSR are disabled, so execution never pauses to promote a function
-from interpreted code or compile its first call. This deliberately trades
-module load time and JIT-code memory for stable foreground performance.
-
-Platforms that support the OMG optimizing tier may still promote hot BBQ code
-later. ARMv7 has no OMG tier, so its WebAssembly code remains in the already
-compiled BBQ tier for the full instance lifetime. An eager compilation failure
-rejects instantiation instead of silently falling back to interpreted code.
+OOS leaves JavaScriptCore's normal WebAssembly tiering enabled. Application
+code can start in the interpreter and hot functions promote to BBQ, avoiding a
+multi-second, input-blocking compile of every function before the first frame.
+Platforms that support the OMG optimizing tier may promote hot BBQ code later;
+ARMv7 retains BBQ as its highest WebAssembly tier.
 
 FTL and WebAssembly OMG are disabled because WebKit does not support those
 optimizing tiers on this 32-bit ARM target. The C-loop interpreter is disabled,

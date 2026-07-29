@@ -133,7 +133,9 @@ target_include_directories(oos_nokia_2780_gles_display PRIVATE
 target_link_libraries(oos_nokia_2780_gles_display PUBLIC
   oos_gles_executor oos_nokia_2780_display EGL GLESv2 android)
 
-add_library(oos_nokia_2780_device STATIC src/device.cpp)
+add_library(oos_nokia_2780_device STATIC
+  src/device.cpp
+  "${CMAKE_SOURCE_DIR}/src/oos/device/android_service_provider.cpp")
 oos_nokia_2780_android_target(oos_nokia_2780_device)
 target_include_directories(oos_nokia_2780_device PUBLIC
   "${CMAKE_SOURCE_DIR}/src")
@@ -144,6 +146,7 @@ target_link_libraries(oos_nokia_2780_device PUBLIC
   oos_input
   oos_nokia_2780_gles_display)
 add_library(oos::platform ALIAS oos_nokia_2780_device)
+target_link_libraries(oos_wasm_runtime PUBLIC oos::platform)
 
 oos_nokia_2780_android_target(oos)
 target_include_directories(oos PRIVATE
@@ -218,6 +221,9 @@ target_link_libraries(oos_nokia_2780_modem PUBLIC
   "${NOKIA_2780_SYSTEM_LIB_DIR}/libcutils.so"
   "${NOKIA_2780_SYSTEM_LIB_DIR}/liblog.so")
 add_library(oos::modem ALIAS oos_nokia_2780_modem)
+
+target_link_libraries(oos_nokia_2780_device PUBLIC
+  oos::hardware oos::network oos::modem)
 
 if(OOS_BUILD_DEVICE_TESTS)
   add_executable(oos_test_nokia_2780_surface_transport_key

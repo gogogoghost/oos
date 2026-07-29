@@ -92,6 +92,28 @@ bool parseRecord(storage::SqliteStatement &statement, AppRecord &record) {
   return true;
 }
 
+bool loadGrantedPermissions(storage::SqliteDatabase &database,
+                            AppRecord &record) {
+  storage::SqliteStatement permissions;
+  if (!database.prepare(
+          "SELECT permission FROM app_permissions"
+          " WHERE app_id=? AND requested=1 AND granted=1"
+          " ORDER BY permission;",
+          permissions) ||
+      !permissions.bindText(1, record.manifest.id))
+    return false;
+  record.manifest.requested_permissions.clear();
+  while (true) {
+    const auto result = permissions.step();
+    if (result == storage::SqliteStatement::Step::Done)
+      return true;
+    const char *permission = permissions.columnText(0);
+    if (result != storage::SqliteStatement::Step::Row || !permission)
+      return false;
+    record.manifest.requested_permissions.emplace_back(permission);
+  }
+}
+
 } // namespace
 
 class AppRepository::Impl {
@@ -373,6 +395,10 @@ bool AppRepository::resolve(const char *app_id, AppRecord &record) {
              std::string(app_id ? app_id : "(null)");
     return false;
   }
+  if (!loadGrantedPermissions(impl_->database, record)) {
+    error_ = impl_->database.lastError();
+    return false;
+  }
   return true;
 }
 
@@ -396,7 +422,8 @@ bool AppRepository::list(std::vector<AppRecord> &records) {
       return true;
     AppRecord record;
     if (result != storage::SqliteStatement::Step::Row ||
-        !parseRecord(statement, record)) {
+        !parseRecord(statement, record) ||
+        !loadGrantedPermissions(impl_->database, record)) {
       error_ = impl_->database.lastError();
       return false;
     }

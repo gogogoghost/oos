@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "oos/apps/app_repository.h"
+#include "oos/apps/permissions.h"
 #include "oos/compositor/compositor.h"
 #include "oos/device/device.h"
 #include "oos/device/display.h"
@@ -244,6 +245,10 @@ int run(int argc, char **argv) {
       native_launch.data_directory = app_launch.data_directory.c_str();
       native_launch.stack_size = app_launch.app.manifest.stack_bytes;
       native_launch.heap_size = app_launch.app.manifest.heap_bytes;
+      native_launch.service_permission_mask =
+          oos::apps::deviceServicePermissionMask(
+              app_launch.app.manifest.requested_permissions);
+      native_launch.enforce_service_permissions = true;
     }
   }
 
@@ -274,11 +279,11 @@ int run(int argc, char **argv) {
   std::signal(SIGTERM, stopRuntime);
   if (runtime_kind == oos::apps::RuntimeKind::Wpe) {
 #if defined(OOS_EXTERNAL_WPE_RUNTIME)
-    oos::web::WpeAppHost web_app(compositor, input);
+    oos::web::WpeAppHost web_app(compositor, input, *platform_device);
     std::fprintf(stderr, "OOS WPE app starting on %s: %s\n", descriptor.id,
                  app_launch.app.manifest.id.c_str());
     std::fflush(stderr);
-    const bool success = web_app.run(app_launch, descriptor, &g_stop_requested);
+    const bool success = web_app.run(app_launch, &g_stop_requested);
     if (!success)
       std::fprintf(stderr, "WPE foreground app failed: %s\n",
                    web_app.lastError().c_str());

@@ -3,6 +3,7 @@
 #include "oos/apps/app_repository.h"
 
 #include <csignal>
+#include <memory>
 #include <string>
 
 namespace oos::compositor {
@@ -10,7 +11,8 @@ class Compositor;
 }
 
 namespace oos::device {
-struct DeviceDescriptor;
+class Device;
+class ServiceProvider;
 }
 
 namespace oos::input {
@@ -23,10 +25,11 @@ namespace oos::web {
 // authority in the OOS host process.
 class WpeAppHost {
 public:
-  WpeAppHost(compositor::Compositor &compositor, input::KeyInputSource &input);
+  WpeAppHost(compositor::Compositor &compositor, input::KeyInputSource &input,
+             device::Device &device);
+  ~WpeAppHost();
 
   bool run(const apps::AppLaunch &launch,
-           const device::DeviceDescriptor &device,
            volatile std::sig_atomic_t *stop_requested);
 
   const std::string &lastError() const { return error_; }
@@ -34,6 +37,8 @@ public:
 private:
   compositor::Compositor &compositor_;
   input::KeyInputSource &input_;
+  device::Device &device_;
+  std::unique_ptr<device::ServiceProvider> services_;
   std::string error_;
 };
 

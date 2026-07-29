@@ -128,7 +128,9 @@ if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
-add_library(oos_nokia_8110_device STATIC src/device.cpp)
+add_library(oos_nokia_8110_device STATIC
+  src/device.cpp
+  "${CMAKE_SOURCE_DIR}/src/oos/device/android_service_provider.cpp")
 oos_nokia_8110_android_target(oos_nokia_8110_device)
 target_include_directories(oos_nokia_8110_device PUBLIC
   "${CMAKE_SOURCE_DIR}/src")
@@ -139,6 +141,7 @@ target_link_libraries(oos_nokia_8110_device PUBLIC
   oos_input
   oos_nokia_8110_gles_display)
 add_library(oos::platform ALIAS oos_nokia_8110_device)
+target_link_libraries(oos_wasm_runtime PUBLIC oos::platform)
 
 oos_nokia_8110_android_target(oos)
 target_include_directories(oos PRIVATE
@@ -199,6 +202,9 @@ target_link_libraries(oos_nokia_8110_basic_hardware PUBLIC
   "${NOKIA_8110_SYSTEM_LIB_DIR}/liblog.so"
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 add_library(oos::hardware ALIAS oos_nokia_8110_basic_hardware)
+
+target_link_libraries(oos_nokia_8110_device PUBLIC
+  oos::hardware oos::network oos::modem)
 
 if(OOS_BUILD_DEVICE_TESTS)
   add_executable(oos_test_nokia_8110_surface_transport_key

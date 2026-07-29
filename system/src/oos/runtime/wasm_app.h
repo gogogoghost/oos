@@ -21,6 +21,8 @@ struct WasmAppOptions {
   std::string data_directory;
   std::string internal_media_directory = "/data/media/internal";
   std::string removable_media_directory = "/data/media/removable";
+  uint32_t service_permission_mask = 0;
+  bool enforce_service_permissions = false;
 };
 
 class WasmApp {

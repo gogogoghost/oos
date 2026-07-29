@@ -65,18 +65,41 @@ producer cannot access HWC, panel power, backlights, or evdev directly.
 
 The injected bridge exposes immutable `__oosRuntime` identity, lifecycle,
 key-name compatibility, and the selected KaiOS API profile. Implemented
-privileged calls travel from `navigator.moz*` or `navigator.b2g` through a
-WebKit message handler and a private OOS control socket. The OOS host performs
-the operation; HTTP remains unaware of it. Unimplemented compatibility APIs
-are explicit empty or `NotSupportedError` adapters selected by `api_profile`.
+calls travel from the KaiOS 2.5 `navigator.moz*` surface, the KaiOS 3
+`navigator.b2g` surface, or a supported 3.0 daemon-service adapter through a
+WebKit message handler and a private OOS control socket. DeviceCapability uses
+the documented `lib_session` / `lib_devicecapability` service entry point.
+The OOS host performs the operation; HTTP remains unaware of it. Battery and
+vibration remain baseline Web capabilities. Granted manifest permissions are
+loaded from the registry, passed as individual runner arguments, checked again
+by the host, and used to select every sensitive injected surface. Unsupported
+APIs are not injected, so an empty object cannot be mistaken for a working
+implementation.
 
-DeviceStorage is the first shared adapter. Enumeration returns metadata from
+DeviceStorage, power/battery, vibration, Wi-Fi/IP, Bluetooth, camera discovery/
+torch, mobile-network snapshots, and device capabilities use the shared host
+provider. DeviceStorage enumeration returns metadata from
 `/data/media/internal` and `/data/media/removable`; file bytes are fetched only
 when `FileReader` reads the selected file. Creation, replacement, append,
 deletion, and volume space queries use the same service. WIT `device-storage`
 exposes that service to WAMR, so WPE and WAMR do not grow separate filesystem
 implementations. The remaining compatibility matrix is tracked in
 [kaios-api-coverage.md](kaios-api-coverage.md).
+
+For KaiOS 2.5, `datastores-owned` declarations are normalized into launch
+grants and `navigator.getDataStores()` is injected only when at least one owned
+store is granted. Records, revisions, and bounded sync history persist through
+the existing application-private `storage` WIT backend under the Web app's
+OOS data directory. The host validates the store name and read/write mode on
+every request. An owner remains writable even when its declaration says
+`readonly`; that field limits future consumers, not the owning app. Access-only
+stores are not exposed yet because cross-application ownership and change
+broadcasting require a system DataStore registry.
+
+The WPE message callback and OOS device service run blocking control work on
+dedicated ordered workers. Hardware discovery therefore does not block WebKit
+input dispatch or the host compositor. Frame transport is unchanged and never
+crosses this JSON control channel.
 
 Packaged Web applications use `http://<app-id>.localhost:8080`. The unprivileged
 port is identical in local and device builds, and the KaiOS bridge is injected
@@ -93,6 +116,7 @@ The first user has separate runtime roots:
 ├── users/0/wasm/<app-id>/kv.sqlite3
 ├── users/0/wasm/<app-id>/db/<name>.sqlite3
 ├── users/0/web/<app-id>/data/
+├── users/0/web/<app-id>/oos-platform/kv.sqlite3
 ├── cache/aot/<content-key>/
 ├── cache/web/<app-id>/<content-key>/
 ├── media/internal/
@@ -115,8 +139,9 @@ removing a card cannot corrupt application state.
 ## Deferred Security
 
 For the current bring-up phase, requested permissions are recorded with
-`granted=1`, packages are marked `unverified`, and no signature, process
-permission boundary, or SELinux policy is enforced. These columns and API
-profiles are retained so policy can be added without changing package
-identity or storage layout. This mode is suitable only for the explicitly
-rooted development deployment.
+`granted=1` and packages are marked `unverified`. WPE and WAMR both enforce
+those grants at their host API boundary, but no signature, separate process
+permission boundary, or SELinux policy is enforced yet. These columns and API
+profiles are retained so stronger install policy can be added without changing
+package identity or storage layout. This mode is suitable only for the
+explicitly rooted development deployment.

@@ -16,7 +16,8 @@ configure_file("${OOS_LOCAL_KEYMAP_SOURCE}" "${OOS_LOCAL_KEYMAP_BUILD}" COPYONLY
 add_library(oos_local_platform STATIC
   src/device.cpp
   src/local_display.cpp
-  src/local_key_input.cpp)
+  src/local_key_input.cpp
+  src/service_provider.cpp)
 target_include_directories(oos_local_platform PUBLIC
   "${CMAKE_SOURCE_DIR}/src"
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -28,6 +29,7 @@ target_link_libraries(oos_local_platform PUBLIC
   SDL3::SDL3
   OpenGL::GLES2)
 add_library(oos::platform ALIAS oos_local_platform)
+target_link_libraries(oos_wasm_runtime PUBLIC oos::platform)
 
 target_compile_definitions(oos PRIVATE
   OOS_DEFAULT_BOOT_SPLASH="${CMAKE_SOURCE_DIR}/assets/boot/nokia-2780-flip/boot-splash.png")

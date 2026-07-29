@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <memory>
+#include <vector>
 
 typedef struct _WebKitUserContentManager WebKitUserContentManager;
 typedef struct _JSCValue JSCValue;
@@ -8,11 +10,14 @@ typedef struct _WebKitScriptMessageReply WebKitScriptMessageReply;
 
 namespace oos::web {
 
+class DeviceApiClient;
+
 class KaiOsApiBridge {
 public:
   using CloseCallback = void (*)(void *context);
 
-  KaiOsApiBridge(std::string app_id, std::string api_profile, int api_fd);
+  KaiOsApiBridge(std::string app_id, std::string api_profile,
+                 std::vector<std::string> permissions, int api_fd);
   ~KaiOsApiBridge();
 
   KaiOsApiBridge(const KaiOsApiBridge &) = delete;
@@ -32,7 +37,9 @@ private:
 
   std::string app_id_;
   std::string api_profile_;
+  std::vector<std::string> permissions_;
   int api_fd_ = -1;
+  std::unique_ptr<DeviceApiClient> api_client_;
   WebKitUserContentManager *manager_ = nullptr;
   CloseCallback close_callback_ = nullptr;
   void *close_context_ = nullptr;

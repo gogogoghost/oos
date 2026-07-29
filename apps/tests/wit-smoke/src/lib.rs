@@ -11,6 +11,10 @@ fn unavailable<T>(result: Result<T, ErrorCode>) {
     assert!(matches!(result, Err(ErrorCode::Unavailable)));
 }
 
+fn permission_denied<T>(result: Result<T, ErrorCode>) {
+    assert!(matches!(result, Err(ErrorCode::PermissionDenied)));
+}
+
 fn graphics_smoke() {
     assert_ne!(
         oos_app::supported_texture_formats() & (1 << TextureFormat::Rgb565 as u32),
@@ -146,6 +150,35 @@ fn mocked() {
     assert_eq!(codec.encoder_name, "mock.h264.encoder");
 }
 
+fn permission_filtered() {
+    audio::play_tone(440.0, 1, 0.1, audio::Usage::Media).unwrap();
+    permission_denied(audio::record_wav("recording.wav", 1));
+
+    permission_denied(camera::enumerate());
+    permission_denied(camera::set_torch("0", false));
+    assert_eq!(camera::last_error(), "permission denied");
+
+    assert_eq!(power::query_battery().unwrap().capacity_percent, 82);
+    permission_denied(power::set_interactive(true));
+    permission_denied(power::acquire_wake_lock("smoke"));
+    permission_denied(power::query_flip_state());
+
+    vibrator::vibrate(1).unwrap();
+    vibrator::stop().unwrap();
+    codec::test_h264_round_trip(16, 16, 1, 1).unwrap();
+
+    permission_denied(wifi::get_status());
+    assert_eq!(wifi::last_error(), "permission denied");
+    permission_denied(ip::get_status());
+    permission_denied(bluetooth::enable(1));
+    assert_eq!(bluetooth::last_error(), "permission denied");
+    permission_denied(modem::query_snapshot(1));
+    assert_eq!(modem::last_error(), "permission denied");
+    permission_denied(oos_app::device_storage::enumerate(
+        oos_app::DeviceStorageVolume::Internal,
+    ));
+}
+
 impl AppLifecycle for App {
     fn init() -> Result<(), ErrorCode> {
         assert_eq!(runtime::abi_version(), oos_app::ABI_VERSION);
@@ -153,6 +186,10 @@ impl AppLifecycle for App {
         assert_eq!(limits.max_texture_size, oos_app::MAX_TEXTURE_SIZE as u32);
         graphics_smoke();
         let descriptor = device::get_descriptor();
+        if descriptor.id == "local-denied" {
+            permission_filtered();
+            return Ok(());
+        }
         if descriptor.id == "local" {
             oos_app::kv_set("smoke", b"persistent").unwrap();
             assert_eq!(

@@ -13,15 +13,85 @@ trap 'rm -rf "$staging"' EXIT
 
 mkdir -p "$staging/kaios25" "$staging/kaios3"
 printf '%s\n' \
-  '{"name":"APN Config","version":"1.0.0","launch_path":"/index.html"}' \
+  '{"name":"APN Config","version":"1.0.0","launch_path":"/index.html","permissions":{"device-storage:sdcard":{"access":"readwrite"},"wifi-manage":{}},"datastores-owned":{"test-state":{"access":"readwrite","description":"WPE bridge test"},"owner-write":{"access":"readonly","description":"Owner remains writable"}}}' \
   > "$staging/kaios25/manifest.webapp"
-printf '%s\n' '<!doctype html><title>KaiOS 2.5</title>' \
-  > "$staging/kaios25/index.html"
+cat > "$staging/kaios25/index.html" <<'EOF'
+<!doctype html><meta charset="utf-8"><title>KaiOS 2.5 API test</title>
+<body>RUNNING<script>
+(async () => {
+  try {
+    if (globalThis.__oosRuntime?.apiProfile !== 'kaios-b2g48' ||
+        navigator.b2g || !navigator.mozApps || !navigator.mozWifiManager ||
+        typeof navigator.getDeviceStorage !== 'function' ||
+        typeof navigator.getDataStores !== 'function' ||
+        typeof navigator.getFeature !== 'function')
+      throw new Error('invalid KaiOS 2.5 API profile');
+    const status = await navigator.mozWifiManager.refresh();
+    if (status.ssid !== 'OOS Mock Network')
+      throw new Error('Wi-Fi host bridge failed');
+    const [store] = await navigator.getDataStores('test-state');
+    await store.clear();
+    const id = await store.add({ value: 7 });
+    if ((await store.get(id))?.value !== 7 || await store.getLength() !== 1)
+      throw new Error('DataStore host bridge failed');
+    await store.put({ value: 9 }, id, store.revisionId);
+    const cursor = store.sync();
+    if ((await cursor.next()).operation !== 'add')
+      throw new Error('DataStore sync cursor failed');
+    if (!await store.remove(id, store.revisionId) ||
+        await store.getLength() !== 0)
+      throw new Error('DataStore remove/revision bridge failed');
+    const [ownerStore] = await navigator.getDataStores('owner-write');
+    if (ownerStore.readOnly)
+      throw new Error('DataStore owner write access failed');
+    await ownerStore.clear();
+    const ownerId = await ownerStore.add({ owner: true });
+    if (!(await ownerStore.get(ownerId))?.owner)
+      throw new Error('DataStore readonly declaration semantics failed');
+    document.body.textContent = 'PASS';
+    await new Promise(resolve => requestAnimationFrame(() =>
+      requestAnimationFrame(resolve)));
+    setTimeout(() => window.close(), 100);
+  } catch (error) {
+    document.body.textContent = `FAIL: ${error}`;
+    console.error('OOS KaiOS 2.5 API test failed', error);
+  }
+})();
+</script>
+EOF
 printf '%s\n' \
-  '{"name":"Calculator","start_url":"./main.html?source=test","b2g_features":{"version":"3.0.0"}}' \
+  '{"name":"Calculator","start_url":"./main.html?source=test","b2g_features":{"version":"3.0.0","permissions":{"bluetooth":{},"camera":{}}}}' \
   > "$staging/kaios3/manifest.webmanifest"
-printf '%s\n' '<!doctype html><title>KaiOS 3</title>' \
-  > "$staging/kaios3/main.html"
+cat > "$staging/kaios3/main.html" <<'EOF'
+<!doctype html><meta charset="utf-8"><title>KaiOS 3 API test</title>
+<body>RUNNING<script>
+(async () => {
+  try {
+    if (globalThis.__oosRuntime?.apiProfile !== 'kaios-v3' ||
+        !navigator.b2g || navigator.mozApps ||
+        typeof navigator.b2g.cameras?.refresh !== 'function' ||
+        typeof globalThis.lib_devicecapability?.DeviceCapabilityManager?.get !==
+          'function' ||
+        typeof navigator.getDeviceStorage === 'function')
+      throw new Error('invalid KaiOS 3 API profile');
+    const capability = await lib_devicecapability.DeviceCapabilityManager
+      .get(new lib_session.Session());
+    if (await capability.get('camera-capture') !== 'validated')
+      throw new Error('device capability host bridge failed');
+    const cameras = await navigator.b2g.cameras.refresh();
+    if (cameras[0]?.id !== 'mock-camera-0')
+      throw new Error('camera host bridge failed');
+    document.body.textContent = 'PASS';
+    await new Promise(resolve => requestAnimationFrame(() =>
+      requestAnimationFrame(resolve)));
+    setTimeout(() => window.close(), 100);
+  } catch (error) {
+    document.body.textContent = `FAIL: ${error}`;
+    console.error('OOS KaiOS 3 API test failed', error);
+  }
+})();
+</script>
+EOF
 
 mkdir -p "$(dirname "$kaios25")" "$(dirname "$kaios3")"
 (cd "$staging/kaios25" && zip -q -D -9 "$kaios25" manifest.webapp index.html)
