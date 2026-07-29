@@ -75,6 +75,7 @@ LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
 SYSTEM_FONT="$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
 SYSTEM_FONT_LICENSE="$ROOT_DIR/system/assets/fonts/LICENSE.txt"
+INSPECTOR_RESOURCE="$WPE_SYSROOT/share/wpe-webkit-2.0/inspector.gresource"
 package_require_file "$OOS_BINARY"
 package_require_file "$OOS_WPE_BINARY"
 package_require_directory "$WPE_SYSROOT/lib"
@@ -87,6 +88,7 @@ package_require_file "$LUCIDE_LICENSE"
 package_require_file "$WAMR_LICENSE"
 package_require_file "$SYSTEM_FONT"
 package_require_file "$SYSTEM_FONT_LICENSE"
+package_require_file "$INSPECTOR_RESOURCE"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -225,7 +227,7 @@ while (( queue_index < ${#ELF_QUEUE[@]} )); do
     | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
 done
 
-for runtime_share in fontconfig glib-2.0 icu licenses xml; do
+for runtime_share in fontconfig glib-2.0 icu licenses wpe-webkit-2.0 xml; do
   if [[ -d "$WPE_SYSROOT/share/$runtime_share" ]]; then
     rsync -a "$WPE_SYSROOT/share/$runtime_share" "$STAGING/share/"
   fi
@@ -261,7 +263,8 @@ printf '%s\n' \
   "buffer_abi=$OOS_WPE_BUFFER_ABI" \
   "javascript_jit=baseline,dfg" \
   "webassembly_jit=bbq" \
-  "webassembly_execution=eager-bbq" \
+  "webassembly_execution=tiered-ipint-bbq" \
+  "remote_inspector=runtime-optional" \
   "native_app_runtime=wamr-2.4.4" \
   "web_app_runtime=wpe-webkit-2.52.5" \
   "web_app_host=external-single-foreground" \

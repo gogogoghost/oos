@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
+#include <unordered_map>
 
 #include "oos/compositor/compositor.h"
 #include "oos/compositor/surface_transport.h"
@@ -61,6 +62,7 @@ int main() {
   oos::device::Display &display = device->display();
   oos::compositor::Compositor compositor(display);
   uint64_t presented_frames = 0;
+  std::unordered_map<uint64_t, AHardwareBuffer *> surface_buffers;
   bool success = true;
   while (true) {
     OosSurfaceTransportFrame packet{};
@@ -76,6 +78,22 @@ int main() {
       break;
     }
 
+    if (buffer) {
+      auto [entry, inserted] =
+          surface_buffers.emplace(packet.buffer_id, buffer);
+      if (!inserted) {
+        AHardwareBuffer_release(entry->second);
+        entry->second = buffer;
+      }
+    }
+    auto buffer_entry = surface_buffers.find(packet.buffer_id);
+    if (buffer_entry == surface_buffers.end()) {
+      std::fprintf(stderr, "frame referenced unknown buffer %llu\n",
+                   static_cast<unsigned long long>(packet.buffer_id));
+      success = false;
+      break;
+    }
+    buffer = buffer_entry->second;
     AHardwareBuffer_Desc description{};
     AHardwareBuffer_describe(buffer, &description);
     oos::compositor::SurfaceFrame frame;
@@ -86,7 +104,6 @@ int main() {
     frame.width = packet.width;
     frame.height = packet.height;
     const bool presented = compositor.presentSurface(frame);
-    AHardwareBuffer_release(buffer);
     if (oos_surface_transport_acknowledge(connection, presented) != 0) {
       success = false;
       break;
@@ -100,6 +117,10 @@ int main() {
   }
 
   close(connection);
+  for (const auto &[buffer_id, retained_buffer] : surface_buffers) {
+    (void)buffer_id;
+    AHardwareBuffer_release(retained_buffer);
+  }
   close(listener);
   unlink(socket_path);
   std::fprintf(stderr, "OOS compositor host presented %llu WPE frames\n",

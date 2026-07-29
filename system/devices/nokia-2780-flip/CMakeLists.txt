@@ -100,7 +100,8 @@ target_include_directories(oos_wpe_surface_host PUBLIC
 target_include_directories(oos_wpe_surface_host PRIVATE
   ${NOKIA_2780_WPE_INCLUDES})
 target_link_libraries(oos_wpe_surface_host PUBLIC
-  "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEBackend-android.so")
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEBackend-android.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libwpe-1.0.so")
 add_library(oos::web ALIAS oos_wpe_surface_host)
 
 add_executable(oos-wpe
@@ -119,7 +120,11 @@ target_link_libraries(oos-wpe PRIVATE
   "${NOKIA_2780_WPE_SYSROOT}/lib/libgio-2.0.so"
   "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
   "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
-  android)
+  android
+  "${NOKIA_2780_SYSTEM_LIB_DIR}/libc++.so")
+target_link_options(oos-wpe PRIVATE
+  -Wl,--allow-shlib-undefined
+  "-Wl,-rpath-link,${NOKIA_2780_SYSTEM_LIB_DIR}")
 set_target_properties(oos-wpe PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

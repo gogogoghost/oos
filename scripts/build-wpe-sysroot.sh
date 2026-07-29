@@ -38,7 +38,8 @@ export WPE_BUILD_JOBS
 BASE_CONFIG="$WPE_CERBERO_DIR/config/cross-android-armv7.cbc"
 KAIOS_CONFIG="$ROOT_DIR/$OOS_WPE_CERBERO_CONFIG"
 CERBERO="$WPE_CERBERO_DIR/cerbero-uninstalled"
-PROFILE_SOURCE="$WPE_CERBERO_DIR/build/sources/$OOS_WPE_SOURCE_KEY"
+CERBERO_WORK_ROOT=$(cd "$(dirname "$KAIOS_CONFIG")/../.." && pwd)
+PROFILE_SOURCE="$CERBERO_WORK_ROOT/third_party/wpe-android-cerbero/build/sources/$OOS_WPE_SOURCE_KEY"
 WPE_BUILD_DIR="$PROFILE_SOURCE/wpewebkit-git/b"
 WPE_PREFIX="$ROOT_DIR/build/wpe-sysroot/$OOS_WPE_SYSROOT_KEY"
 
@@ -96,6 +97,15 @@ printf '%s\n' \
   "webkit_commit=$WPEWEBKIT_COMMIT" \
   >"$WPE_PREFIX/.oos-wpe-profile.pending"
 
+FORCE_WPE_REBUILD=0
+if [[ -f "$WPE_BUILD_DIR/cmakeconfig.h" &&
+      -f "$WPE_BUILD_DIR/CMakeCache.txt" ]] &&
+   ! oos_wpe_verify_features "$WPE_BUILD_DIR/cmakeconfig.h" \
+       "$WPE_BUILD_DIR/CMakeCache.txt"; then
+  FORCE_WPE_REBUILD=1
+  echo "WPE feature profile changed; forcing the wpewebkit recipe rebuild."
+fi
+
 if [[ $OOS_WPE_ANDROID_API -lt 26 ]]; then
   "$ROOT_DIR/scripts/configure-android.sh" "$DEVICE" -DOOS_BUILD_DEVICE_TESTS=OFF
   cmake --build "$ROOT_DIR/build/android-$DEVICE" \
@@ -114,8 +124,13 @@ fi
 "$CERBERO" -c "$BASE_CONFIG" -c "$KAIOS_CONFIG" bootstrap "${BOOTSTRAP_ARGS[@]}"
 "$CERBERO" -c "$BASE_CONFIG" -c "$KAIOS_CONFIG" build -j "$WPE_BUILD_JOBS" \
   wpebackend-android
-"$CERBERO" -c "$BASE_CONFIG" -c "$KAIOS_CONFIG" build -j "$WPE_BUILD_JOBS" \
-  wpewebkit
+if [[ $FORCE_WPE_REBUILD -eq 1 ]]; then
+  "$CERBERO" -c "$BASE_CONFIG" -c "$KAIOS_CONFIG" buildone \
+    -j "$WPE_BUILD_JOBS" wpewebkit
+else
+  "$CERBERO" -c "$BASE_CONFIG" -c "$KAIOS_CONFIG" build \
+    -j "$WPE_BUILD_JOBS" wpewebkit
+fi
 
 oos_wpe_verify_features "$WPE_BUILD_DIR/cmakeconfig.h" \
   "$WPE_BUILD_DIR/CMakeCache.txt"

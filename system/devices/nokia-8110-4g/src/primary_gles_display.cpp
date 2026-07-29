@@ -18,14 +18,21 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <unistd.h>
+#include <vector>
 
 struct AHardwareBuffer;
-extern "C" EGLClientBuffer EGLAPIENTRY
+extern "C" {
+void AHardwareBuffer_acquire(AHardwareBuffer *buffer);
+void AHardwareBuffer_release(AHardwareBuffer *buffer);
+EGLClientBuffer EGLAPIENTRY
 eglGetNativeClientBufferANDROID(const AHardwareBuffer *buffer);
+}
 
 namespace oos::nokia8110 {
 namespace {
@@ -110,7 +117,10 @@ bool finiteRect(const OosGfxDrawCommand &command) {
 
 class PrimaryGlesDisplay::Impl final : public runtime::GlesFrameTarget {
 public:
-  Impl() : gles_(*this) {}
+  Impl() : gles_(*this) {
+    const char *trace = std::getenv("OOS_TRACE_WPE_FRAMES");
+    trace_frames_ = trace && trace[0] && std::strcmp(trace, "0") != 0;
+  }
 
   ~Impl() { shutdown(); }
 
@@ -466,6 +476,8 @@ public:
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
     glFinish();
+    if (trace_frames_)
+      traceTargetHash();
     glDeleteTextures(1, &texture);
     return glGetError() == GL_NO_ERROR && presentAndReveal();
   }
@@ -489,29 +501,11 @@ public:
         return false;
       }
     }
-    EGLClientBuffer native = eglGetNativeClientBufferANDROID(
-        static_cast<AHardwareBuffer *>(frame.buffer));
-    if (!native) {
-      std::fprintf(stderr, "OOS failed to obtain Android native buffer\n");
+    ExternalSurface *external =
+        externalSurface(static_cast<AHardwareBuffer *>(frame.buffer));
+    if (!external)
       return false;
-    }
-    const EGLImageKHR image =
-        create_image_(egl_display_, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
-                      native, nullptr);
-    if (image == EGL_NO_IMAGE_KHR) {
-      std::fprintf(stderr, "OOS external eglCreateImageKHR failed: 0x%x\n",
-                   eglGetError());
-      return false;
-    }
-
-    GLuint texture = 0;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    image_target_(GL_TEXTURE_2D, reinterpret_cast<GLeglImageOES>(image));
+    glBindTexture(GL_TEXTURE_2D, external->texture);
 
     constexpr OosGfxVertex vertices[] = {
         {{0, 0}, {0, 0}, {255, 255, 255, 255}},
@@ -544,8 +538,6 @@ public:
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
     glFinish();
-    glDeleteTextures(1, &texture);
-    destroy_image_(egl_display_, image);
     const GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
       std::fprintf(stderr, "OOS external surface GL error: 0x%x\n", error);
@@ -630,6 +622,12 @@ public:
       std::fprintf(stderr, "OOS HWC1 set failed: %d\n", result);
       return false;
     }
+    if (trace_frames_) {
+      std::fprintf(stderr, "OOS HWC1 fences: source=%d target=%d retire=%d\n",
+                   source_layer.releaseFenceFd, target_layer.releaseFenceFd,
+                   frame.contents.retireFenceFd);
+      std::fflush(stderr);
+    }
     if (source_layer.releaseFenceFd >= 0)
       close(source_layer.releaseFenceFd);
     release_fence_ = target_layer.releaseFenceFd;
@@ -652,6 +650,27 @@ public:
     return false;
   }
 
+  void traceTargetHash() {
+    constexpr size_t pixel_bytes =
+        static_cast<size_t>(PrimaryGlesDisplay::kWidth) *
+        PrimaryGlesDisplay::kHeight * 4;
+    trace_pixels_.resize(pixel_bytes);
+    glReadPixels(0, 0, PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight,
+                 GL_RGBA, GL_UNSIGNED_BYTE, trace_pixels_.data());
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+      std::fprintf(stderr, "OOS target hash readback failed: 0x%x\n", error);
+      return;
+    }
+    uint32_t hash = 2166136261u;
+    for (const uint8_t value : trace_pixels_) {
+      hash ^= value;
+      hash *= 16777619u;
+    }
+    std::fprintf(stderr, "OOS display target hash=%08x\n", hash);
+    std::fflush(stderr);
+  }
+
   void refresh() {
     if (initialized_)
       presentTarget();
@@ -666,6 +685,7 @@ public:
         pbuffer_ != EGL_NO_SURFACE &&
         eglMakeCurrent(egl_display_, pbuffer_, pbuffer_, context_) == EGL_TRUE;
     if (context_current) {
+      clearExternalSurfaces(true);
       gles_.reset();
       if (program_)
         glDeleteProgram(program_);
@@ -677,7 +697,8 @@ public:
         glDeleteFramebuffers(1, &framebuffer_);
       if (target_texture_)
         glDeleteTextures(1, &target_texture_);
-    }
+    } else
+      clearExternalSurfaces(false);
     if (target_image_ != EGL_NO_IMAGE_KHR && destroy_image_)
       destroy_image_(egl_display_, target_image_);
     if (egl_display_ != EGL_NO_DISPLAY) {
@@ -726,6 +747,88 @@ public:
 
 private:
   friend class PrimaryGlesDisplay;
+
+  struct ExternalSurface {
+    AHardwareBuffer *buffer = nullptr;
+    EGLImageKHR image = EGL_NO_IMAGE_KHR;
+    GLuint texture = 0;
+    uint64_t last_used = 0;
+  };
+
+  void destroyExternalSurface(ExternalSurface &surface, bool destroy_egl) {
+    if (destroy_egl && surface.texture)
+      glDeleteTextures(1, &surface.texture);
+    if (destroy_egl && surface.image != EGL_NO_IMAGE_KHR && destroy_image_)
+      destroy_image_(egl_display_, surface.image);
+    if (surface.buffer)
+      AHardwareBuffer_release(surface.buffer);
+    surface = {};
+  }
+
+  void clearExternalSurfaces(bool destroy_egl) {
+    if (destroy_egl && !external_surfaces_.empty())
+      glFinish();
+    for (ExternalSurface &surface : external_surfaces_)
+      destroyExternalSurface(surface, destroy_egl);
+    external_surfaces_.clear();
+  }
+
+  ExternalSurface *externalSurface(AHardwareBuffer *buffer) {
+    for (ExternalSurface &surface : external_surfaces_) {
+      if (surface.buffer == buffer) {
+        surface.last_used = ++external_surface_epoch_;
+        return &surface;
+      }
+    }
+
+    constexpr size_t kMaximumCachedSurfaces = 8;
+    if (external_surfaces_.size() >= kMaximumCachedSurfaces) {
+      auto oldest = std::min_element(
+          external_surfaces_.begin(), external_surfaces_.end(),
+          [](const ExternalSurface &left, const ExternalSurface &right) {
+            return left.last_used < right.last_used;
+          });
+      glFinish();
+      destroyExternalSurface(*oldest, true);
+      external_surfaces_.erase(oldest);
+    }
+
+    EGLClientBuffer native = eglGetNativeClientBufferANDROID(buffer);
+    if (!native) {
+      std::fprintf(stderr, "OOS failed to obtain Android native buffer\n");
+      return nullptr;
+    }
+    ExternalSurface surface;
+    surface.buffer = buffer;
+    AHardwareBuffer_acquire(buffer);
+    surface.image = create_image_(egl_display_, EGL_NO_CONTEXT,
+                                  EGL_NATIVE_BUFFER_ANDROID, native, nullptr);
+    if (surface.image == EGL_NO_IMAGE_KHR) {
+      std::fprintf(stderr, "OOS external eglCreateImageKHR failed: 0x%x\n",
+                   eglGetError());
+      destroyExternalSurface(surface, false);
+      return nullptr;
+    }
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    glGenTextures(1, &surface.texture);
+    glBindTexture(GL_TEXTURE_2D, surface.texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    image_target_(GL_TEXTURE_2D,
+                  reinterpret_cast<GLeglImageOES>(surface.image));
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+      std::fprintf(stderr, "OOS external EGLImage bind failed: 0x%x\n", error);
+      destroyExternalSurface(surface, true);
+      return nullptr;
+    }
+    surface.last_used = ++external_surface_epoch_;
+    external_surfaces_.push_back(surface);
+    return &external_surfaces_.back();
+  }
 
   bool makeGlesContextCurrent() override {
     return egl_display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT &&
@@ -816,7 +919,11 @@ private:
   bool revealed_ = false;
   bool owns_display_state_ = false;
   bool geometry_changed_ = true;
+  bool trace_frames_ = false;
   int release_fence_ = -1;
+  uint64_t external_surface_epoch_ = 0;
+  std::vector<ExternalSurface> external_surfaces_;
+  std::vector<uint8_t> trace_pixels_;
 };
 
 PrimaryGlesDisplay::PrimaryGlesDisplay() : impl_(std::make_unique<Impl>()) {}

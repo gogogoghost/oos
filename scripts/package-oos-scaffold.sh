@@ -71,6 +71,8 @@ install -m 0755 "$TEMPLATE_DIR/init.sh" "$STAGING/init.sh"
 install -m 0755 "$TEMPLATE_DIR/deinit.sh" "$STAGING/deinit.sh"
 install -m 0755 "$TEMPLATE_DIR/start.sh" "$STAGING/start.sh"
 install -m 0755 "$TEMPLATE_DIR/gc-res.sh" "$STAGING/gc-res.sh"
+install -m 0644 "$TEMPLATE_DIR/runtime.conf.example" \
+  "$STAGING/runtime.conf.example"
 
 mkdir -p "$STAGING/rootfs/system" \
   "$STAGING/rootfs/vendor" \

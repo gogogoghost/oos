@@ -23,6 +23,11 @@ namespace oos::web {
 
 namespace {
 
+bool environmentEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] && std::strcmp(value, "0") != 0;
+}
+
 std::string jsonString(const std::string &value) {
   static const char hex[] = "0123456789abcdef";
   std::string output = "\"";
@@ -81,7 +86,9 @@ public:
   static constexpr size_t kMaximumPendingRequests = 64;
 
   explicit DeviceApiClient(int socket_fd)
-      : socket_fd_(socket_fd), worker_(&DeviceApiClient::run, this) {}
+      : socket_fd_(socket_fd),
+        trace_(environmentEnabled("OOS_TRACE_DEVICE_API")),
+        worker_(&DeviceApiClient::run, this) {}
 
   ~DeviceApiClient() {
     {
@@ -140,17 +147,15 @@ private:
   };
 
   static gboolean finish(gpointer data) {
-    std::unique_ptr<Completion> completion(
-        static_cast<Completion *>(data));
+    std::unique_ptr<Completion> completion(static_cast<Completion *>(data));
     if (completion->result != 0) {
       webkit_script_message_reply_return_error_message(
-          completion->reply,
-          completion->result < 0 ? std::strerror(-completion->result)
+          completion->reply, completion->result < 0
+                                 ? std::strerror(-completion->result)
                                  : "OOS device API failed");
     } else {
-      JSCValue *value =
-          jsc_value_new_string(completion->context,
-                               completion->response.c_str());
+      JSCValue *value = jsc_value_new_string(completion->context,
+                                             completion->response.c_str());
       webkit_script_message_reply_return_value(completion->reply, value);
       g_object_unref(value);
     }
@@ -212,11 +217,19 @@ private:
         }
       }
       oos_device_api_free(payload);
+      if (trace_) {
+        std::fprintf(stderr,
+                     "OOS device API: operation=%u volume=%u path=%s "
+                     "request=%zu response=%u result=%d\n",
+                     request.operation, request.volume, request.path.c_str(),
+                     request.payload.size(), payload_size, completion->result);
+      }
       g_main_context_invoke(nullptr, finish, completion.release());
     }
   }
 
   int socket_fd_ = -1;
+  bool trace_ = false;
   std::mutex mutex_;
   std::condition_variable ready_;
   std::deque<Pending> pending_;
@@ -276,8 +289,8 @@ bool KaiOsApiBridge::initialize(CloseCallback close_callback,
   api_client_ = std::make_unique<DeviceApiClient>(api_fd_);
 
   script_ = "(() => { 'use strict';"
-            "const runtime = Object.freeze({appId:" + jsonString(app_id_) +
-            ",apiProfile:" + jsonString(api_profile_) +
+            "const runtime = Object.freeze({appId:" +
+            jsonString(app_id_) + ",apiProfile:" + jsonString(api_profile_) +
             ",permissions:Object.freeze(" + jsonStrings(permissions_) +
             "),bridgeVersion:3,traceKeys:" +
             (std::getenv("OOS_TRACE_KEYS") ? "true" : "false") +
@@ -302,10 +315,18 @@ const translatedKeys = new WeakSet();
 if (runtime.traceKeys) {
   const trace = message =>
     window.webkit.messageHandlers.oosLifecycle.postMessage(`trace:${message}`);
-  for (const type of ['keydown', 'keyup'])
-    globalThis.addEventListener(type, event =>
-      trace(`${type}:key=${event.key}:code=${event.code}:repeat=${event.repeat}`),
-      true);
+  const traceDom = reason => defer(() => {
+    const active = document.activeElement?.tagName ?? 'none';
+    const body = (document.body?.innerText ?? '').replace(/\s+/g, ' ')
+      .trim().slice(0, 240);
+    trace(`${reason}:active=${active}:body=${body}`);
+  });
+  for (const type of ['keydown', 'keyup']) {
+    globalThis.addEventListener(type, event => {
+      trace(`${type}:key=${event.key}:code=${event.code}:repeat=${event.repeat}`);
+      if (type === 'keyup') traceDom('post-key');
+    }, true);
+  }
   globalThis.addEventListener('focus', () => trace('window-focus'), true);
   globalThis.addEventListener('blur', () => trace('window-blur'), true);
   document.addEventListener('visibilitychange', () =>
@@ -2055,10 +2076,12 @@ int KaiOsApiBridge::handleDeviceApi(WebKitUserContentManager *,
     }
   }
 
-  const bool queued = bridge->api_client_ && bridge->api_client_->enqueue(
-      request_operation, static_cast<uint16_t>(volume->integerValue()),
-      request_flags, request_path, request_payload,
-      static_cast<uint32_t>(request_payload_size), message, reply);
+  const bool queued =
+      bridge->api_client_ &&
+      bridge->api_client_->enqueue(
+          request_operation, static_cast<uint16_t>(volume->integerValue()),
+          request_flags, request_path, request_payload,
+          static_cast<uint32_t>(request_payload_size), message, reply);
   g_free(request_payload);
   if (!queued) {
     webkit_script_message_reply_return_error_message(

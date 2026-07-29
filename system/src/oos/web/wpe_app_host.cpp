@@ -1,8 +1,8 @@
 #include "oos/web/wpe_app_host.h"
 
+#include "oos/apps/permissions.h"
 #include "oos/compositor/compositor.h"
 #include "oos/compositor/surface_transport.h"
-#include "oos/apps/permissions.h"
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
 #include "oos/input/key_input.h"
@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 extern "C" {
@@ -35,8 +36,6 @@ void AHardwareBuffer_release(AHardwareBuffer *buffer);
 namespace oos::web {
 namespace {
 
-constexpr int kAcceptSliceMs = 100;
-constexpr int kAcceptTimeoutMs = 10000;
 constexpr int kFramePollMs = 16;
 constexpr int kChildStopSlices = 50;
 constexpr useconds_t kChildStopSliceUs = 20000;
@@ -44,6 +43,11 @@ constexpr useconds_t kChildStopSliceUs = 20000;
 const char *environmentOr(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
   return value && value[0] ? value : fallback;
+}
+
+bool environmentEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] && std::strcmp(value, "0") != 0;
 }
 
 std::string errorText(const char *operation, int result) {
@@ -72,7 +76,7 @@ void stopChild(pid_t child) {
 
 struct KeyDispatchContext {
   int connection = -1;
-  bool success = true;
+  int result = 0;
   bool trace = false;
 };
 
@@ -89,29 +93,44 @@ void sendKey(void *data, const input::KeyEvent &event) {
     std::fprintf(stderr, "OOS key send: code=%u action=%u result=%d\n",
                  key.code, key.action, result);
   }
-  if (result != 0)
-    context->success = false;
+  if (result != 0 && context->result == 0)
+    context->result = result;
 }
 
 pid_t startRunner(const apps::AppLaunch &launch,
-                  const device::DeviceDescriptor &device,
-                  const char *socket_path, int api_fd, int host_api_fd) {
+                  const device::DeviceDescriptor &device, int surface_fd,
+                  int host_surface_fd, int input_fd, int host_input_fd,
+                  int api_fd, int host_api_fd) {
   const char *runner = environmentOr("OOS_WPE_RUNNER", "/opt/oos/bin/oos-wpe");
   const std::string width = std::to_string(device.primary_width);
   const std::string height = std::to_string(device.primary_height);
+  const std::string surface_descriptor = std::to_string(surface_fd);
+  const std::string input_descriptor = std::to_string(input_fd);
   const std::string api_descriptor = std::to_string(api_fd);
   std::vector<std::string> argument_storage = {
       runner,
-      "--id", launch.app.manifest.id,
-      "--package", launch.executable_path,
-      "--entrypoint", launch.entrypoint,
-      "--api-profile", launch.app.manifest.api_profile,
-      "--data", launch.data_directory,
-      "--cache", launch.cache_directory,
-      "--socket", socket_path,
-      "--api-fd", api_descriptor,
-      "--width", width,
-      "--height", height,
+      "--id",
+      launch.app.manifest.id,
+      "--package",
+      launch.executable_path,
+      "--entrypoint",
+      launch.entrypoint,
+      "--api-profile",
+      launch.app.manifest.api_profile,
+      "--data",
+      launch.data_directory,
+      "--cache",
+      launch.cache_directory,
+      "--surface-fd",
+      surface_descriptor,
+      "--input-fd",
+      input_descriptor,
+      "--api-fd",
+      api_descriptor,
+      "--width",
+      width,
+      "--height",
+      height,
   };
   for (const std::string &permission :
        launch.app.manifest.requested_permissions) {
@@ -125,7 +144,16 @@ pid_t startRunner(const apps::AppLaunch &launch,
   arguments.push_back(nullptr);
   const pid_t child = fork();
   if (child == 0) {
+    close(host_surface_fd);
+    close(host_input_fd);
     close(host_api_fd);
+    // ARMv7 BBQ remains enabled, but its loop OSR entrypoint is not reliable on
+    // the KaiOS JSC port. Hot functions still tier from IPInt to BBQ.
+    setenv("JSC_useWasmOSR", "false", 1);
+    if (environmentEnabled("OOS_ENABLE_INSPECTOR")) {
+      setenv("WEBKIT_INSPECTOR_HTTP_SERVER",
+             environmentOr("OOS_INSPECTOR_ADDRESS", "127.0.0.1:9222"), 1);
+    }
     const char *wpe_library_path = environmentOr(
         "OOS_WPE_LD_LIBRARY_PATH",
         "/opt/oos/lib:/system/lib:/vendor/lib:/apex/com.android.runtime/lib");
@@ -150,7 +178,8 @@ WpeAppHost::~WpeAppHost() = default;
 bool WpeAppHost::run(const apps::AppLaunch &launch,
                      volatile std::sig_atomic_t *stop_requested) {
   error_.clear();
-  services::SystemServiceHub system_services(repository_.dataRoot(), &repository_);
+  services::SystemServiceHub system_services(repository_.dataRoot(),
+                                             &repository_);
   if (!system_services.initialize()) {
     error_ = "initialize OOS system services: " + system_services.lastError();
     return false;
@@ -159,38 +188,54 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       apps::ownedDataStoreGrants(launch.app.manifest.requested_permissions);
   std::unique_ptr<storage::AppStorage> app_storage;
   if (!data_store_grants.empty()) {
-    app_storage = std::make_unique<storage::AppStorage>(
-        launch.data_directory + "/oos-platform");
+    app_storage = std::make_unique<storage::AppStorage>(launch.data_directory +
+                                                        "/oos-platform");
     if (!app_storage->initialize()) {
       error_ = "initialize KaiOS DataStore: " + app_storage->lastError();
       return false;
     }
   }
-  const char *socket_path =
-      environmentOr("OOS_WPE_SURFACE_SOCKET", "/data/runtime/wpe-surface.sock");
-  const int listener = oos_surface_transport_listen(socket_path);
-  if (listener < 0) {
-    error_ = errorText("create WPE surface listener", listener);
+  int surface_sockets[2] = {-1, -1};
+  const int surface_pair_result =
+      oos_surface_transport_socket_pair(surface_sockets);
+  if (surface_pair_result != 0) {
+    error_ = errorText("create WPE surface channel", surface_pair_result);
+    return false;
+  }
+  int input_sockets[2] = {-1, -1};
+  const int input_pair_result =
+      oos_surface_transport_socket_pair(input_sockets);
+  if (input_pair_result != 0) {
+    error_ = errorText("create WPE input channel", input_pair_result);
+    close(surface_sockets[0]);
+    close(surface_sockets[1]);
     return false;
   }
   int api_sockets[2] = {-1, -1};
   const int api_pair_result = oos_device_api_socket_pair(api_sockets);
   if (api_pair_result != 0) {
     error_ = errorText("create WPE device API channel", api_pair_result);
-    close(listener);
-    unlink(socket_path);
+    close(surface_sockets[0]);
+    close(surface_sockets[1]);
+    close(input_sockets[0]);
+    close(input_sockets[1]);
     return false;
   }
-  const pid_t child = startRunner(launch, device_.descriptor(), socket_path,
-                                  api_sockets[1], api_sockets[0]);
+  const pid_t child = startRunner(
+      launch, device_.descriptor(), surface_sockets[1], surface_sockets[0],
+      input_sockets[1], input_sockets[0], api_sockets[1], api_sockets[0]);
   if (child < 0) {
     error_ = std::string("start WPE runner: ") + std::strerror(errno);
-    close(listener);
+    close(surface_sockets[0]);
+    close(surface_sockets[1]);
+    close(input_sockets[0]);
+    close(input_sockets[1]);
     close(api_sockets[0]);
     close(api_sockets[1]);
-    unlink(socket_path);
     return false;
   }
+  close(surface_sockets[1]);
+  close(input_sockets[1]);
   close(api_sockets[1]);
 
   storage::DeviceStorageService device_storage;
@@ -230,30 +275,12 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
     device_api_context.wake_locks.clear();
   };
 
-  int connection = -ETIMEDOUT;
   int child_status = 0;
-  for (int waited = 0; waited < kAcceptTimeoutMs; waited += kAcceptSliceMs) {
-    if ((stop_requested && *stop_requested) || input_.stopRequested() ||
-        childExited(child, child_status))
-      break;
-    connection = oos_surface_transport_accept(listener, kAcceptSliceMs);
-    if (connection >= 0 || connection != -ETIMEDOUT)
-      break;
-  }
-  if (connection < 0) {
-    const bool externally_stopped =
-        (stop_requested && *stop_requested) || input_.stopRequested();
-    error_ = errorText("accept WPE producer", connection);
-    stopChild(child);
-    stopDeviceApi();
-    close(listener);
-    unlink(socket_path);
-    return externally_stopped;
-  }
-
   bool success = true;
   uint64_t presented_frames = 0;
-  KeyDispatchContext key_context{connection, true,
+  std::unordered_map<uint64_t, AHardwareBuffer *> surface_buffers;
+  const bool trace_frames = environmentEnabled("OOS_TRACE_WPE_FRAMES");
+  KeyDispatchContext key_context{input_sockets[0], 0,
                                  std::getenv("OOS_TRACE_KEYS") != nullptr};
   while (!(stop_requested && *stop_requested) && !input_.stopRequested()) {
     if (!device_api_success) {
@@ -263,8 +290,8 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
     }
     OosSurfaceTransportFrame packet = {};
     AHardwareBuffer *buffer = nullptr;
-    const int received = oos_surface_transport_receive(connection, &packet,
-                                                       &buffer, kFramePollMs);
+    const int received = oos_surface_transport_receive(
+        surface_sockets[0], &packet, &buffer, kFramePollMs);
     if (received == 0)
       break;
     if (received < 0 && received != -ETIMEDOUT) {
@@ -273,6 +300,21 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       break;
     }
     if (received > 0) {
+      if (buffer) {
+        auto [entry, inserted] =
+            surface_buffers.emplace(packet.buffer_id, buffer);
+        if (!inserted) {
+          AHardwareBuffer_release(entry->second);
+          entry->second = buffer;
+        }
+      }
+      auto buffer_entry = surface_buffers.find(packet.buffer_id);
+      if (buffer_entry == surface_buffers.end()) {
+        error_ = "WPE frame referenced an unknown surface buffer";
+        success = false;
+        break;
+      }
+      buffer = buffer_entry->second;
       AHardwareBuffer_Desc description = {};
       AHardwareBuffer_describe(buffer, &description);
       compositor::SurfaceFrame frame;
@@ -284,9 +326,8 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       frame.width = packet.width;
       frame.height = packet.height;
       const bool presented = compositor_.presentSurface(frame);
-      AHardwareBuffer_release(buffer);
       const int acknowledged =
-          oos_surface_transport_acknowledge(connection, presented);
+          oos_surface_transport_acknowledge(surface_sockets[0], presented);
       if (!presented || acknowledged != 0) {
         error_ = !presented ? "OOS compositor rejected the WPE surface"
                             : errorText("acknowledge WPE frame", acknowledged);
@@ -294,9 +335,16 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
         break;
       }
       ++presented_frames;
+      if (trace_frames) {
+        std::fprintf(stderr, "OOS WPE host presented frame=%llu\n",
+                     static_cast<unsigned long long>(presented_frames));
+        std::fflush(stderr);
+      }
     }
-    if (input_.poll(0, sendKey, &key_context) < 0 || !key_context.success) {
-      error_ = "forward key input to WPE failed";
+    if (input_.poll(0, sendKey, &key_context) < 0 || key_context.result != 0) {
+      error_ = key_context.result
+                   ? errorText("forward key input to WPE", key_context.result)
+                   : "poll key input for WPE failed";
       success = false;
       break;
     }
@@ -304,9 +352,12 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       break;
   }
 
-  close(connection);
-  close(listener);
-  unlink(socket_path);
+  close(surface_sockets[0]);
+  close(input_sockets[0]);
+  for (const auto &[buffer_id, retained_buffer] : surface_buffers) {
+    (void)buffer_id;
+    AHardwareBuffer_release(retained_buffer);
+  }
   const bool externally_stopped =
       (stop_requested && *stop_requested) || input_.stopRequested();
   if (!childExited(child, child_status))

@@ -104,6 +104,16 @@ adb shell "su -c 'tar -xzf \
   -C /data/local/tmp/oos'"
 ```
 
+The Nokia 8110 image has `gzip` but no `gunzip` applet, so its `tar -xzf`
+path is not usable. With root adbd, extract the same archives through BusyBox:
+
+```sh
+adb shell 'cd /data/local/tmp && busybox gzip -dc \
+  oos-scaffold-nokia-8110-4g.tgz | tar -xf -'
+adb shell 'cd /data/local/tmp/oos && busybox gzip -dc \
+  ../oos-res-nokia-8110-4g-1.0.0.tgz | tar -xf -'
+```
+
 Activate, initialize, and start:
 
 ```sh
@@ -121,6 +131,28 @@ the same ZIP. Selecting a registered KaiOS application starts the packaged
 `/opt/oos/bin/oos-wpe` producer while the main OOS process retains display and
 input ownership. Each Web app receives separate persistent WebKit data and
 content-versioned cache directories.
+
+## WPE Inspector
+
+Remote inspector support is built into WPE but remains disabled at runtime.
+Enable it only for a diagnostic launch; the HTTP frontend listens on device
+loopback and is exposed to the host through ADB:
+
+```sh
+adb shell 'cd /data/local/tmp/oos && \
+  OOS_ENABLE_INSPECTOR=1 OOS_TRACE_WEB_CONSOLE=1 \
+  OOS_TRACE_DEVICE_API=1 ./start.sh --app omnij2me'
+./scripts/forward-wpe-inspector.sh
+```
+
+Open `http://127.0.0.1:9222/` in a desktop browser and select the advertised
+page. Set `OOS_INSPECTOR_ADDRESS=127.0.0.1:<port>` and pass the same port to
+the forwarding script when 9222 is already occupied.
+
+For a persistent runtime switch, copy `runtime.conf.example` to
+`/data/oos/system/runtime.conf`, set `OOS_ENABLE_INSPECTOR=1`, and restart the
+current WPE application. Remote inspector support stays compiled into every
+WPE device profile; changing this file never requires a rebuild.
 
 ## Upgrade
 

@@ -1,0 +1,27 @@
+From 6ff20b6a3c0ca8e934af4b6209017468e15b3661 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Wed, 29 Jul 2026 17:30:00 +0800
+Subject: [PATCH] JSC: honor the WebAssembly OSR option in BBQ
+
+Do not generate a loop OSR entrypoint when useWasmOSR is disabled. This keeps
+normal IPInt-to-BBQ function tiering while allowing ARMv7 hosts to disable the
+unreliable loop entrypoint path.
+---
+ Source/JavaScriptCore/wasm/WasmBBQJIT.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Source/JavaScriptCore/wasm/WasmBBQJIT.cpp b/Source/JavaScriptCore/wasm/WasmBBQJIT.cpp
+index 5bb5491e26..9a73d00fa5 100644
+--- a/Source/JavaScriptCore/wasm/WasmBBQJIT.cpp
++++ b/Source/JavaScriptCore/wasm/WasmBBQJIT.cpp
+@@ -5713,7 +5713,7 @@ Expected<std::unique_ptr<InternalFunction>, String> parseAndCompileBBQ(Compilati
+     FunctionParser<BBQJIT> parser(irGenerator, function.data, signature, info);
+     WASM_FAIL_IF_HELPER_FAILS(parser.parse());
+ 
+-    if (irGenerator.hasLoops())
++    if (irGenerator.hasLoops() && Options::useWasmOSR())
+         result->bbqSharedLoopEntrypoint = irGenerator.addLoopOSREntrypoint();
+ 
+     irGenerator.finalize();
+-- 
+2.50.1

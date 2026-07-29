@@ -14,12 +14,17 @@ WPEWebProcess -> WpeSurfaceHost (producer process)
 ```
 
 `WpeSurfaceHost` is part of the WPE producer. It waits for the acquire fence
-and sends the opaque GPU handle over `SOCK_SEQPACKET`. The OOS host imports the
-handle into `oos::compositor::Compositor` and acknowledges it only after
-composition. WPE then sends release/frame-complete. The processes deliberately
-have separate library paths: WPE uses its isolated sysroot and the host uses
-the stock graphics stack. This prevents C++ ABI and common-SONAME collisions
-on both Android 6 and Android 10.
+and sends each opaque GPU handle once over `SOCK_SEQPACKET`. Later frames refer
+to that connection-local allocation by `buffer_id`; the OOS host retains the
+import until the producer disconnects and acknowledges every frame only after
+composition. This avoids per-frame FD transfer and gralloc registration while
+preserving producer backpressure. WPE's release/frame-complete replies use the
+per-EGLTarget channel so WebKit receives them on its compositor thread, as
+required by `ThreadedCompositor`.
+
+The processes deliberately have separate library paths: WPE uses its isolated
+sysroot and the host uses the stock graphics stack. This prevents C++ ABI and
+common-SONAME collisions on both Android 6 and Android 10.
 
 WPE code must never open HWC, write a framebuffer, switch displays, or control
 a backlight. Only the OOS host owns those capabilities.

@@ -1,33 +1,143 @@
 #include "oos/compositor/surface_transport.h"
 
+#include <android/hardware_buffer.h>
+
+#include <cerrno>
 #include <cstdio>
-#include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-int main() {
+extern "C" {
+int AHardwareBuffer_allocate(const AHardwareBuffer_Desc *description,
+                             AHardwareBuffer **buffer);
+void AHardwareBuffer_release(AHardwareBuffer *buffer);
+}
+
+namespace {
+
+bool testRetainedBufferTransport() {
   int sockets[2] = {-1, -1};
-  if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) != 0) {
-    std::perror("socketpair");
-    return 1;
+  if (oos_surface_transport_socket_pair(sockets) != 0)
+    return false;
+
+  AHardwareBuffer_Desc description = {};
+  description.width = 16;
+  description.height = 16;
+  description.layers = 1;
+  description.format = AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM;
+  description.usage = AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
+                      AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+  AHardwareBuffer *producer_buffer = nullptr;
+  if (AHardwareBuffer_allocate(&description, &producer_buffer) != 0 ||
+      !producer_buffer) {
+    close(sockets[0]);
+    close(sockets[1]);
+    return false;
   }
-  const OosSurfaceTransportKey expected = {
-      .timestamp_us = 123456789,
-      .code = 28,
-      .action = 1,
+
+  const pid_t consumer = fork();
+  if (consumer == 0) {
+    close(sockets[0]);
+    OosSurfaceTransportFrame received_frame = {};
+    AHardwareBuffer *retained_buffer = nullptr;
+    const int allocation = oos_surface_transport_receive(
+        sockets[1], &received_frame, &retained_buffer, 2000);
+    const bool first_valid =
+        allocation == 1 && retained_buffer && received_frame.buffer_id == 7 &&
+        (received_frame.flags & OOS_SURFACE_FRAME_NEW_BUFFER);
+    if (oos_surface_transport_acknowledge(sockets[1], first_valid) != 0) {
+      if (retained_buffer)
+        AHardwareBuffer_release(retained_buffer);
+      _exit(1);
+    }
+
+    AHardwareBuffer *unexpected_buffer = nullptr;
+    const int reference = oos_surface_transport_receive(
+        sockets[1], &received_frame, &unexpected_buffer, 2000);
+    const bool second_valid = reference == 1 && !unexpected_buffer &&
+                              received_frame.buffer_id == 7 &&
+                              received_frame.flags == 0;
+    const bool consumer_success =
+        oos_surface_transport_acknowledge(sockets[1], second_valid) == 0 &&
+        first_valid && second_valid;
+    if (retained_buffer)
+      AHardwareBuffer_release(retained_buffer);
+    close(sockets[1]);
+    _exit(consumer_success ? 0 : 1);
+  }
+  if (consumer < 0) {
+    AHardwareBuffer_release(producer_buffer);
+    close(sockets[0]);
+    close(sockets[1]);
+    return false;
+  }
+  close(sockets[1]);
+
+  OosSurfaceTransportFrame frame = {
+      .surface_id = 1,
+      .buffer_id = 7,
+      .width = 16,
+      .height = 16,
+      .flags = OOS_SURFACE_FRAME_NEW_BUFFER,
       .reserved = 0,
   };
-  OosSurfaceTransportKey actual = {};
-  const int sent = oos_surface_transport_send_key(sockets[0], &expected);
-  const int received =
-      oos_surface_transport_receive_key(sockets[1], &actual, 1000);
+  const int allocation =
+      oos_surface_transport_send(sockets[0], &frame, producer_buffer, -1, 2000);
+  frame.flags = 0;
+  const int reference =
+      allocation == 0
+          ? oos_surface_transport_send(sockets[0], &frame, nullptr, -1, 2000)
+          : allocation;
+  int consumer_status = 0;
+  while (waitpid(consumer, &consumer_status, 0) < 0 && errno == EINTR) {
+  }
+  AHardwareBuffer_release(producer_buffer);
   close(sockets[0]);
-  close(sockets[1]);
-  if (sent != 0 || received != 1 ||
-      actual.timestamp_us != expected.timestamp_us ||
-      actual.code != expected.code || actual.action != expected.action) {
-    std::fprintf(stderr, "FAIL: surface transport key round trip\n");
+  return allocation == 0 && reference == 0 && WIFEXITED(consumer_status) &&
+         WEXITSTATUS(consumer_status) == 0;
+}
+
+} // namespace
+
+int main() {
+  int surface_sockets[2] = {-1, -1};
+  int input_sockets[2] = {-1, -1};
+  if (oos_surface_transport_socket_pair(surface_sockets) != 0 ||
+      oos_surface_transport_socket_pair(input_sockets) != 0) {
+    std::fprintf(stderr, "FAIL: create isolated transport channels\n");
     return 1;
   }
-  std::fprintf(stderr, "PASS: surface transport key round trip\n");
-  return 0;
+
+  bool success = true;
+  for (uint16_t index = 0; index < 1024; ++index) {
+    const OosSurfaceTransportKey expected = {
+        .timestamp_us = 123456789 + index,
+        .code = index,
+        .action = static_cast<uint8_t>(index % 3),
+        .reserved = 0,
+    };
+    OosSurfaceTransportKey actual = {};
+    const int sent =
+        oos_surface_transport_send_key(input_sockets[0], &expected);
+    const int surface_received =
+        oos_surface_transport_receive_key(surface_sockets[1], &actual, 0);
+    const int received =
+        oos_surface_transport_receive_key(input_sockets[1], &actual, 1000);
+    if (sent != 0 || surface_received != -ETIMEDOUT || received != 1 ||
+        actual.timestamp_us != expected.timestamp_us ||
+        actual.code != expected.code || actual.action != expected.action) {
+      success = false;
+      break;
+    }
+  }
+  close(surface_sockets[0]);
+  close(surface_sockets[1]);
+  close(input_sockets[0]);
+  close(input_sockets[1]);
+  std::fprintf(stderr, "%s: isolated input transport stress test\n",
+               success ? "PASS" : "FAIL");
+  const bool retained_buffer_success = testRetainedBufferTransport();
+  std::fprintf(stderr, "%s: retained surface buffer transport test\n",
+               retained_buffer_success ? "PASS" : "FAIL");
+  return success && retained_buffer_success ? 0 : 1;
 }

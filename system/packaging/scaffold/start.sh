@@ -22,6 +22,45 @@ fi
 "$OOS_HOME/init.sh"
 resolve_res
 
+runtime_config_value() {
+  awk -F= -v option="$1" \
+    '$1 == option { value=substr($0, index($0, "=") + 1) } END { print value }' \
+    "$OOS_PERSIST_DIR/system/runtime.conf"
+}
+
+if [ -f "$OOS_PERSIST_DIR/system/runtime.conf" ]; then
+  if [ -z "${OOS_ENABLE_INSPECTOR+x}" ]; then
+    OOS_ENABLE_INSPECTOR=$(runtime_config_value OOS_ENABLE_INSPECTOR)
+  fi
+  if [ -z "${OOS_TRACE_WEB_CONSOLE+x}" ]; then
+    OOS_TRACE_WEB_CONSOLE=$(runtime_config_value OOS_TRACE_WEB_CONSOLE)
+  fi
+  if [ -z "${OOS_TRACE_DEVICE_API+x}" ]; then
+    OOS_TRACE_DEVICE_API=$(runtime_config_value OOS_TRACE_DEVICE_API)
+  fi
+  if [ -z "${OOS_TRACE_WPE_FRAMES+x}" ]; then
+    OOS_TRACE_WPE_FRAMES=$(runtime_config_value OOS_TRACE_WPE_FRAMES)
+  fi
+  if [ -z "${OOS_INSPECTOR_ADDRESS+x}" ]; then
+    OOS_INSPECTOR_ADDRESS=$(runtime_config_value OOS_INSPECTOR_ADDRESS)
+  fi
+fi
+for runtime_switch in "${OOS_ENABLE_INSPECTOR:-0}" \
+  "${OOS_TRACE_WEB_CONSOLE:-0}" "${OOS_TRACE_DEVICE_API:-0}" \
+  "${OOS_TRACE_WPE_FRAMES:-0}"; do
+  case "$runtime_switch" in
+    0|1) ;;
+    *) echo "invalid boolean in runtime.conf: $runtime_switch" >&2; exit 1 ;;
+  esac
+done
+case "${OOS_INSPECTOR_ADDRESS:-127.0.0.1:9222}" in
+  127.0.0.1:*) ;;
+  *) echo "inspector must listen on device loopback" >&2; exit 1 ;;
+esac
+export OOS_ENABLE_INSPECTOR OOS_TRACE_WEB_CONSOLE OOS_TRACE_DEVICE_API
+export OOS_TRACE_WPE_FRAMES
+export OOS_INSPECTOR_ADDRESS
+
 setprop ctl.stop b2g 2>/dev/null || true
 setprop ctl.stop b2gkillerd 2>/dev/null || true
 echo 0 > /sys/class/leds/lcd-backlight/brightness 2>/dev/null || true

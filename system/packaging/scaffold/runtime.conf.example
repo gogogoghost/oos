@@ -1,0 +1,8 @@
+# Copy this file to /data/oos/system/runtime.conf to persist diagnostic
+# switches across OOS application restarts. Inspector changes take effect the
+# next time a WPE application starts.
+OOS_ENABLE_INSPECTOR=0
+OOS_INSPECTOR_ADDRESS=127.0.0.1:9222
+OOS_TRACE_WEB_CONSOLE=0
+OOS_TRACE_DEVICE_API=0
+OOS_TRACE_WPE_FRAMES=0

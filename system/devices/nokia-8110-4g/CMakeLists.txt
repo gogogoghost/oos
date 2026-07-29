@@ -104,7 +104,8 @@ if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
   target_include_directories(oos_wpe_surface_host PRIVATE
     ${NOKIA_8110_WPE_INCLUDES})
   target_link_libraries(oos_wpe_surface_host PUBLIC
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so"
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libwpe-1.0.so")
   add_library(oos::web ALIAS oos_wpe_surface_host)
 
   add_executable(oos-wpe
@@ -123,7 +124,11 @@ if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
     "${NOKIA_8110_WPE_SYSROOT}/lib/libgio-2.0.so"
     "${NOKIA_8110_WPE_SYSROOT}/lib/libglib-2.0.so"
     "${NOKIA_8110_WPE_SYSROOT}/lib/libgobject-2.0.so"
-    oos_android23_hardware_buffer)
+    oos_android23_hardware_buffer
+    "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
+  target_link_options(oos-wpe PRIVATE
+    -Wl,--allow-shlib-undefined
+    "-Wl,-rpath-link,${NOKIA_8110_SYSTEM_LIB_DIR}")
   set_target_properties(oos-wpe PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
@@ -180,6 +185,7 @@ add_library(oos::modem ALIAS oos_nokia_8110_modem)
 add_library(oos_nokia_8110_basic_hardware STATIC
   src/audio_manager.cpp
   src/camera_manager.cpp
+  src/codec_manager.cpp
   src/permission_controller.cpp
   src/power_manager.cpp
   src/vibrator_manager.cpp)

@@ -16,7 +16,7 @@ int AHardwareBuffer_recvHandleFromUnixSocket(int socket_fd,
 
 enum {
   OOS_SURFACE_TRANSPORT_MAGIC = 0x4f535446,
-  OOS_SURFACE_TRANSPORT_VERSION = 2,
+  OOS_SURFACE_TRANSPORT_VERSION = 3,
   OOS_SURFACE_PACKET_FRAME = 1,
   OOS_SURFACE_PACKET_ACKNOWLEDGE = 2,
   OOS_SURFACE_PACKET_KEY = 3,
@@ -36,12 +36,18 @@ typedef struct OosSurfaceTransportPacket {
 
 static int wait_for_fd(int fd, short events, int timeout_ms);
 
-static int send_packet(int socket_fd, const OosSurfaceTransportPacket *packet) {
+static int send_packet_with_flags(int socket_fd,
+                                  const OosSurfaceTransportPacket *packet,
+                                  int flags) {
   ssize_t sent;
   do {
-    sent = send(socket_fd, packet, sizeof(*packet), MSG_NOSIGNAL);
+    sent = send(socket_fd, packet, sizeof(*packet), MSG_NOSIGNAL | flags);
   } while (sent < 0 && errno == EINTR);
   return sent == (ssize_t)sizeof(*packet) ? 0 : (sent < 0 ? -errno : -EIO);
+}
+
+static int send_packet(int socket_fd, const OosSurfaceTransportPacket *packet) {
+  return send_packet_with_flags(socket_fd, packet, 0);
 }
 
 static int receive_packet(int socket_fd, OosSurfaceTransportPacket *packet,
@@ -99,6 +105,16 @@ static int create_socket(void) {
   if (flags >= 0)
     fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
   return fd;
+}
+
+int oos_surface_transport_socket_pair(int sockets[2]) {
+  if (!sockets)
+    return -EINVAL;
+  sockets[0] = -1;
+  sockets[1] = -1;
+  if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) != 0)
+    return -errno;
+  return 0;
 }
 
 int oos_surface_transport_listen(const char *socket_path) {
@@ -161,8 +177,12 @@ int oos_surface_transport_send(int socket_fd,
                                const OosSurfaceTransportFrame *frame,
                                AHardwareBuffer *buffer, int acquire_fence_fd,
                                int timeout_ms) {
-  if (socket_fd < 0 || !frame || !buffer || !frame->surface_id ||
-      !frame->width || !frame->height) {
+  const int sends_buffer =
+      frame && (frame->flags & OOS_SURFACE_FRAME_NEW_BUFFER);
+  if (socket_fd < 0 || !frame || !frame->surface_id || !frame->buffer_id ||
+      !frame->width || !frame->height ||
+      (frame->flags & ~OOS_SURFACE_FRAME_NEW_BUFFER) ||
+      (sends_buffer && !buffer)) {
     if (acquire_fence_fd >= 0)
       close(acquire_fence_fd);
     return -EINVAL;
@@ -182,9 +202,11 @@ int oos_surface_transport_send(int socket_fd,
   int result = send_packet(socket_fd, &packet);
   if (result)
     return result;
-  result = AHardwareBuffer_sendHandleToUnixSocket(buffer, socket_fd);
-  if (result)
-    return result;
+  if (sends_buffer) {
+    result = AHardwareBuffer_sendHandleToUnixSocket(buffer, socket_fd);
+    if (result)
+      return result;
+  }
   OosSurfaceTransportPacket response;
   result = receive_packet(socket_fd, &response, timeout_ms);
   if (result <= 0)
@@ -205,15 +227,18 @@ int oos_surface_transport_receive(int socket_fd,
   if (result <= 0)
     return result;
   if (packet.type != OOS_SURFACE_PACKET_FRAME ||
-      !packet.payload.frame.surface_id || !packet.payload.frame.width ||
-      !packet.payload.frame.height)
+      !packet.payload.frame.surface_id || !packet.payload.frame.buffer_id ||
+      !packet.payload.frame.width || !packet.payload.frame.height ||
+      (packet.payload.frame.flags & ~OOS_SURFACE_FRAME_NEW_BUFFER))
     return -EPROTO;
-  result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
-  if (result)
-    return result;
-  result = AHardwareBuffer_recvHandleFromUnixSocket(socket_fd, buffer);
-  if (result)
-    return result;
+  if (packet.payload.frame.flags & OOS_SURFACE_FRAME_NEW_BUFFER) {
+    result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
+    if (result)
+      return result;
+    result = AHardwareBuffer_recvHandleFromUnixSocket(socket_fd, buffer);
+    if (result)
+      return result;
+  }
   *frame = packet.payload.frame;
   return 1;
 }
@@ -238,7 +263,7 @@ int oos_surface_transport_send_key(int socket_fd,
       .type = OOS_SURFACE_PACKET_KEY,
       .payload.key = *key,
   };
-  return send_packet(socket_fd, &packet);
+  return send_packet_with_flags(socket_fd, &packet, MSG_DONTWAIT);
 }
 
 int oos_surface_transport_receive_key(int socket_fd,

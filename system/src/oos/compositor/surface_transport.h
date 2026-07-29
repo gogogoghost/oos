@@ -9,9 +9,19 @@ extern "C" {
 
 typedef struct OosSurfaceTransportFrame {
   uint64_t surface_id;
+  uint64_t buffer_id;
   uint32_t width;
   uint32_t height;
+  uint32_t flags;
+  uint32_t reserved;
 } OosSurfaceTransportFrame;
+
+enum {
+  // The frame is followed by an AHardwareBuffer handle. Producers set this
+  // only for the first frame using a buffer_id; hosts retain that buffer until
+  // the surface connection closes.
+  OOS_SURFACE_FRAME_NEW_BUFFER = 1u << 0,
+};
 
 typedef struct OosSurfaceTransportKey {
   int64_t timestamp_us;
@@ -20,27 +30,34 @@ typedef struct OosSurfaceTransportKey {
   uint8_t reserved;
 } OosSurfaceTransportKey;
 
+// Creates one connected SOCK_SEQPACKET channel. Surface traffic and input
+// traffic must use different pairs so ACK and key packets have one reader.
+int oos_surface_transport_socket_pair(int sockets[2]);
+
 int oos_surface_transport_listen(const char *socket_path);
 int oos_surface_transport_accept(int listener_fd, int timeout_ms);
 int oos_surface_transport_connect(const char *socket_path, int timeout_ms);
 
-// The acquire fence is always consumed. The call returns after the host has
-// presented or rejected the buffer, so the producer may release it safely.
+// The acquire fence is always consumed. buffer is required for NEW_BUFFER and
+// ignored otherwise. The call returns after the host has presented or rejected
+// the frame, so the producer may reuse it safely.
 int oos_surface_transport_send(int socket_fd,
                                const OosSurfaceTransportFrame *frame,
                                AHardwareBuffer *buffer, int acquire_fence_fd,
                                int timeout_ms);
 
 // Returns 1 for a frame, 0 when the producer closed the connection, or a
-// negative errno value. The caller owns the returned buffer reference.
+// negative errno value. A non-null returned buffer is a new retained pool
+// entry owned by the caller; null means the caller must resolve buffer_id from
+// its connection-local pool.
 int oos_surface_transport_receive(int socket_fd,
                                   OosSurfaceTransportFrame *frame,
                                   AHardwareBuffer **buffer, int timeout_ms);
 int oos_surface_transport_acknowledge(int socket_fd, int accepted);
 
-// Input travels in the opposite direction from frames. The OOS host remains
-// the only process that reads evdev; the WPE producer receives normalized raw
-// key codes and maps them to WPE key symbols.
+// Input uses a dedicated channel. The OOS host remains the only process that
+// reads evdev; the WPE producer receives normalized raw key codes and maps them
+// to WPE key symbols.
 int oos_surface_transport_send_key(int socket_fd,
                                    const OosSurfaceTransportKey *key);
 // Returns 1 for a key, 0 when the host closed the connection, or a negative

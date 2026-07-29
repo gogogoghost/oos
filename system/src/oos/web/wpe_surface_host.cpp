@@ -3,8 +3,11 @@
 #include "oos/compositor/surface.h"
 
 #include <wpe-android/view-backend.h>
+#include <wpe/wpe.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace oos::web {
 
@@ -13,7 +16,10 @@ public:
   Impl(compositor::SurfaceSink &surface_sink, uint64_t surface_id,
        uint32_t width, uint32_t height)
       : surface_sink_(surface_sink), surface_id_(surface_id), width_(width),
-        height_(height) {}
+        height_(height) {
+    const char *trace = std::getenv("OOS_TRACE_WPE_FRAMES");
+    trace_frames_ = trace && trace[0] && std::strcmp(trace, "0") != 0;
+  }
 
   ~Impl() {
     if (backend_)
@@ -26,6 +32,10 @@ public:
     backend_ = WPEAndroidViewBackend_create(width_, height_);
     if (!backend_)
       return false;
+    wpe_view_backend_add_activity_state(viewBackend(),
+                                        wpe_view_activity_state_visible |
+                                            wpe_view_activity_state_focused |
+                                            wpe_view_activity_state_in_window);
     WPEAndroidViewBackend_setCommitBufferHandler(backend_, this, commitBuffer);
     return true;
   }
@@ -60,6 +70,11 @@ private:
       return;
     }
     ++presented_frames_;
+    if (trace_frames_) {
+      std::fprintf(stderr, "WPE surface producer committed frame=%llu\n",
+                   static_cast<unsigned long long>(presented_frames_));
+      std::fflush(stderr);
+    }
     WPEAndroidViewBackend_dispatchFrameComplete(backend_);
   }
 
@@ -69,6 +84,7 @@ private:
   const uint32_t height_;
   WPEAndroidViewBackend *backend_ = nullptr;
   uint64_t presented_frames_ = 0;
+  bool trace_frames_ = false;
 };
 
 WpeSurfaceHost::WpeSurfaceHost(compositor::SurfaceSink &surface_sink,

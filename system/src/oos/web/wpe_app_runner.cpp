@@ -17,10 +17,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <limits>
 #include <signal.h>
 #include <string>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 extern "C" {
@@ -40,7 +42,8 @@ struct RunnerOptions {
   const char *api_profile = nullptr;
   const char *data_directory = nullptr;
   const char *cache_directory = nullptr;
-  const char *socket_path = nullptr;
+  int surface_fd = -1;
+  int input_fd = -1;
   int api_fd = -1;
   uint32_t width = 0;
   uint32_t height = 0;
@@ -50,8 +53,9 @@ struct RunnerOptions {
 void printUsage(const char *program) {
   std::fprintf(stderr,
                "usage: %s --id ID --package APP.zip --entrypoint PATH "
-               "--api-profile PROFILE --data DIR --cache DIR --socket PATH "
-               "--api-fd FD [--permission NAME ...] "
+               "--api-profile PROFILE --data DIR --cache DIR "
+               "--surface-fd FD --input-fd FD --api-fd FD "
+               "[--permission NAME ...] "
                "--width PIXELS --height PIXELS\n",
                program);
 }
@@ -69,6 +73,11 @@ bool parseDimension(const char *value, uint32_t &result) {
   return true;
 }
 
+bool environmentEnabled(const char *name) {
+  const char *value = std::getenv(name);
+  return value && value[0] && std::strcmp(value, "0") != 0;
+}
+
 bool parseFileDescriptor(const char *value, int &result) {
   if (!value || !value[0])
     return false;
@@ -79,6 +88,11 @@ bool parseFileDescriptor(const char *value, int &result) {
     return false;
   result = static_cast<int>(parsed);
   return true;
+}
+
+bool markCloseOnExec(int fd) {
+  const int flags = fcntl(fd, F_GETFD);
+  return flags >= 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
 }
 
 bool parseOptions(int argc, char **argv, RunnerOptions &options) {
@@ -101,9 +115,13 @@ bool parseOptions(int argc, char **argv, RunnerOptions &options) {
       options.data_directory = value;
     else if (std::strcmp(name, "--cache") == 0)
       options.cache_directory = value;
-    else if (std::strcmp(name, "--socket") == 0)
-      options.socket_path = value;
-    else if (std::strcmp(name, "--api-fd") == 0) {
+    else if (std::strcmp(name, "--surface-fd") == 0) {
+      if (!parseFileDescriptor(value, options.surface_fd))
+        return false;
+    } else if (std::strcmp(name, "--input-fd") == 0) {
+      if (!parseFileDescriptor(value, options.input_fd))
+        return false;
+    } else if (std::strcmp(name, "--api-fd") == 0) {
       if (!parseFileDescriptor(value, options.api_fd))
         return false;
     } else if (std::strcmp(name, "--width") == 0) {
@@ -118,8 +136,9 @@ bool parseOptions(int argc, char **argv, RunnerOptions &options) {
   }
   return options.app_id && options.package_path && options.entrypoint &&
          options.api_profile && options.data_directory &&
-         options.cache_directory && options.socket_path &&
-         options.api_fd >= 0 && options.width && options.height;
+         options.cache_directory && options.surface_fd >= 0 &&
+         options.input_fd >= 0 && options.api_fd >= 0 && options.width &&
+         options.height;
 }
 
 class TransportSurfaceSink final : public oos::compositor::SurfaceSink {
@@ -131,33 +150,40 @@ public:
   }
 
   bool presentSurface(const oos::compositor::SurfaceFrame &frame) override {
+    const auto [buffer_id, inserted] =
+        buffer_ids_.try_emplace(frame.buffer, next_buffer_id_++);
     OosSurfaceTransportFrame transport_frame = {
         .surface_id = frame.surface_id,
+        .buffer_id = buffer_id->second,
         .width = frame.width,
         .height = frame.height,
+        .flags = inserted ? OOS_SURFACE_FRAME_NEW_BUFFER : 0u,
+        .reserved = 0,
     };
     const int result =
         oos_surface_transport_send(socket_fd_, &transport_frame,
                                    static_cast<AHardwareBuffer *>(frame.buffer),
                                    frame.acquire_fence_fd, 5000);
     if (result != 0) {
+      if (inserted)
+        buffer_ids_.erase(buffer_id);
       std::fprintf(stderr, "WPE surface transport failed: %d (%s)\n", result,
                    std::strerror(-result));
     }
     return result == 0;
   }
 
-  int socketFd() const { return socket_fd_; }
-
 private:
   int socket_fd_ = -1;
+  uint64_t next_buffer_id_ = 1;
+  std::unordered_map<void *, uint64_t> buffer_ids_;
 };
 
 struct RunnerState {
   GMainLoop *loop = nullptr;
   wpe_view_backend *backend = nullptr;
   WebKitWebView *view = nullptr;
-  int socket_fd = -1;
+  int input_fd = -1;
   guint input_source = 0;
   bool api_ready = false;
   bool load_failed = false;
@@ -234,7 +260,7 @@ gboolean receiveInput(gint, GIOCondition condition, gpointer data) {
   while (true) {
     OosSurfaceTransportKey key = {};
     const int result =
-        oos_surface_transport_receive_key(state->socket_fd, &key, 0);
+        oos_surface_transport_receive_key(state->input_fd, &key, 0);
     if (result == -ETIMEDOUT)
       return G_SOURCE_CONTINUE;
     if (result <= 0) {
@@ -272,15 +298,14 @@ int main(int argc, char **argv) {
     printUsage(argv[0]);
     return 2;
   }
-
-  const int socket_fd =
-      oos_surface_transport_connect(options.socket_path, 10000);
-  if (socket_fd < 0) {
-    std::fprintf(stderr, "connect to OOS compositor failed: %d (%s)\n",
-                 socket_fd, std::strerror(-socket_fd));
+  if (!markCloseOnExec(options.surface_fd) ||
+      !markCloseOnExec(options.input_fd) || !markCloseOnExec(options.api_fd)) {
+    std::fprintf(stderr, "secure inherited WPE channels failed: %s\n",
+                 std::strerror(errno));
     return 1;
   }
-  TransportSurfaceSink surface_sink(socket_fd);
+
+  TransportSurfaceSink surface_sink(options.surface_fd);
   oos::web::WpeSurfaceHost surface(surface_sink, kWebSurfaceId, options.width,
                                    options.height);
   if (!surface.initialize()) {
@@ -323,14 +348,20 @@ int main(int argc, char **argv) {
     g_main_loop_unref(loop);
     return 1;
   }
-  RunnerState state{loop, surface.viewBackend(), view, surface_sink.socketFd()};
+  WebKitSettings *settings = webkit_web_view_get_settings(view);
+  if (environmentEnabled("OOS_ENABLE_INSPECTOR"))
+    webkit_settings_set_enable_developer_extras(settings, TRUE);
+  if (environmentEnabled("OOS_TRACE_WEB_CONSOLE")) {
+    webkit_settings_set_enable_write_console_messages_to_stdout(settings, TRUE);
+  }
+  RunnerState state{loop, surface.viewBackend(), view, options.input_fd};
   state.trace_keys = std::getenv("OOS_TRACE_KEYS") != nullptr;
   g_signal_connect(view, "load-changed", G_CALLBACK(loadChanged), &state);
   g_signal_connect(view, "load-failed", G_CALLBACK(loadFailed), &state);
   g_signal_connect(view, "web-process-terminated",
                    G_CALLBACK(webProcessTerminated), &state);
   state.input_source = g_unix_fd_add(
-      state.socket_fd, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR),
+      state.input_fd, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR),
       receiveInput, &state);
   g_unix_signal_add(SIGINT, stopRunner, loop);
   g_unix_signal_add(SIGTERM, stopRunner, loop);
@@ -341,6 +372,7 @@ int main(int argc, char **argv) {
   g_main_loop_run(loop);
   if (state.input_source)
     g_source_remove(state.input_source);
+  close(options.input_fd);
   g_object_unref(view);
   g_main_loop_unref(loop);
   std::fprintf(stderr, "OOS WPE app stopped: frames=%llu\n",

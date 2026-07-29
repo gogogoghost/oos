@@ -113,7 +113,7 @@ add_library(oos_web_device_api STATIC
 target_include_directories(oos_web_device_api PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_web_device_api PUBLIC
-  oos_device_storage oos_system_services)
+  oos_device_api oos_device_storage oos_system_services)
 
 if(NOT BUILD_LOCAL)
   add_library(oos_surface_transport STATIC
