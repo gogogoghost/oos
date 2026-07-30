@@ -6,3 +6,8 @@ OOS_INSPECTOR_ADDRESS=127.0.0.1:9222
 OOS_TRACE_WEB_CONSOLE=0
 OOS_TRACE_DEVICE_API=0
 OOS_TRACE_WPE_FRAMES=0
+# Reports WebCore PCM burst boundaries; use only while diagnosing lost audio.
+OOS_TRACE_WEBAUDIO=0
+# Negative nice value applied only to WPE WebAudio/GStreamer output threads.
+# Set 0 to disable priority adjustment for compatibility testing.
+OOS_WEB_AUDIO_NICE=-10

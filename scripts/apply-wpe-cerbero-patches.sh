@@ -16,6 +16,7 @@ PATCH_FILES=(
   "$ROOT_DIR/system/patches/wpe-android-cerbero-context-menus-link.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-webassembly-off-jit-build.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-localhost-http-scheme.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-android-webaudio-continuous.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-wpebackend-seqpacket.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-wavpack.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-flac.patch"
@@ -30,6 +31,7 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch:recipes/wpewebkit/0007-OOS-context-menus-off-link-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-webassembly-off-jit-build.patch:recipes/wpewebkit/0008-OOS-webassembly-off-jit-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-localhost-http-scheme.patch:recipes/wpewebkit/0009-OOS-localhost-http-scheme.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-android-webaudio-continuous.patch:recipes/wpewebkit/0010-OOS-Android-continuous-WebAudio.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-gralloc0.patch:recipes/wpebackend-android/0001-OOS-RGB565-and-Android23-buffer.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-seqpacket-ipc.patch:recipes/wpebackend-android/0002-OOS-seqpacket-renderer-IPC.patch"
   "$ROOT_DIR/system/patches/libtasn1-android-opaque-file.patch:recipes/libtasn1/0002-Android-opaque-FILE.patch"
@@ -39,6 +41,19 @@ if [[ ! -d "$CERBERO_DIR/.git" ]]; then
   echo "Missing Cerbero checkout: $CERBERO_DIR" >&2
   exit 1
 fi
+
+# Migrate a checkout previously prepared by the removed JSC Wasm policy. These
+# recipe entries are mutually exclusive with the WAMR replacement patches, and
+# a Cerbero checkout intentionally persists across builds.
+WPEWEBKIT_RECIPE="$CERBERO_DIR/recipes/wpewebkit.recipe"
+for obsolete_patch in \
+  0008-OOS-honor-Wasm-OSR-option.patch \
+  0009-OOS-eager-Wasm-BBQ.patch; do
+  if rg -q -- "$obsolete_patch" "$WPEWEBKIT_RECIPE"; then
+    sed -i "\\|$obsolete_patch|d" "$WPEWEBKIT_RECIPE"
+    echo "Removed obsolete source patch: $obsolete_patch"
+  fi
+done
 
 for patch_mapping in "${SOURCE_PATCHES[@]}"; do
   source_patch=${patch_mapping%%:*}
@@ -98,6 +113,10 @@ for patch_file in "${PATCH_FILES[@]}"; do
        rg -q -- '0009-OOS-localhost-http-scheme.patch' \
          "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
     echo "Cerbero recipe supports packaged .localhost HTTP origins."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-android-webaudio-continuous.patch ]] && \
+       rg -q -- '0010-OOS-Android-continuous-WebAudio.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe preserves continuous Android WebAudio output."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-wpebackend-seqpacket.patch ]] && \
        rg -q -- '0002-OOS-seqpacket-renderer-IPC.patch' \
          "$CERBERO_DIR/recipes/wpebackend-android.recipe"; then

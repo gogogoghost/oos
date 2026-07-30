@@ -1,13 +1,18 @@
 #include <jsc/jsc.h>
 #include <wpe/webkit-web-process-extension.h>
 
+#include <glib.h>
+
 #include <wasm_export.h>
 
 // wasm_export.h must define WAMR's extended allocator API first.
 #include <wasm_c_api.h>
 
+#include "audio_thread_priority.h"
+
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -22,8 +27,23 @@ namespace {
 
 constexpr uint32_t kWasmPageSize = 64 * 1024;
 
+#ifndef OOS_WAMR_WEB_AOT_NAMESPACE
+#define OOS_WAMR_WEB_AOT_NAMESPACE "wamr-unknown/unknown"
+#endif
+
+constexpr const char kDefaultAotCacheRoot[] =
+    "/opt/oos/share/oos/webassembly-aot";
+
 struct ContextState;
 struct InstanceHandle;
+
+struct ImportMetadata {
+  std::string module_name;
+  std::string field_name;
+  wasm_externkind_t kind = WASM_EXTERN_FUNC;
+  uint32_t minimum_pages = 0;
+  uint32_t maximum_pages = 0;
+};
 
 struct MemoryHandle {
   std::atomic<uint32_t> references{1};
@@ -61,6 +81,9 @@ struct ModuleHandle {
   ContextState *state = nullptr;
   wasm_module_t *module = nullptr;
   uint64_t id = 0;
+  std::string sha256;
+  std::string execution;
+  std::vector<ImportMetadata> source_imports;
 };
 
 struct HostFunction {
@@ -68,6 +91,13 @@ struct HostFunction {
   JSCValue *function = nullptr;
   std::vector<wasm_valkind_t> parameters;
   std::vector<wasm_valkind_t> results;
+  std::string module_name;
+  std::string field_name;
+  uint64_t calls = 0;
+  uint64_t elapsed_nanoseconds = 0;
+  uint64_t reported_calls = 0;
+  uint64_t reported_nanoseconds = 0;
+  std::chrono::steady_clock::time_point next_report{};
 };
 
 struct InstanceHandle {
@@ -107,6 +137,110 @@ elapsed_milliseconds(const std::chrono::steady_clock::time_point &started) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now() - started)
       .count();
+}
+
+std::string wasm_name_string(const wasm_name_t *name);
+
+std::vector<std::string> aot_cache_roots() {
+  const char *configured = std::getenv("OOS_WAMR_AOT_CACHE_PATH");
+  std::string value =
+      configured && configured[0] ? configured : kDefaultAotCacheRoot;
+  std::vector<std::string> roots;
+  size_t offset = 0;
+  while (offset <= value.size()) {
+    const size_t separator = value.find(':', offset);
+    const size_t length = separator == std::string::npos ? value.size() - offset
+                                                         : separator - offset;
+    if (length)
+      roots.emplace_back(value.substr(offset, length));
+    if (separator == std::string::npos)
+      break;
+    offset = separator + 1;
+  }
+  return roots;
+}
+
+wasm_module_t *load_cached_aot(const std::string &sha256, uint64_t module_id,
+                               std::string *loaded_path) {
+  for (const auto &root : aot_cache_roots()) {
+    std::string path = root;
+    if (!path.empty() && path.back() != '/')
+      path.push_back('/');
+    path.append(OOS_WAMR_WEB_AOT_NAMESPACE)
+        .append("/")
+        .append(sha256)
+        .append(".aot");
+
+    gchar *contents = nullptr;
+    gsize size = 0;
+    GError *error = nullptr;
+    if (!g_file_get_contents(path.c_str(), &contents, &size, &error)) {
+      if (test_diagnostics_enabled() &&
+          (!error ||
+           !g_error_matches(error, G_FILE_ERROR, G_FILE_ERROR_NOENT))) {
+        std::fprintf(stderr,
+                     "OOS WAMR Web module=%llu aot_cache=read-fail "
+                     "sha256=%s path=%s error=%s\n",
+                     static_cast<unsigned long long>(module_id), sha256.c_str(),
+                     path.c_str(), error ? error->message : "unknown");
+      }
+      g_clear_error(&error);
+      continue;
+    }
+
+    wasm_byte_vec_t binary{};
+    wasm_byte_vec_new(&binary, size,
+                      reinterpret_cast<const wasm_byte_t *>(contents));
+    g_free(contents);
+    wasm_module_t *compiled = wasm_module_new(g_runtime.store, &binary);
+    wasm_byte_vec_delete(&binary);
+    if (compiled) {
+      *loaded_path = std::move(path);
+      return compiled;
+    }
+    if (test_diagnostics_enabled()) {
+      std::fprintf(stderr,
+                   "OOS WAMR Web module=%llu aot_cache=rejected sha256=%s "
+                   "path=%s\n",
+                   static_cast<unsigned long long>(module_id), sha256.c_str(),
+                   path.c_str());
+    }
+  }
+  return nullptr;
+}
+
+bool read_source_imports(const uint8_t *data, size_t size,
+                         std::vector<ImportMetadata> *result) {
+  wasm_byte_vec_t binary{};
+  wasm_byte_vec_new(&binary, size, reinterpret_cast<const wasm_byte_t *>(data));
+  wasm_module_t *module = wasm_module_new(g_runtime.store, &binary);
+  wasm_byte_vec_delete(&binary);
+  if (!module)
+    return false;
+
+  wasm_importtype_vec_t types{};
+  wasm_module_imports(module, &types);
+  result->reserve(types.num_elems);
+  for (size_t i = 0; i < types.num_elems; ++i) {
+    wasm_importtype_t *type = types.data[i];
+    const wasm_externtype_t *external_type = wasm_importtype_type(type);
+    ImportMetadata metadata{
+        wasm_name_string(wasm_importtype_module(type)),
+        wasm_name_string(wasm_importtype_name(type)),
+        wasm_externtype_kind(external_type),
+    };
+    if (metadata.kind == WASM_EXTERN_MEMORY) {
+      const wasm_memorytype_t *memory_type =
+          wasm_externtype_as_memorytype_const(external_type);
+      const wasm_limits_t *limits = wasm_memorytype_limits(memory_type);
+      metadata.minimum_pages = limits->min;
+      metadata.maximum_pages = limits->max;
+    }
+    result->push_back(std::move(metadata));
+  }
+  wasm_importtype_vec_delete(&types);
+  wasm_module_delete(module);
+  return true;
 }
 
 void context_retain(ContextState *state) {
@@ -392,6 +526,9 @@ wasm_trap_t *call_host_function(void *environment,
                                 const wasm_val_vec_t *arguments,
                                 wasm_val_vec_t *results) {
   auto *host = static_cast<HostFunction *>(environment);
+  const bool profile = test_diagnostics_enabled();
+  const auto started = profile ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
   const size_t result_count = host->results.size();
   if (results->size < result_count || (result_count && !results->data))
     return trap_from_exception(host,
@@ -424,6 +561,30 @@ wasm_trap_t *call_host_function(void *environment,
     }
   }
   g_object_unref(return_value);
+  if (profile) {
+    const auto now = std::chrono::steady_clock::now();
+    host->calls++;
+    host->elapsed_nanoseconds +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - started)
+            .count();
+    if (host->next_report.time_since_epoch().count() == 0)
+      host->next_report = now + std::chrono::seconds(5);
+    if (host->calls == 1 || now >= host->next_report) {
+      const uint64_t calls = host->calls - host->reported_calls;
+      const uint64_t nanoseconds =
+          host->elapsed_nanoseconds - host->reported_nanoseconds;
+      g_message("OOS WAMR Web import=%s.%s calls=%llu total_calls=%llu "
+                "elapsed_ms=%.3f average_ns=%llu",
+                host->module_name.c_str(), host->field_name.c_str(),
+                static_cast<unsigned long long>(calls),
+                static_cast<unsigned long long>(host->calls),
+                static_cast<double>(nanoseconds) / 1000000.0,
+                static_cast<unsigned long long>(nanoseconds / calls));
+      host->reported_calls = host->calls;
+      host->reported_nanoseconds = host->elapsed_nanoseconds;
+      host->next_report = now + std::chrono::seconds(5);
+    }
+  }
   return valid ? nullptr
                : trap_from_exception(host,
                                      "WebAssembly import returned a bad value");
@@ -431,6 +592,18 @@ wasm_trap_t *call_host_function(void *environment,
 
 void destroy_host_function(void *environment) {
   auto *host = static_cast<HostFunction *>(environment);
+  if (test_diagnostics_enabled() && host->calls > host->reported_calls) {
+    const uint64_t calls = host->calls - host->reported_calls;
+    const uint64_t nanoseconds =
+        host->elapsed_nanoseconds - host->reported_nanoseconds;
+    g_message("OOS WAMR Web import=%s.%s calls=%llu total_calls=%llu "
+              "elapsed_ms=%.3f average_ns=%llu final=1",
+              host->module_name.c_str(), host->field_name.c_str(),
+              static_cast<unsigned long long>(calls),
+              static_cast<unsigned long long>(host->calls),
+              static_cast<double>(nanoseconds) / 1000000.0,
+              static_cast<unsigned long long>(nanoseconds / calls));
+  }
   g_object_unref(host->function);
   g_object_unref(host->context);
   delete host;
@@ -513,6 +686,27 @@ JSCValue *module_type_list(ModuleHandle *module, bool imports) {
   JSCContext *context = module->state->context;
   JSCValue *array = jsc_value_new_array(context, G_TYPE_NONE);
   if (imports) {
+    if (!module->source_imports.empty()) {
+      for (size_t i = 0; i < module->source_imports.size(); ++i) {
+        const auto &metadata = module->source_imports[i];
+        JSCValue *entry = jsc_value_new_object(context, nullptr, nullptr);
+        JSCValue *module_name =
+            jsc_value_new_string(context, metadata.module_name.c_str());
+        JSCValue *name =
+            jsc_value_new_string(context, metadata.field_name.c_str());
+        JSCValue *kind =
+            jsc_value_new_string(context, kind_name(metadata.kind));
+        jsc_value_object_set_property(entry, "module", module_name);
+        jsc_value_object_set_property(entry, "name", name);
+        jsc_value_object_set_property(entry, "kind", kind);
+        jsc_value_object_set_property_at_index(array, i, entry);
+        g_object_unref(module_name);
+        g_object_unref(name);
+        g_object_unref(kind);
+        g_object_unref(entry);
+      }
+      return array;
+    }
     wasm_importtype_vec_t types{};
     wasm_module_imports(module->module, &types);
     for (size_t i = 0; i < types.num_elems; ++i) {
@@ -688,10 +882,56 @@ JSCValue *module_instantiate(ModuleHandle *module, JSCValue *imports_object) {
 
   wasm_importtype_vec_t import_types{};
   wasm_module_imports(module->module, &import_types);
-  const size_t import_count = import_types.num_elems;
+  const size_t import_count = module->source_imports.empty()
+                                  ? import_types.num_elems
+                                  : module->source_imports.size();
   std::vector<wasm_extern_t *> imports;
   imports.reserve(import_types.num_elems);
   MemoryHandle *pending_memory = nullptr;
+
+  for (const auto &metadata : module->source_imports) {
+    if (metadata.kind != WASM_EXTERN_MEMORY)
+      continue;
+    if (pending_memory) {
+      wasm_importtype_vec_delete(&import_types);
+      return throw_error(state->context, "WebAssembly.LinkError",
+                         "Multiple imported memories are not supported");
+    }
+    JSCValue *namespace_object = jsc_value_object_get_property(
+        imports_object, metadata.module_name.c_str());
+    JSCValue *import_value =
+        jsc_value_is_object(namespace_object)
+            ? jsc_value_object_get_property(namespace_object,
+                                            metadata.field_name.c_str())
+            : undefined_value(state->context);
+    JSCValue *native = jsc_value_is_object(import_value)
+                           ? jsc_value_object_get_property(
+                                 import_value, "__oosWamrNativeMemory")
+                           : undefined_value(state->context);
+    JSCValue *id_value = jsc_value_is_object(native)
+                             ? jsc_value_object_get_property(native, "id")
+                             : undefined_value(state->context);
+    const uint64_t id = static_cast<uint64_t>(jsc_value_to_double(id_value));
+    auto found = state->memories.find(id);
+    if (found != state->memories.end()) {
+      const uint32_t pages =
+          static_cast<uint32_t>(found->second->byte_length / kWasmPageSize);
+      if (pages >= metadata.minimum_pages &&
+          (metadata.maximum_pages == UINT32_MAX ||
+           found->second->maximum_pages <= metadata.maximum_pages))
+        pending_memory = found->second;
+    }
+    g_object_unref(id_value);
+    g_object_unref(native);
+    g_object_unref(import_value);
+    g_object_unref(namespace_object);
+    if (!pending_memory) {
+      wasm_importtype_vec_delete(&import_types);
+      return throw_error(state->context, "WebAssembly.LinkError",
+                         "Missing or incompatible imported memory " +
+                             metadata.module_name + "." + metadata.field_name);
+    }
+  }
 
   for (size_t i = 0; i < import_types.num_elems; ++i) {
     wasm_importtype_t *import_type = import_types.data[i];
@@ -716,7 +956,9 @@ JSCValue *module_instantiate(ModuleHandle *module, JSCValue *imports_object) {
           new HostFunction{JSC_CONTEXT(g_object_ref(state->context)),
                            JSC_VALUE(g_object_ref(import_value)),
                            value_kinds(wasm_functype_params(function_type)),
-                           value_kinds(wasm_functype_results(function_type))};
+                           value_kinds(wasm_functype_results(function_type)),
+                           module_name,
+                           field_name};
       wasm_functype_t *type_copy = wasm_functype_copy(function_type);
       wasm_func_t *function =
           wasm_func_new_with_env(g_runtime.store, type_copy, call_host_function,
@@ -785,8 +1027,9 @@ JSCValue *module_instantiate(ModuleHandle *module, JSCValue *imports_object) {
     if (test_diagnostics_enabled()) {
       std::fprintf(stderr,
                    "OOS WAMR Web module=%llu instantiate=fail imports=%zu "
-                   "elapsed_ms=%lld error=%s\n",
+                   "sha256=%s execution=%s elapsed_ms=%lld error=%s\n",
                    static_cast<unsigned long long>(module->id), import_count,
+                   module->sha256.c_str(), module->execution.c_str(),
                    elapsed_milliseconds(started), message.c_str());
     }
     instance_release(instance);
@@ -796,9 +1039,10 @@ JSCValue *module_instantiate(ModuleHandle *module, JSCValue *imports_object) {
   if (test_diagnostics_enabled()) {
     std::fprintf(stderr,
                  "OOS WAMR Web module=%llu instantiate=pass imports=%zu "
-                 "exports=%zu elapsed_ms=%lld\n",
+                 "exports=%zu sha256=%s execution=%s elapsed_ms=%lld\n",
                  static_cast<unsigned long long>(module->id), import_count,
-                 instance->exports.num_elems, elapsed_milliseconds(started));
+                 instance->exports.num_elems, module->sha256.c_str(),
+                 module->execution.c_str(), elapsed_milliseconds(started));
   }
   return jsc_value_new_object(state->context, instance, state->instance_class);
 }
@@ -810,19 +1054,37 @@ JSCValue *native_compile(JSCValue *bytes, ContextState *state) {
     return throw_error(
         state->context, "TypeError",
         "WebAssembly source must be an ArrayBuffer or typed array");
-  wasm_byte_vec_t binary{};
-  wasm_byte_vec_new(&binary, size, reinterpret_cast<const wasm_byte_t *>(data));
   const uint64_t module_id =
       g_next_module_id.fetch_add(1, std::memory_order_relaxed);
   const auto started = std::chrono::steady_clock::now();
-  wasm_module_t *compiled = wasm_module_new(g_runtime.store, &binary);
-  wasm_byte_vec_delete(&binary);
+  gchar *checksum = g_compute_checksum_for_data(G_CHECKSUM_SHA256, data, size);
+  const std::string sha256 = checksum ? checksum : "";
+  g_free(checksum);
+
+  std::string cache_path;
+  wasm_module_t *compiled = load_cached_aot(sha256, module_id, &cache_path);
+  std::string execution = compiled ? "aot" : "interpreter";
+  std::vector<ImportMetadata> source_imports;
+  if (compiled && !read_source_imports(data, size, &source_imports)) {
+    wasm_module_delete(compiled);
+    compiled = nullptr;
+    execution = "interpreter";
+    cache_path.clear();
+  }
+  if (!compiled) {
+    wasm_byte_vec_t binary{};
+    wasm_byte_vec_new(&binary, size,
+                      reinterpret_cast<const wasm_byte_t *>(data));
+    compiled = wasm_module_new(g_runtime.store, &binary);
+    wasm_byte_vec_delete(&binary);
+  }
   if (!compiled) {
     if (test_diagnostics_enabled()) {
       std::fprintf(stderr,
                    "OOS WAMR Web module=%llu compile=fail bytes=%zu "
-                   "elapsed_ms=%lld\n",
+                   "sha256=%s execution=%s elapsed_ms=%lld\n",
                    static_cast<unsigned long long>(module_id), size,
+                   sha256.c_str(), execution.c_str(),
                    elapsed_milliseconds(started));
     }
     return throw_error(state->context, "WebAssembly.CompileError",
@@ -831,12 +1093,15 @@ JSCValue *native_compile(JSCValue *bytes, ContextState *state) {
   if (test_diagnostics_enabled()) {
     std::fprintf(stderr,
                  "OOS WAMR Web module=%llu compile=pass bytes=%zu "
-                 "elapsed_ms=%lld\n",
+                 "sha256=%s execution=%s elapsed_ms=%lld cache=%s\n",
                  static_cast<unsigned long long>(module_id), size,
-                 elapsed_milliseconds(started));
+                 sha256.c_str(), execution.c_str(),
+                 elapsed_milliseconds(started),
+                 cache_path.empty() ? "none" : cache_path.c_str());
   }
   context_retain(state);
-  auto *handle = new ModuleHandle{state, compiled, module_id};
+  auto *handle = new ModuleHandle{state,  compiled,  module_id,
+                                  sha256, execution, std::move(source_imports)};
   return jsc_value_new_object(state->context, handle, state->module_class);
 }
 
@@ -864,8 +1129,12 @@ JSCValue *native_create_memory(JSCValue *descriptor, ContextState *state) {
   double maximum_number = jsc_value_to_double(maximum_value);
   g_object_unref(initial_value);
   g_object_unref(maximum_value);
-  if (initial_number < 0 || maximum_number < initial_number ||
-      maximum_number > 65536 || initial_number != maximum_number)
+  if (!std::isfinite(initial_number) || !std::isfinite(maximum_number) ||
+      std::trunc(initial_number) != initial_number ||
+      std::trunc(maximum_number) != maximum_number || initial_number < 0 ||
+      maximum_number < initial_number || maximum_number > 65536 ||
+      initial_number != maximum_number ||
+      initial_number > SIZE_MAX / kWasmPageSize)
     return throw_error(
         state->context, "RangeError",
         "The fixed-memory WAMR profile requires maximum to equal initial");
@@ -939,6 +1208,13 @@ constexpr const char kWebAssemblyShim[] = R"JS(
 
   class Memory {
     constructor(descriptor) {
+      const initial = Number(descriptor?.initial);
+      const maximum = Number(descriptor?.maximum);
+      if (!Number.isInteger(initial) || !Number.isInteger(maximum) ||
+          initial < 0 || maximum < initial || maximum > 65536 ||
+          initial !== maximum) {
+        throw new RangeError('The fixed-memory WAMR profile requires maximum to equal initial');
+      }
       this[memoryHandle] = native.createMemory(descriptor);
       memoryCache.set(this[memoryHandle].id, this);
       Object.defineProperty(this, '__oosWamrNativeMemory', { value: this[memoryHandle] });
@@ -1039,6 +1315,7 @@ void window_object_cleared(WebKitScriptWorld *world, WebKitWebPage *,
 
 extern "C" __attribute__((visibility("default"))) void
 webkit_web_process_extension_initialize(WebKitWebProcessExtension *) {
+  install_audio_thread_priority_manager();
   g_signal_connect(webkit_script_world_get_default(), "window-object-cleared",
                    G_CALLBACK(window_object_cleared), nullptr);
 }

@@ -18,6 +18,19 @@ fi
 "$ROOT_DIR/scripts/fetch-wamr.sh"
 WAMR_DIR="$ROOT_DIR/third_party/wasm-micro-runtime"
 BUILD_DIR="$ROOT_DIR/build/host-wamrc"
+WAMR_AOT_C_API_PATCH="$ROOT_DIR/system/patches/wamr-aot-c-api-import-arm32.patch"
+
+if grep -Fq 'INT8_PTR_TYPE, "c_api_params"' \
+    "$WAMR_DIR/core/iwasm/compilation/aot_emit_function.c"; then
+  echo "WAMR ARM32 C API import compiler patch is ready"
+elif patch --batch --silent --dry-run -d "$WAMR_DIR" -p1 \
+    <"$WAMR_AOT_C_API_PATCH"; then
+  patch --batch --silent -d "$WAMR_DIR" -p1 <"$WAMR_AOT_C_API_PATCH"
+  echo "Applied WAMR ARM32 C API import compiler patch"
+else
+  echo "Pinned WAMR source does not match $(basename "$WAMR_AOT_C_API_PATCH")" >&2
+  exit 1
+fi
 
 if [[ -n "${OOS_LLVM_CONFIG:-}" ]]; then
   LLVM_CONFIG=$OOS_LLVM_CONFIG

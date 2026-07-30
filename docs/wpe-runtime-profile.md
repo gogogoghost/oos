@@ -93,6 +93,32 @@ resolved registry record, acknowledges every imported frame after composition,
 and sends key events in the reverse direction. Closing the app or stopping OOS
 terminates the producer and removes the runtime socket.
 
+## Android WebAudio
+
+KaiOS application audio follows WebCore's mixed PCM output through GStreamer
+and the Android OpenSL ES sink. Resource packaging includes the required
+GStreamer scanner and a capability-oriented plugin set; OpenSL remains the
+single system output backend on both supported Android profiles.
+
+Android silent WebAudio buffers remain ordinary pipeline buffers rather than
+being marked `GAP` or `DROPPABLE`. This keeps short sounds ordered across a
+silent interval. The OpenSL sink uses its upstream single-buffer queue model
+with a 200 ms GStreamer ring buffer and 40 ms segments. The longer segment
+gives legacy AudioTrack callbacks enough refill time without reading ahead of
+GStreamer's ring-buffer cursor.
+
+The WebProcess extension raises only `webaudioSrc`, `webaudioSrcTask`, and
+`AudioTrack` threads to nice `-10`. Set `OOS_WEB_AUDIO_NICE=0` in
+`/data/oos/system/runtime.conf` to disable this adjustment. Set
+`OOS_TRACE_WEBAUDIO=1` only while diagnosing playback; it reports the PCM burst
+boundaries emitted by WebCore and is intentionally off in normal operation.
+
+The Nokia 8110 validation covers repeated identical short sounds and sustained
+audio through OmniJ2ME. The WebCore burst log, OpenSL output, and audible result
+remain continuous. WPE patches must use `OS(ANDROID)`, not
+`PLATFORM(ANDROID)`; the latter is false in this WPE port and silently compiles
+the non-Android branch.
+
 ## Profile Model
 
 Android version alone is not a sufficient compatibility key. A WPE engine

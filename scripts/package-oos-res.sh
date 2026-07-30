@@ -99,11 +99,30 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
 fi
 BUILTIN_KAIOS3_APP_ID=${OOS_BUILTIN_KAIOS3_APP_ID:-}
 BUILTIN_KAIOS3_PACKAGE=${OOS_BUILTIN_KAIOS3_PACKAGE:-}
+BUILTIN_KAIOS3_AOT_CACHE=${OOS_BUILTIN_KAIOS3_AOT_CACHE:-}
 if [[ -n "$BUILTIN_KAIOS3_APP_ID" || -n "$BUILTIN_KAIOS3_PACKAGE" ]]; then
   [[ "$BUILTIN_KAIOS3_APP_ID" =~ ^[A-Za-z0-9._-]+$ ]] ||
     package_die "Invalid built-in KaiOS 3 application id"
   package_require_file "$BUILTIN_KAIOS3_PACKAGE"
 fi
+if [[ -n "$BUILTIN_KAIOS3_AOT_CACHE" ]]; then
+  package_require_directory "$BUILTIN_KAIOS3_AOT_CACHE"
+  find "$BUILTIN_KAIOS3_AOT_CACHE" -type f -name '*.aot' -print -quit |
+    grep -q . || package_die \
+      "Built-in KaiOS 3 AOT cache contains no .aot files"
+fi
+
+run_patchelf() {
+  if command -v patchelf >/dev/null 2>&1; then
+    patchelf "$@"
+  elif [[ -n ${WPE_DISTROBOX:-} ]]; then
+    distrobox enter "$WPE_DISTROBOX" -- patchelf "$@"
+  else
+    package_die \
+      "patchelf is required (install it locally or in WPE_DISTROBOX)"
+  fi
+}
+
 WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
 CXX_RUNTIME="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so"
 if [[ ! -f "$CXX_RUNTIME" ]]; then
@@ -146,6 +165,12 @@ if [[ -n "$BUILTIN_KAIOS3_PACKAGE" ]]; then
   install -m 0644 "$BUILTIN_KAIOS3_PACKAGE" \
     "$STAGING/packages/$BUILTIN_KAIOS3_APP_ID/application.zip"
   BUILTIN_MANIFEST_LINES+=("builtin_web_app=$BUILTIN_KAIOS3_APP_ID")
+fi
+if [[ -n "$BUILTIN_KAIOS3_AOT_CACHE" ]]; then
+  mkdir -p "$STAGING/share/oos/webassembly-aot"
+  rsync -a "$BUILTIN_KAIOS3_AOT_CACHE/" \
+    "$STAGING/share/oos/webassembly-aot/"
+  BUILTIN_MANIFEST_LINES+=("builtin_web_app_aot=sha256-cache")
 fi
 install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
 install -m 0644 "$LUCIDE_LICENSE" \
@@ -202,9 +227,60 @@ for runtime_entry in \
   lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so \
   lib/gio/modules/libgioenvironmentproxy.so \
   lib/gio/modules/libgioopenssl.so \
+  libexec/gstreamer-1.0/gst-plugin-scanner \
   libexec/wpe-webkit-2.0/WPENetworkProcess \
   libexec/wpe-webkit-2.0/WPEWebProcess; do
   copy_runtime_elf "$WPE_SYSROOT/$runtime_entry" "$runtime_entry"
+done
+
+# GStreamer discovers these at runtime, so they do not appear in WPE's ELF
+# dependency graph. Keep a capability-oriented KaiOS media baseline instead of
+# shipping every Cerbero plugin.
+GSTREAMER_PLUGINS=(
+  libgstadaptivedemux2.so
+  libgstapp.so
+  libgstaudioconvert.so
+  libgstaudioparsers.so
+  libgstaudioresample.so
+  libgstautodetect.so
+  libgstcoreelements.so
+  libgstdash.so
+  libgstencoding.so
+  libgstflac.so
+  libgstgio.so
+  libgsthls.so
+  libgstid3demux.so
+  libgstinterleave.so
+  libgstisomp4.so
+  libgstmatroska.so
+  libgstmpg123.so
+  libgstmse.so
+  libgstogg.so
+  libgstopensles.so
+  libgstopus.so
+  libgstopusparse.so
+  libgstpbtypes.so
+  libgstplayback.so
+  libgstsoup.so
+  libgstsubparse.so
+  libgsttypefindfunctions.so
+  libgstvideoconvertscale.so
+  libgstvideoparsersbad.so
+  libgstvideorate.so
+  libgstvolume.so
+  libgstvorbis.so
+  libgstwavenc.so
+  libgstwavparse.so
+)
+# The Android media plugin from the API 29 build is usable on the 2780, while
+# the API 23 profile cannot resolve its ANativeWindow JNI entry point. WPE
+# WebAudio uses OpenSL ES directly and does not depend on this decoder plugin.
+if ((OOS_WPE_ANDROID_API >= 29)); then
+  GSTREAMER_PLUGINS+=(libgstandroidmedia.so)
+fi
+for plugin in "${GSTREAMER_PLUGINS[@]}"; do
+  copy_runtime_elf "$WPE_SYSROOT/lib/gstreamer-1.0/$plugin" \
+    "lib/gstreamer-1.0/$plugin"
 done
 
 queue_index=0
@@ -229,6 +305,29 @@ while (( queue_index < ${#ELF_QUEUE[@]} )); do
   done < <(readelf -d "$runtime_file" 2>/dev/null \
     | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
 done
+
+# The HLS plugin uses Cerbero's unversioned OpenSSL libcrypto. Leaving that
+# SONAME in /opt/oos makes Android's OpenSL media stack bind its system libssl
+# to the incompatible Cerbero library. Give the WPE copy a private identity so
+# HLS and the system audio stack can coexist in WPEWebProcess.
+if [[ -f "$STAGING/lib/libcrypto.so" ]]; then
+  WPE_CRYPTO_NAME=liboos-wpe-crypto.so
+  WPE_CRYPTO_PATH="$STAGING/lib/$WPE_CRYPTO_NAME"
+  mv "$STAGING/lib/libcrypto.so" "$WPE_CRYPTO_PATH"
+  run_patchelf --set-soname "$WPE_CRYPTO_NAME" "$WPE_CRYPTO_PATH"
+  for queue_index in "${!ELF_QUEUE[@]}"; do
+    runtime_file=${ELF_QUEUE[$queue_index]}
+    if [[ "$runtime_file" == "$STAGING/lib/libcrypto.so" ]]; then
+      ELF_QUEUE[$queue_index]=$WPE_CRYPTO_PATH
+      continue
+    fi
+    if run_patchelf --print-needed "$runtime_file" 2>/dev/null \
+        | grep -qx libcrypto.so; then
+      run_patchelf --replace-needed libcrypto.so "$WPE_CRYPTO_NAME" \
+        "$runtime_file"
+    fi
+  done
+fi
 
 for runtime_share in fontconfig glib-2.0 icu licenses wpe-webkit-2.0 xml; do
   if [[ -d "$WPE_SYSROOT/share/$runtime_share" ]]; then
@@ -271,6 +370,7 @@ printf '%s\n' \
   "native_app_runtime=wamr-2.4.4" \
   "web_app_runtime=wpe-webkit-2.52.5" \
   "web_app_host=external-single-foreground" \
+  "web_audio_output=gstreamer-opensles" \
   "${BUILTIN_MANIFEST_LINES[@]}" \
   "native_app_execution=aot" \
   "native_app_interface=oos-wit-0.1.0-core" \

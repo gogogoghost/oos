@@ -22,10 +22,10 @@ main { padding: 20px; text-align: center; }
 </style>
 <main>
   WAMR WebAssembly
-  <p id="result">Running...</p>
+  <p id="status">Running...</p>
 </main>
 <script>
-const result = document.getElementById('result');
+const result = document.getElementById('status');
 
 const addModule = new Uint8Array([
   0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
@@ -33,6 +33,14 @@ const addModule = new Uint8Array([
   0x03, 0x02, 0x01, 0x00,
   0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
   0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b
+]);
+
+const callbackOnlyModule = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60,
+  0x01, 0x7f, 0x01, 0x7f, 0x02, 0x0e, 0x01, 0x01, 0x61, 0x08, 0x63, 0x61,
+  0x6c, 0x6c, 0x62, 0x61, 0x63, 0x6b, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
+  0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x01, 0x0a, 0x08, 0x01,
+  0x06, 0x00, 0x20, 0x00, 0x10, 0x00, 0x0b
 ]);
 
 const importModule = new Uint8Array([
@@ -48,6 +56,15 @@ const importModule = new Uint8Array([
 ]);
 
 async function run() {
+  let rejectedFractionalMemory = false;
+  try {
+    new WebAssembly.Memory({ initial: 1.5, maximum: 1.5 });
+  } catch (error) {
+    rejectedFractionalMemory = error instanceof RangeError;
+  }
+  if (!rejectedFractionalMemory)
+    throw new Error('fractional memory limits were accepted');
+
   // OmniJ2ME creates a 32 MiB memory before its first module. Keep this here
   // to catch collection of the native JSC class prototypes under memory
   // pressure.
@@ -64,6 +81,12 @@ async function run() {
   const add = await WebAssembly.instantiate(addModule);
   if (add.instance.exports.add(19, 23) !== 42)
     throw new Error('exported function returned the wrong value');
+
+  const callbackOnly = await WebAssembly.instantiate(callbackOnlyModule, {
+    a: { callback: value => value * 2 }
+  });
+  if (callbackOnly.instance.exports.run(21) !== 42)
+    throw new Error('function-only import returned the wrong value');
 
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 1 });
   new Uint32Array(memory.buffer)[0] = 7;

@@ -120,6 +120,7 @@ target_link_libraries(oos-wpe PRIVATE
   "${NOKIA_2780_WPE_SYSROOT}/lib/libgio-2.0.so"
   "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
   "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
+  "${NOKIA_2780_WPE_SYSROOT}/lib/libsoup-3.0.so"
   android
   "${NOKIA_2780_SYSTEM_LIB_DIR}/libc++.so")
 target_link_options(oos-wpe PRIVATE
@@ -279,6 +280,7 @@ if(OOS_BUILD_DEVICE_TESTS)
     "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
+  oos_nokia_2780_android_target(oos_test_nokia_2780_wpe_producer)
   target_include_directories(oos_test_nokia_2780_wpe_producer PRIVATE
     ${NOKIA_2780_WPE_INCLUDES})
   target_link_libraries(oos_test_nokia_2780_wpe_producer PRIVATE
@@ -288,7 +290,9 @@ if(OOS_BUILD_DEVICE_TESTS)
     "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
     "${NOKIA_2780_WPE_SYSROOT}/lib/libglib-2.0.so"
     "${NOKIA_2780_WPE_SYSROOT}/lib/libgobject-2.0.so"
-    android)
+    "${NOKIA_2780_WPE_SYSROOT}/lib/libsoup-3.0.so"
+    android
+    "${NOKIA_2780_SYSTEM_LIB_DIR}/libc++.so")
 
   add_executable(oos_test_nokia_2780_wpe_host
     "${CMAKE_SOURCE_DIR}/tests/web/wpe_surface_host_test.cpp")

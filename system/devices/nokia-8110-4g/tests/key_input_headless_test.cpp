@@ -13,10 +13,12 @@ struct EventCount {
 void printEvent(void *context, const oos::input::KeyEvent &event) {
   auto *count = static_cast<EventCount *>(context);
   ++count->value;
-  std::printf("key code=%u name=%s action=%s device=%s path=%s\n", event.code,
-              oos::input::keyCodeName(event.code),
-              oos::input::keyActionName(event.action),
-              event.device_name.c_str(), event.device_path.c_str());
+  std::printf(
+      "key code=%u name=%s action=%s device=%.*s path=%.*s\n", event.code,
+      oos::input::keyCodeName(event.code),
+      oos::input::keyActionName(event.action),
+      static_cast<int>(event.device_name.size()), event.device_name.data(),
+      static_cast<int>(event.device_path.size()), event.device_path.data());
   std::fflush(stdout);
 }
 

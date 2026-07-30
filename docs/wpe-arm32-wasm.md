@@ -67,7 +67,11 @@ The port-free `http://omnij2me.localhost/` resource handler requires a fresh
 WPE build and end-to-end smoke test before it can be included in this validation
 record.
 
-The ARM32 build and QEMU execution test are intentionally still pending. The
-device build pipeline now builds and packages the same extension with the WAMR
-interpreter and AOT loader enabled, but that target must not be marked validated
-until its ELF is run under the Android 23 ARM userspace and then on hardware.
+The Android 23 ARMv7 runtime is validated on the Nokia 8110 4G with both
+OmniJ2ME modules. Packages retain the original Wasm bytes while publishing AOT
+artifacts in a WAMR-versioned ARMv7 namespace. Runtime lookup uses the raw Wasm
+SHA-256, so byte buffers supplied directly to `WebAssembly.compile()` receive
+the same cache behavior as URL-loaded modules. Cache misses fall back to the
+interpreter without changing the browser API. Compiler and runtime modules load
+from AOT, instantiate their JavaScript imports, install a JAR, and run the game
+on device.

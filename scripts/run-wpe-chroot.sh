@@ -15,15 +15,15 @@ if [[ $# -gt 0 ]]; then
   ACTION=$1
   shift
 fi
-[[ $# -eq 0 ]] || { echo "usage: $0 [DEVICE] {start|input-test|stop|status}" >&2; exit 2; }
+[[ $# -eq 0 ]] || { echo "usage: $0 [DEVICE] {start|wasm-test|input-test|stop|status}" >&2; exit 2; }
 
 case "$DEVICE" in
   nokia-2780-flip|nokia-8110-4g) ;;
   *) echo "unsupported WPE device: $DEVICE" >&2; exit 2 ;;
 esac
 case "$ACTION" in
-  start|input-test|stop|status) ;;
-  *) echo "usage: $0 [DEVICE] {start|input-test|stop|status}" >&2; exit 2 ;;
+  start|wasm-test|input-test|stop|status) ;;
+  *) echo "usage: $0 [DEVICE] {start|wasm-test|input-test|stop|status}" >&2; exit 2 ;;
 esac
 
 REMOTE=/data/local/tmp/oos-wpe
@@ -31,8 +31,16 @@ DEVICE_SCRIPT="$ROOT_DIR/scripts/device/wpe_chroot_device.sh"
 WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
 WPE_PRODUCER="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_${DEVICE//-/_}_wpe_producer"
 WPE_HOST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_${DEVICE//-/_}_wpe_host"
-INPUT_TEST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_nokia_2780_key_input"
-WPE_HTML="$ROOT_DIR/system/tests/web/assets/hello.html"
+if [[ $DEVICE == nokia-8110-4g ]]; then
+  INPUT_TEST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_nokia_8110_key_input"
+else
+  INPUT_TEST="$ROOT_DIR/build/android-$DEVICE/bin/tests/$DEVICE/oos_test_nokia_2780_key_input"
+fi
+if [[ $ACTION == wasm-test ]]; then
+  WPE_HTML="$ROOT_DIR/system/tests/web/assets/wamr-webassembly.html"
+else
+  WPE_HTML="$ROOT_DIR/system/tests/web/assets/hello.html"
+fi
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -65,11 +73,12 @@ for required in "$DEVICE_SCRIPT" "$WPE_PRODUCER" "$WPE_HOST" "$WPE_HTML" \
   "$CXX_RUNTIME" \
   "$WPE_SYSROOT/lib/libWPEBackend-android.so" \
   "$WPE_SYSROOT/lib/libWPEWebKit-2.0.so" \
+  "$WPE_SYSROOT/lib/oos/web-process-extensions/liboos-wamr-web-process.so" \
   "$WPE_SYSROOT/libexec/wpe-webkit-2.0/WPEWebProcess"; do
   [[ -f "$required" ]] || { echo "missing WPE runtime file: $required" >&2; exit 1; }
 done
 if [[ $ACTION == input-test && ! -x $INPUT_TEST ]]; then
-  echo "input test is available only after building the Nokia 2780 target" >&2
+  echo "input test is unavailable before building the $DEVICE target" >&2
   exit 1
 fi
 
@@ -85,6 +94,11 @@ cp -a "$WPE_SYSROOT/lib/." "$STAGING/lib/"
 cp -a "$WPE_SYSROOT/libexec/." "$STAGING/libexec/"
 if [[ -d "$WPE_SYSROOT/share" ]]; then
   cp -a "$WPE_SYSROOT/share/." "$STAGING/share/"
+fi
+if [[ -d "$ROOT_DIR/build/web-aot-cache" ]]; then
+  mkdir -p "$STAGING/share/oos/webassembly-aot"
+  cp -a "$ROOT_DIR/build/web-aot-cache/." \
+    "$STAGING/share/oos/webassembly-aot/"
 fi
 if [[ -d "$WPE_SYSROOT/etc" ]]; then
   cp -a "$WPE_SYSROOT/etc/." "$STAGING/etc/"
@@ -110,6 +124,8 @@ tar -C "$STAGING" -czf "$ARCHIVE" .
 
 adb_root_shell "setprop ctl.stop b2g; setprop ctl.stop b2gkillerd; mkdir -p $REMOTE"
 "$ADB" push "$ARCHIVE" "$REMOTE/runtime.tgz" >/dev/null
-adb_root_shell "set -e; if [ -x $REMOTE/wpe_chroot_device.sh ]; then $REMOTE/wpe_chroot_device.sh stop 2>/dev/null || true; fi; if command -v busybox >/dev/null 2>&1; then busybox tar -xzf $REMOTE/runtime.tgz -C $REMOTE; elif command -v gunzip >/dev/null 2>&1; then tar -xzf $REMOTE/runtime.tgz -C $REMOTE; elif command -v gzip >/dev/null 2>&1; then gzip -d -c $REMOTE/runtime.tgz | tar -xf - -C $REMOTE; else echo 'No gzip decompressor is available' >&2; exit 1; fi; test -f $REMOTE/wpe_chroot_device.sh; chmod 0755 $REMOTE/wpe_chroot_device.sh; $REMOTE/wpe_chroot_device.sh $ACTION"
+DEVICE_ACTION=$ACTION
+[[ $DEVICE_ACTION == wasm-test ]] && DEVICE_ACTION=start
+adb_root_shell "set -e; if [ -x $REMOTE/wpe_chroot_device.sh ]; then $REMOTE/wpe_chroot_device.sh stop 2>/dev/null || true; fi; if command -v busybox >/dev/null 2>&1; then busybox tar -xzf $REMOTE/runtime.tgz -C $REMOTE; elif command -v gunzip >/dev/null 2>&1; then tar -xzf $REMOTE/runtime.tgz -C $REMOTE; elif command -v gzip >/dev/null 2>&1; then gzip -d -c $REMOTE/runtime.tgz | tar -xf - -C $REMOTE; else echo 'No gzip decompressor is available' >&2; exit 1; fi; test -f $REMOTE/wpe_chroot_device.sh; chmod 0755 $REMOTE/wpe_chroot_device.sh; $REMOTE/wpe_chroot_device.sh $DEVICE_ACTION"
 sleep 2
 adb_root_shell "$REMOTE/wpe_chroot_device.sh status"

@@ -202,7 +202,6 @@ void finishResource(WebKitURISchemeRequest *request, const std::string &path,
   soup_message_headers_append(headers, "Cache-Control",
                               "public, max-age=31536000, immutable");
   webkit_uri_scheme_response_set_http_headers(response, headers);
-  soup_message_headers_unref(headers);
   webkit_uri_scheme_request_finish_with_response(request, response);
   g_object_unref(response);
   g_object_unref(stream);

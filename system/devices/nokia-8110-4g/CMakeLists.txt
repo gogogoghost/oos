@@ -124,6 +124,7 @@ if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
     "${NOKIA_8110_WPE_SYSROOT}/lib/libgio-2.0.so"
     "${NOKIA_8110_WPE_SYSROOT}/lib/libglib-2.0.so"
     "${NOKIA_8110_WPE_SYSROOT}/lib/libgobject-2.0.so"
+    "${NOKIA_8110_WPE_SYSROOT}/lib/libsoup-3.0.so"
     oos_android23_hardware_buffer
     "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
   target_link_options(oos-wpe PRIVATE
@@ -224,6 +225,7 @@ if(OOS_BUILD_DEVICE_TESTS)
       "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp"
       "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
       "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
+    oos_nokia_8110_android_target(oos_test_nokia_8110_4g_wpe_producer)
     target_include_directories(oos_test_nokia_8110_4g_wpe_producer PRIVATE
       ${NOKIA_8110_WPE_INCLUDES})
     target_link_libraries(oos_test_nokia_8110_4g_wpe_producer PRIVATE
@@ -233,7 +235,9 @@ if(OOS_BUILD_DEVICE_TESTS)
       "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
       "${NOKIA_8110_WPE_SYSROOT}/lib/libglib-2.0.so"
       "${NOKIA_8110_WPE_SYSROOT}/lib/libgobject-2.0.so"
-      oos_android23_hardware_buffer)
+      "${NOKIA_8110_WPE_SYSROOT}/lib/libsoup-3.0.so"
+      oos_android23_hardware_buffer
+      "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 
     add_executable(oos_test_nokia_8110_4g_wpe_host
       "${CMAKE_SOURCE_DIR}/tests/web/wpe_surface_host_test.cpp")

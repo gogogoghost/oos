@@ -1,0 +1,18 @@
+diff --git a/core/iwasm/compilation/aot_emit_function.c b/core/iwasm/compilation/aot_emit_function.c
+index 96570175..e3f61153 100644
+--- a/core/iwasm/compilation/aot_emit_function.c
++++ b/core/iwasm/compilation/aot_emit_function.c
+@@ -355,6 +355,12 @@ call_aot_invoke_c_api_native(AOTCompContext *comp_ctx, AOTFuncContext *func_ctx,
+                               &offset, 1, "c_api_func_import");
+ 
+     param_values[1] = c_api_func_import;
+-    param_values[2] = c_api_params = func_ctx->argv_buf;
++    c_api_params = LLVMBuildBitCast(comp_ctx->builder, func_ctx->argv_buf,
++                                    INT8_PTR_TYPE, "c_api_params");
++    if (!c_api_params) {
++        aot_set_last_error("llvm build bit cast failed.");
++        return false;
++    }
++    param_values[2] = c_api_params;
+     param_values[3] = I32_CONST(aot_func_type->param_count);
+     CHECK_LLVM_CONST(param_values[3]);

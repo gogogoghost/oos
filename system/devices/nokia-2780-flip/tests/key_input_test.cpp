@@ -53,17 +53,21 @@ void showKey(void *data, const KeyEvent &event) {
   auto *context = static_cast<InputTestContext *>(data);
   const char *key_name = oos::input::keyCodeName(event.code);
   const char *action_name = oos::input::keyActionName(event.action);
-  std::fprintf(stderr, "key code=%u name=%s action=%s device=%s path=%s\n",
-               event.code, key_name, action_name, event.device_name.c_str(),
-               event.device_path.c_str());
+  std::fprintf(
+      stderr, "key code=%u name=%s action=%s device=%.*s path=%.*s\n",
+      event.code, key_name, action_name,
+      static_cast<int>(event.device_name.size()), event.device_name.data(),
+      static_cast<int>(event.device_path.size()), event.device_path.data());
   std::fflush(stderr);
 
   if (!context->page_ready)
     return;
   gchar *escaped_key = g_strescape(key_name, nullptr);
   gchar *escaped_action = g_strescape(action_name, nullptr);
-  gchar *escaped_device = g_strescape(event.device_name.c_str(), nullptr);
-  gchar *escaped_path = g_strescape(event.device_path.c_str(), nullptr);
+  gchar *device = g_strndup(event.device_name.data(), event.device_name.size());
+  gchar *path = g_strndup(event.device_path.data(), event.device_path.size());
+  gchar *escaped_device = g_strescape(device, nullptr);
+  gchar *escaped_path = g_strescape(path, nullptr);
   gchar *script = g_strdup_printf(
       "window.oosShowKey(%u,\"%s\",\"%s\",\"%s\",\"%s\")", event.code,
       escaped_key, escaped_action, escaped_device, escaped_path);
@@ -73,6 +77,8 @@ void showKey(void *data, const KeyEvent &event) {
   g_free(script);
   g_free(escaped_path);
   g_free(escaped_device);
+  g_free(path);
+  g_free(device);
   g_free(escaped_action);
   g_free(escaped_key);
 }

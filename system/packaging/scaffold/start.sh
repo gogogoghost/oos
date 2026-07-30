@@ -41,13 +41,19 @@ if [ -f "$OOS_PERSIST_DIR/system/runtime.conf" ]; then
   if [ -z "${OOS_TRACE_WPE_FRAMES+x}" ]; then
     OOS_TRACE_WPE_FRAMES=$(runtime_config_value OOS_TRACE_WPE_FRAMES)
   fi
+  if [ -z "${OOS_TRACE_WEBAUDIO+x}" ]; then
+    OOS_TRACE_WEBAUDIO=$(runtime_config_value OOS_TRACE_WEBAUDIO)
+  fi
   if [ -z "${OOS_INSPECTOR_ADDRESS+x}" ]; then
     OOS_INSPECTOR_ADDRESS=$(runtime_config_value OOS_INSPECTOR_ADDRESS)
+  fi
+  if [ -z "${OOS_WEB_AUDIO_NICE+x}" ]; then
+    OOS_WEB_AUDIO_NICE=$(runtime_config_value OOS_WEB_AUDIO_NICE)
   fi
 fi
 for runtime_switch in "${OOS_ENABLE_INSPECTOR:-0}" \
   "${OOS_TRACE_WEB_CONSOLE:-0}" "${OOS_TRACE_DEVICE_API:-0}" \
-  "${OOS_TRACE_WPE_FRAMES:-0}"; do
+  "${OOS_TRACE_WPE_FRAMES:-0}" "${OOS_TRACE_WEBAUDIO:-0}"; do
   case "$runtime_switch" in
     0|1) ;;
     *) echo "invalid boolean in runtime.conf: $runtime_switch" >&2; exit 1 ;;
@@ -57,15 +63,30 @@ case "${OOS_INSPECTOR_ADDRESS:-127.0.0.1:9222}" in
   127.0.0.1:*) ;;
   *) echo "inspector must listen on device loopback" >&2; exit 1 ;;
 esac
+OOS_WEB_AUDIO_NICE=${OOS_WEB_AUDIO_NICE:--10}
+case "$OOS_WEB_AUDIO_NICE" in
+  -[0-9]|-[0-9][0-9]|[0-9]|[0-9][0-9]) ;;
+  *) echo "invalid OOS_WEB_AUDIO_NICE: $OOS_WEB_AUDIO_NICE" >&2; exit 1 ;;
+esac
+if [ "$OOS_WEB_AUDIO_NICE" -lt -20 ] || [ "$OOS_WEB_AUDIO_NICE" -gt 19 ]; then
+  echo "OOS_WEB_AUDIO_NICE must be between -20 and 19" >&2
+  exit 1
+fi
 export OOS_ENABLE_INSPECTOR OOS_TRACE_WEB_CONSOLE OOS_TRACE_DEVICE_API
 export OOS_TRACE_WPE_FRAMES
+export OOS_TRACE_WEBAUDIO
 export OOS_INSPECTOR_ADDRESS
+export OOS_WEB_AUDIO_NICE
 
 setprop ctl.stop b2g 2>/dev/null || true
 setprop ctl.stop b2gkillerd 2>/dev/null || true
 echo 0 > /sys/class/leds/lcd-backlight/brightness 2>/dev/null || true
-echo 0 > /sys/class/leds/sublcd-backlight/brightness 2>/dev/null || true
-echo 4 > /sys/class/graphics/fb1/blank 2>/dev/null || true
+if [ -e /sys/class/leds/sublcd-backlight/brightness ]; then
+  echo 0 > /sys/class/leds/sublcd-backlight/brightness
+fi
+if [ -e /sys/class/graphics/fb1/blank ]; then
+  echo 4 > /sys/class/graphics/fb1/blank
+fi
 
 if [ -n "${OOS_HWC_SERVICE:-}" ]; then
   setprop ctl.restart "$OOS_HWC_SERVICE"
@@ -90,10 +111,15 @@ export WEBKIT_INJECTED_BUNDLE_PATH=/opt/oos/lib/wpe-webkit-2.0/injected-bundle
 export WPE_BACKEND=/opt/oos/lib/libWPEBackend-android.so
 export GIO_EXTRA_MODULES=/opt/oos/lib/gio/modules
 export GST_PLUGIN_SYSTEM_PATH=/opt/oos/lib/gstreamer-1.0
+export GST_PLUGIN_SCANNER=/opt/oos/libexec/gstreamer-1.0/gst-plugin-scanner
+export GST_REGISTRY=/data/cache/system/gstreamer-1.0/registry.bin
+export OOS_WAMR_AOT_CACHE_PATH=/data/cache/webassembly-aot:/opt/oos/share/oos/webassembly-aot
 export FONTCONFIG_FILE=/opt/oos/etc/fonts/fonts.conf
 export SSL_CERT_FILE=/opt/oos/etc/ssl/certs/ca-certificates.crt
 
 mkdir -p "$OOS_PERSIST_DIR/tmp" "$OOS_PERSIST_DIR/cache/system" \
+  "$OOS_PERSIST_DIR/cache/system/gstreamer-1.0" \
+  "$OOS_PERSIST_DIR/cache/webassembly-aot" \
   "$OOS_PERSIST_DIR/users/0/system/share"
 
 chroot "$OOS_ROOTFS" /system/bin/sh -c \

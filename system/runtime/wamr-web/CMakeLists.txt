@@ -9,6 +9,8 @@ set(OOS_REPO_ROOT "" CACHE PATH "OOS repository root")
 set(OOS_WPE_PREFIX "" CACHE PATH "Installed WPE prefix")
 set(OOS_WAMR_WEB_PLATFORM "linux" CACHE STRING "WAMR platform")
 set(OOS_WAMR_WEB_TARGET "X86_64" CACHE STRING "WAMR target")
+set(OOS_WAMR_WEB_AOT_NAMESPACE "wamr-unknown/unknown" CACHE STRING
+    "Relative namespace below each WebAssembly AOT cache root")
 option(OOS_WAMR_WEB_JIT "Use the WAMR LLVM JIT for WebAssembly" ON)
 
 if(NOT EXISTS "${OOS_REPO_ROOT}/third_party/wasm-micro-runtime/core/iwasm/include/wasm_c_api.h")
@@ -49,8 +51,11 @@ set(WAMR_BUILD_ALLOC_WITH_USER_DATA 1)
 include("${WAMR_ROOT_DIR}/build-scripts/runtime_lib.cmake")
 
 add_library(oos-wamr-web-process MODULE
+  src/audio_thread_priority.cpp
   src/web_process_extension.cpp
   ${WAMR_RUNTIME_LIB_SOURCE})
+target_compile_definitions(oos-wamr-web-process PRIVATE
+  OOS_WAMR_WEB_AOT_NAMESPACE="${OOS_WAMR_WEB_AOT_NAMESPACE}")
 target_include_directories(oos-wamr-web-process PRIVATE
   "${WAMR_ROOT_DIR}/core/iwasm/include"
   "${OOS_WPE_PREFIX}/include/wpe-webkit-2.0"
@@ -85,7 +90,7 @@ else()
     "${OOS_WPE_PREFIX}/lib/libWPEWebKit-2.0.so"
     "${OOS_WPE_PREFIX}/lib/libgobject-2.0.so"
     "${OOS_WPE_PREFIX}/lib/libglib-2.0.so"
-    dl m)
+    dl log m)
   target_link_options(oos-wamr-web-process PRIVATE
     -Wl,--allow-shlib-undefined
     "-Wl,-rpath-link,${OOS_WPE_PREFIX}/lib")

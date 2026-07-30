@@ -45,8 +45,12 @@ trap 'release_bootstrap_lock' 0
 
 stop_oos
 echo 0 > /sys/class/leds/lcd-backlight/brightness 2>/dev/null || true
-echo 0 > /sys/class/leds/sublcd-backlight/brightness 2>/dev/null || true
-echo 4 > /sys/class/graphics/fb1/blank 2>/dev/null || true
+if [ -e /sys/class/leds/sublcd-backlight/brightness ]; then
+  echo 0 > /sys/class/leds/sublcd-backlight/brightness
+fi
+if [ -e /sys/class/graphics/fb1/blank ]; then
+  echo 4 > /sys/class/graphics/fb1/blank
+fi
 
 status=0
 unmount_if_mounted "$OOS_ROOTFS/data/media/removable" || status=1

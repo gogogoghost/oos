@@ -1,3 +1,11 @@
+From 8f31d55f0a09e649fc8a551fdb98804fba2d43f1 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Thu, 30 Jul 2026 20:15:00 +0800
+Subject: [PATCH] JSC: build JIT maps with WebAssembly disabled
+
+Keep the JavaScript JIT enabled when WAMR supplies the browser WebAssembly
+implementation.
+---
 diff --git a/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp b/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp
 index 7f95b150a65f..76fdf7ecb29c 100644
 --- a/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp

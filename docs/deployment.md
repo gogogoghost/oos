@@ -154,6 +154,11 @@ For a persistent runtime switch, copy `runtime.conf.example` to
 current WPE application. Remote inspector support stays compiled into every
 WPE device profile; changing this file never requires a rebuild.
 
+WebAudio diagnostics use the same file. `OOS_TRACE_WEBAUDIO=1` logs WebCore PCM
+burst boundaries, and `OOS_WEB_AUDIO_NICE` controls the nice value applied only
+to WPE audio feeder threads (`-10` by default, `0` to disable adjustment).
+Leave tracing disabled outside a diagnostic run.
+
 ## Upgrade
 
 Extract the new res archive beside the existing version, stop the supervising

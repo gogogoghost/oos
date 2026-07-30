@@ -1,3 +1,11 @@
+From f82a93c257304e5e67dd370450577ec9b7ac2b02 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Thu, 30 Jul 2026 20:16:00 +0800
+Subject: [PATCH] WPE: route localhost application origins to scheme handlers
+
+Allow the OOS package source to serve port-free KaiOS 3 localhost origins
+without intercepting ordinary HTTP traffic.
+---
 diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp b/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
 --- a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
 +++ b/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp

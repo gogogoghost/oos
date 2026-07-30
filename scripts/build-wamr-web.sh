@@ -7,6 +7,8 @@ PROFILE=${1:-local}
 JOBS=${WAMR_WEB_BUILD_JOBS:-$(nproc)}
 export CCACHE_DISABLE=${CCACHE_DISABLE:-1}
 WAMR_PATCH="$ROOT_DIR/system/patches/wamr-c-api-import-memory.patch"
+source "$ROOT_DIR/third_party/versions.env"
+WAMR_RELEASE=${WAMR_VERSION#WAMR-}
 
 case "$PROFILE" in
   local)
@@ -14,6 +16,7 @@ case "$PROFILE" in
     WPE_PREFIX="$WPE_SYSROOT/opt/oos"
     WAMR_PLATFORM=linux
     WAMR_TARGET=X86_64
+    AOT_NAMESPACE="wamr-$WAMR_RELEASE/x86_64-nosimd-bounds-checks"
     ENABLE_JIT=${OOS_WAMR_WEB_JIT:-ON}
     TOOLCHAIN_ARGS=()
     ;;
@@ -23,6 +26,7 @@ case "$PROFILE" in
     WPE_PREFIX="$ROOT_DIR/build/wpe-sysroot/$OOS_WPE_SYSROOT_KEY"
     WAMR_PLATFORM=android
     WAMR_TARGET=ARMV7A
+    AOT_NAMESPACE="wamr-$WAMR_RELEASE/armv7a-nosimd-bounds-checks"
     ENABLE_JIT=${OOS_WAMR_WEB_JIT:-OFF}
     WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
     TOOLCHAIN_FILE="$WPE_NDK/build/cmake/android.toolchain.cmake"
@@ -72,6 +76,7 @@ cmake_args=(
   -DOOS_WPE_PREFIX="$WPE_PREFIX"
   -DOOS_WAMR_WEB_PLATFORM="$WAMR_PLATFORM"
   -DOOS_WAMR_WEB_TARGET="$WAMR_TARGET"
+  -DOOS_WAMR_WEB_AOT_NAMESPACE="$AOT_NAMESPACE"
   -DOOS_WAMR_WEB_JIT="$ENABLE_JIT")
 cmake_args+=("${TOOLCHAIN_ARGS[@]}")
 

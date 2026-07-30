@@ -124,12 +124,15 @@ supervise_hello() {
     export LD_LIBRARY_PATH=$RUNTIME/lib:/system/lib:/vendor/lib:/apex/com.android.runtime/lib
     export WEBKIT_EXEC_PATH=$RUNTIME/libexec/wpe-webkit-2.0
     export WEBKIT_INJECTED_BUNDLE_PATH=$RUNTIME/lib/wpe-webkit-2.0/injected-bundle
+    export OOS_WPE_WEB_EXTENSIONS=$RUNTIME/lib/oos/web-process-extensions
+    export OOS_WAMR_AOT_CACHE_PATH=$RUNTIME/share/oos/webassembly-aot
     export WPE_BACKEND=$RUNTIME/lib/libWPEBackend-android.so
     export GIO_EXTRA_MODULES=$RUNTIME/lib/gio/modules
     export FONTCONFIG_FILE=$RUNTIME/etc/fonts/fonts.conf
     export SSL_CERT_FILE=$RUNTIME/etc/ssl/certs/ca-certificates.crt
     export OOS_WPE_HELLO_HTML=$RUNTIME/hello.html
     export OOS_WPE_TEST_HOLD_MS=$TEST_HOLD_MS
+    export OOS_WEB_TEST_MODE=1
     export OOS_SURFACE_SOCKET=$SURFACE_SOCKET
     export OOS_SURFACE_WIDTH=240
     export OOS_SURFACE_HEIGHT=320
@@ -178,6 +181,7 @@ start() {
       export LD_LIBRARY_PATH=$RUNTIME/lib:/system/lib:/vendor/lib:/apex/com.android.runtime/lib
       export WEBKIT_EXEC_PATH=$RUNTIME/libexec/wpe-webkit-2.0
       export WEBKIT_INJECTED_BUNDLE_PATH=$RUNTIME/lib/wpe-webkit-2.0/injected-bundle
+      export OOS_WPE_WEB_EXTENSIONS=$RUNTIME/lib/oos/web-process-extensions
       export WPE_BACKEND=$RUNTIME/lib/libWPEBackend-android.so
       export GIO_EXTRA_MODULES=$RUNTIME/lib/gio/modules
       export FONTCONFIG_FILE=$RUNTIME/etc/fonts/fonts.conf
