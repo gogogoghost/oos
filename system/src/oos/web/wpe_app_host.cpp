@@ -147,8 +147,10 @@ pid_t startRunner(const apps::AppLaunch &launch,
     close(host_surface_fd);
     close(host_input_fd);
     close(host_api_fd);
-    // ARMv7 BBQ remains enabled, but its loop OSR entrypoint is not reliable on
-    // the KaiOS JSC port. Hot functions still tier from IPInt to BBQ.
+    // ARM32 has no usable IPInt or OMG fallback. Compile every Wasm function
+    // with BBQ before instantiation, while avoiding the unreliable loop OSR
+    // entrypoint on the KaiOS JSC port.
+    setenv("JSC_useEagerBBQCompilation", "true", 1);
     setenv("JSC_useWasmOSR", "false", 1);
     if (environmentEnabled("OOS_ENABLE_INSPECTOR")) {
       setenv("WEBKIT_INSPECTOR_HTTP_SERVER",

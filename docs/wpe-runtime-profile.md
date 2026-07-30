@@ -181,11 +181,11 @@ Both current profiles retain and verify:
 - accelerated compositing, EGL, GLES, and WebGL;
 - WPE's Android GPU-buffer producer backend.
 
-OOS leaves JavaScriptCore's normal WebAssembly tiering enabled. Application
-code can start in the interpreter and hot functions promote to BBQ, avoiding a
-multi-second, input-blocking compile of every function before the first frame.
-Platforms that support the OMG optimizing tier may promote hot BBQ code later;
-ARMv7 retains BBQ as its highest WebAssembly tier.
+The current ARMv7 profiles set `JSC_useEagerBBQCompilation=true`. Module
+instantiation therefore waits until every internal function has compiled with
+BBQ. This trades startup latency for stable execution latency and makes JIT
+compilation failures visible before application code runs. ARMv7 retains BBQ
+as its only executable WebAssembly tier; loop OSR entrypoints remain disabled.
 
 FTL and WebAssembly OMG are disabled because WebKit does not support those
 optimizing tiers on this 32-bit ARM target. The C-loop interpreter is disabled,
@@ -195,6 +195,10 @@ fallback.
 Android shared-library boundaries use the base AAPCS softfp ABI. JSC-generated
 ARMv7 code uses `aapcs-vfp` only for its internal operation calls and matching
 function-pointer wrappers. Public and system ABI boundaries remain softfp.
+
+The eager mode changes compilation timing, not generated-code correctness. A
+known ARM32 BBQ miscompilation found with OmniJ2ME is tracked in
+[wpe-arm32-wasm.md](wpe-arm32-wasm.md).
 
 ## New Device Admission
 

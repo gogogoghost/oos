@@ -13,6 +13,7 @@ PATCH_FILES=(
   "$ROOT_DIR/system/patches/wpe-android-cerbero-libdrm-off.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-context-menus-link.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-wasm-osr-option.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-eager-wasm-bbq.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-wpebackend-seqpacket.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-wavpack.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-flac.patch"
@@ -26,6 +27,7 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-libdrm-off-build.patch:recipes/wpewebkit/0006-OOS-libdrm-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch:recipes/wpewebkit/0007-OOS-context-menus-off-link-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-wasm-osr-option.patch:recipes/wpewebkit/0008-OOS-honor-Wasm-OSR-option.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-eager-wasm-bbq.patch:recipes/wpewebkit/0009-OOS-eager-Wasm-BBQ.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-gralloc0.patch:recipes/wpebackend-android/0001-OOS-RGB565-and-Android23-buffer.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-seqpacket-ipc.patch:recipes/wpebackend-android/0002-OOS-seqpacket-renderer-IPC.patch"
   "$ROOT_DIR/system/patches/libtasn1-android-opaque-file.patch:recipes/libtasn1/0002-Android-opaque-FILE.patch"
@@ -80,6 +82,10 @@ for patch_file in "${PATCH_FILES[@]}"; do
        rg -q -- '0008-OOS-honor-Wasm-OSR-option.patch' \
          "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
     echo "Cerbero recipe honors the WebAssembly OSR option."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-eager-wasm-bbq.patch ]] && \
+       rg -q -- '0009-OOS-eager-Wasm-BBQ.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe supports eager WebAssembly BBQ compilation."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-wpebackend-seqpacket.patch ]] && \
        rg -q -- '0002-OOS-seqpacket-renderer-IPC.patch' \
          "$CERBERO_DIR/recipes/wpebackend-android.recipe"; then

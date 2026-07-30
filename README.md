@@ -125,6 +125,9 @@ not support those optimizing tiers on this 32-bit ARM target. The build script
 checks the configured features and ARMv7 JIT objects before reporting success.
 See [docs/wpe-runtime-profile.md](docs/wpe-runtime-profile.md) for the retained
 runtime surface, disabled feature groups, and ARMv7 softfp JIT boundary.
+The current ARM32 WebAssembly miscompilation investigation and validated
+application-side workarounds are recorded in
+[docs/wpe-arm32-wasm.md](docs/wpe-arm32-wasm.md).
 
 For a production-only build, configure with:
 
