@@ -103,6 +103,10 @@ gboolean stopRunner(gpointer data) {
   return G_SOURCE_REMOVE;
 }
 
+void webViewClosed(WebKitWebView *, gpointer data) {
+  g_main_loop_quit(static_cast<GMainLoop *>(data));
+}
+
 void closeFromWeb(void *data) {
   g_main_loop_quit(static_cast<GMainLoop *>(data));
 }
@@ -308,6 +312,22 @@ int main(int argc, char **argv) {
     }
     g_main_loop_unref(loop);
     return 1;
+  }
+  g_signal_connect(view, "close", G_CALLBACK(webViewClosed), loop);
+  if (const char *test_mode = std::getenv("OOS_WEB_TEST_MODE");
+      test_mode && test_mode[0] == '1') {
+    webkit_settings_set_enable_write_console_messages_to_stdout(
+        webkit_web_view_get_settings(view), TRUE);
+    unsigned long timeout_ms = 5000;
+    if (const char *configured_timeout =
+            std::getenv("OOS_WEB_TEST_TIMEOUT_MS")) {
+      char *end = nullptr;
+      const unsigned long parsed =
+          std::strtoul(configured_timeout, &end, 10);
+      if (end && *end == '\0' && parsed >= 100 && parsed <= 300000)
+        timeout_ms = parsed;
+    }
+    g_timeout_add(static_cast<guint>(timeout_ms), stopRunner, loop);
   }
   webkit_web_view_load_uri(view, uri);
   std::fprintf(stderr, "OOS local WPE app started: %s\n", uri);

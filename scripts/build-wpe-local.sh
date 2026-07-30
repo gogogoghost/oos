@@ -24,6 +24,7 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-libdrm-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-webassembly-off-jit-build.patch"
 )
 SOURCE_PATCH_SHA=$(sha256sum "${SOURCE_PATCHES[@]}" | awk '{print $1}' |
   sha256sum | awk '{print $1}')
@@ -65,6 +66,12 @@ source_patch_is_ready() {
     wpewebkit-libdrm-off-build.patch)
       grep -Fq 'static constexpr uint32_t xRGB8888Format' "$backing_store" &&
         grep -Fq '== xRGB8888Format' "$backing_store"
+      ;;
+    wpewebkit-webassembly-off-jit-build.patch)
+      grep -Fq '#if ENABLE(WEBASSEMBLY)' \
+        "$ROOT_DIR/third_party/wpewebkit/Source/JavaScriptCore/jit/PCToCodeOriginMap.h" &&
+        grep -Fq '#include "WasmOpcodeOrigin.h"' \
+          "$ROOT_DIR/third_party/wpewebkit/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp"
       ;;
     *)
       return 1

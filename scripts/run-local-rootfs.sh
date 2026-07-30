@@ -52,6 +52,11 @@ for name in DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR; do
     common_env+=(--setenv "$name" "${!name}")
   fi
 done
+for name in OOS_WEB_TEST_MODE OOS_WEB_TEST_TIMEOUT_MS; do
+  if [[ -n ${!name:-} ]]; then
+    common_env+=(--setenv "$name" "${!name}")
+  fi
+done
 
 if command -v bwrap >/dev/null 2>&1; then
   namespace_args=(
@@ -95,6 +100,8 @@ if command -v proot >/dev/null 2>&1; then
   export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
   export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
   export __GLX_VENDOR_LIBRARY_NAME=mesa
+  export OOS_WEB_TEST_MODE=${OOS_WEB_TEST_MODE:-}
+  export OOS_WEB_TEST_TIMEOUT_MS=${OOS_WEB_TEST_TIMEOUT_MS:-}
   exec proot -0 -r "$ROOTFS" -b /usr -b /etc -b /proc \
     -b "$LOCAL_DATA:/data" "$PROGRAM" "${PROGRAM_ARGUMENTS[@]}"
 fi

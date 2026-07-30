@@ -18,7 +18,7 @@ index 31d8d59..c33b1a4 100644
      deps = ['ca-certificates', 'zlib']
      # Parallel make fails randomly due to undefined macros, probably races
      allow_parallel_build = False
-@@ -21,20 +21,7 @@ class Recipe(recipe.Recipe):
+@@ -21,19 +21,7 @@ class Recipe(recipe.Recipe):
      # Can build for MSVC and UWP
      can_msvc = True
  
@@ -39,14 +39,14 @@ index 31d8d59..c33b1a4 100644
  
      files_bins = ['openssl']
      files_libs = ['libcrypto', 'libssl']
-@@ -192,6 +179,7 @@ class Recipe(recipe.Recipe):
+@@ -186,5 +174,6 @@ class Recipe(recipe.Recipe):
          if self.config.target_platform == Platform.ANDROID:
              self.prepend_env('PATH', self.get_env('ANDROID_NDK_TOOLCHAIN_BIN'), sep=os.pathsep)
 +            self.set_env('ANDROID_NDK_ROOT', self.get_env('ANDROID_NDK_HOME'))
  
  
      @modify_environment
-@@ -207,7 +195,8 @@ class Recipe(recipe.Recipe):
+@@ -200,6 +189,7 @@ class Recipe(recipe.Recipe):
          # OpenSSL guesses the libdir incorrectly on x86_64
          config_sh = 'perl ./Configure --prefix=' + self.config.prefix + \
 -            ' --libdir=lib' + self.config.lib_suffix + '  no-makedepend no-unit-test '

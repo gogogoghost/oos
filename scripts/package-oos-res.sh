@@ -89,6 +89,8 @@ package_require_file "$WAMR_LICENSE"
 package_require_file "$SYSTEM_FONT"
 package_require_file "$SYSTEM_FONT_LICENSE"
 package_require_file "$INSPECTOR_RESOURCE"
+package_require_file \
+  "$WPE_SYSROOT/lib/oos/web-process-extensions/liboos-wamr-web-process.so"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
@@ -196,6 +198,7 @@ if [[ "$DEVICE" == nokia-8110-4g ]]; then
 fi
 for runtime_entry in \
   lib/libWPEBackend-android.so \
+  lib/oos/web-process-extensions/liboos-wamr-web-process.so \
   lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so \
   lib/gio/modules/libgioenvironmentproxy.so \
   lib/gio/modules/libgioopenssl.so \
@@ -262,8 +265,8 @@ printf '%s\n' \
   "wpe_profile=$OOS_WPE_PROFILE" \
   "buffer_abi=$OOS_WPE_BUFFER_ABI" \
   "javascript_jit=baseline,dfg" \
-  "webassembly_jit=bbq" \
-  "webassembly_execution=tiered-ipint-bbq" \
+  "webassembly_runtime=wamr-2.4.4" \
+  "webassembly_execution=interpreter,aot" \
   "remote_inspector=runtime-optional" \
   "native_app_runtime=wamr-2.4.4" \
   "web_app_runtime=wpe-webkit-2.52.5" \

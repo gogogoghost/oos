@@ -66,8 +66,11 @@ device-profile default (or the available CPU count); the local build defaults
 to at most six jobs because WebCore unified sources have high peak memory use.
 
 WAMR builds locally by default. Set `OOS_WAMR_DISTROBOX=oos-debian12` when a
-compatible LLVM is provided by that container. WAMR 2.4.4 is currently built
-with LLVM 14. This setting is intentionally independent of `WPE_DISTROBOX`.
+compatible LLVM is provided by that container. The native-app AOT tool uses
+LLVM 14. The local WPE WebAssembly bridge uses the first available LLVM
+20/19/18 development package for JIT, or can be built with
+`OOS_WAMR_WEB_JIT=OFF` for interpreter diagnostics. This setting is
+intentionally independent of `WPE_DISTROBOX`.
 
 Build each WPE runtime profile, configure the corresponding Android target,
 and compile Orange OS:
@@ -119,14 +122,14 @@ The outputs are:
 - `build/wpe-sysroot/nokia-8110-4g`: isolated Android 6 WPE sysroot.
 - `build/wpe-sysroot/local-root`: local rootfs containing `/opt/oos`.
 
-The KaiOS performance profile deliberately retains JavaScriptCore Baseline and
-DFG JIT plus WebAssembly BBQ JIT. FTL/OMG remain disabled because WebKit does
-not support those optimizing tiers on this 32-bit ARM target. The build script
-checks the configured features and ARMv7 JIT objects before reporting success.
+The KaiOS performance profile retains JavaScriptCore Baseline and DFG JIT while
+WAMR provides WebAssembly through a WebProcess extension. FTL remains disabled
+because WebKit does not support that optimizing JavaScript tier on this 32-bit
+ARM target. The build script checks the configured features, ARMv7 JavaScript
+JIT objects, and WAMR extension before reporting success.
 See [docs/wpe-runtime-profile.md](docs/wpe-runtime-profile.md) for the retained
 runtime surface, disabled feature groups, and ARMv7 softfp JIT boundary.
-The current ARM32 WebAssembly miscompilation investigation and validated
-application-side workarounds are recorded in
+The ARM32 WebAssembly migration rationale and validation status are recorded in
 [docs/wpe-arm32-wasm.md](docs/wpe-arm32-wasm.md).
 
 For a production-only build, configure with:

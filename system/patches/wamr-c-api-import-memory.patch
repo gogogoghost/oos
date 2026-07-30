@@ -1,0 +1,160 @@
+diff --git a/core/iwasm/common/wasm_c_api.c b/core/iwasm/common/wasm_c_api.c
+index 269ec577..24500cf4 100644
+--- a/core/iwasm/common/wasm_c_api.c
++++ b/core/iwasm/common/wasm_c_api.c
+@@ -4568,6 +4568,35 @@ interp_link_global(const WASMModule *module_interp, uint16 global_idx_rt,
+     return true;
+ }
+ 
++static bool
++interp_link_memory(const WASMModule *module_interp, uint16 memory_idx_rt,
++                   wasm_memory_t *import)
++{
++    WASMImport *imported_memory_interp;
++    const wasm_limits_t *limits;
++
++    bh_assert(module_interp && import && import->type);
++    bh_assert(memory_idx_rt < module_interp->import_memory_count);
++    bh_assert(WASM_EXTERN_MEMORY == import->kind);
++
++    imported_memory_interp = module_interp->import_memories + memory_idx_rt;
++    bh_assert(imported_memory_interp->kind == IMPORT_KIND_MEMORY);
++    limits = wasm_memorytype_limits(import->type);
++    if (limits->min <
++            imported_memory_interp->u.memory.mem_type.init_page_count
++        || (imported_memory_interp->u.memory.mem_type.max_page_count
++                != UINT32_MAX
++            && limits->max
++                   > imported_memory_interp->u.memory.mem_type.max_page_count))
++        return false;
++
++    imported_memory_interp->u.memory.mem_type.init_page_count = limits->min;
++    imported_memory_interp->u.memory.mem_type.max_page_count = limits->max;
++    imported_memory_interp->u.memory.is_linked = true;
++    import->memory_idx_rt = memory_idx_rt;
++    return true;
++}
++
+ static bool
+ interp_process_export(wasm_store_t *store,
+                       const WASMModuleInstance *inst_interp,
+@@ -4739,6 +4768,31 @@ failed:
+     return false;
+ }
+ 
++static bool
++aot_link_memory(const AOTModule *module_aot, uint16 memory_idx_rt,
++                wasm_memory_t *import)
++{
++    AOTImportMemory *imported_memory;
++    const wasm_limits_t *limits;
++
++    bh_assert(module_aot && import && import->type);
++    bh_assert(memory_idx_rt < module_aot->import_memory_count);
++    bh_assert(WASM_EXTERN_MEMORY == import->kind);
++
++    imported_memory = module_aot->import_memories + memory_idx_rt;
++    limits = wasm_memorytype_limits(import->type);
++    if (limits->min < imported_memory->mem_type.init_page_count
++        || (imported_memory->mem_type.max_page_count != UINT32_MAX
++            && limits->max > imported_memory->mem_type.max_page_count))
++        return false;
++
++    imported_memory->mem_type.init_page_count = limits->min;
++    imported_memory->mem_type.max_page_count = limits->max;
++    imported_memory->is_linked = true;
++    import->memory_idx_rt = memory_idx_rt;
++    return true;
++}
++
+ static bool
+ aot_process_export(wasm_store_t *store, const AOTModuleInstance *inst_aot,
+                    wasm_extern_vec_t *externals)
+@@ -4836,14 +4890,14 @@ static bool
+ do_link(const wasm_instance_t *inst, const wasm_module_t *module,
+         const wasm_extern_vec_t *imports)
+ {
+-    uint32 i, import_func_i, import_global_i;
++    uint32 i, import_func_i, import_global_i, import_memory_i;
+ 
+     bh_assert(inst && module);
+ 
+     /* we have run a module_type check before. */
+ 
+-    for (i = 0, import_func_i = 0, import_global_i = 0; i < imports->num_elems;
+-         i++) {
++    for (i = 0, import_func_i = 0, import_global_i = 0, import_memory_i = 0;
++         i < imports->num_elems; i++) {
+         wasm_extern_t *import = imports->data[i];
+ 
+         if (!import) {
+@@ -4901,10 +4955,31 @@ do_link(const wasm_instance_t *inst, const wasm_module_t *module,
+                 break;
+             }
+             case WASM_EXTERN_MEMORY:
++            {
++                bool ret = false;
++#if WASM_ENABLE_INTERP != 0
++                if ((*module)->module_type == Wasm_Module_Bytecode) {
++                    ret = interp_link_memory(MODULE_INTERP(module),
++                                             import_memory_i,
++                                             wasm_extern_as_memory(import));
++                }
++#endif
++#if WASM_ENABLE_AOT != 0
++                if ((*module)->module_type == Wasm_Module_AoT) {
++                    ret = aot_link_memory(MODULE_AOT(module), import_memory_i,
++                                          wasm_extern_as_memory(import));
++                }
++#endif
++                if (!ret) {
++                    LOG_WARNING("link memory #%d failed", import_memory_i);
++                    goto failed;
++                }
++                import_memory_i++;
++                break;
++            }
+             case WASM_EXTERN_TABLE:
+             {
+-                LOG_WARNING("doesn't support import memories and tables for "
+-                            "now, ignore them");
++                LOG_WARNING("doesn't support import tables for now, ignore it");
+                 break;
+             }
+             default:
+diff --git a/core/iwasm/compilation/aot.h b/core/iwasm/compilation/aot.h
+index 973d198c..e035ac41 100644
+--- a/core/iwasm/compilation/aot.h
++++ b/core/iwasm/compilation/aot.h
+@@ -86,6 +86,7 @@ typedef struct AOTImportMemory {
+     char *module_name;
+     char *memory_name;
+     AOTMemoryType mem_type;
++    bool is_linked;
+ } AOTImportMemory;
+ 
+ /**
+diff --git a/core/iwasm/interpreter/wasm.h b/core/iwasm/interpreter/wasm.h
+index 0dd73958..0ff11b41 100644
+--- a/core/iwasm/interpreter/wasm.h
++++ b/core/iwasm/interpreter/wasm.h
+@@ -590,6 +590,7 @@ typedef struct WASMMemoryImport {
+     char *module_name;
+     char *field_name;
+     WASMMemoryType mem_type;
++    bool is_linked;
+ #if WASM_ENABLE_MULTI_MODULE != 0
+     WASMModule *import_module;
+     WASMMemory *import_memory_linked;
+diff --git a/core/iwasm/interpreter/wasm_runtime.c b/core/iwasm/interpreter/wasm_runtime.c
+index b4aa483d..e97ba17d 100644
+--- a/core/iwasm/interpreter/wasm_runtime.c
++++ b/core/iwasm/interpreter/wasm_runtime.c
+@@ -2017,6 +2017,7 @@ check_linked_symbol(WASMModuleInstance *module_inst, char *error_buf,
+         WASMMemoryImport *memory = &((module->import_memories + i)->u.memory);
+ 
+         if (!wasm_runtime_is_built_in_module(memory->module_name)
++            && !memory->is_linked
+ #if WASM_ENABLE_MULTI_MODULE != 0
+             && !memory->import_memory_linked
+ #endif

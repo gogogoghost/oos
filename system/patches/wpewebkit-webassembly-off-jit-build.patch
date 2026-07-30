@@ -1,0 +1,43 @@
+diff --git a/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp b/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp
+index 7f95b150a65f..76fdf7ecb29c 100644
+--- a/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp
++++ b/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp
+@@ -31,7 +31,9 @@
+ #include "B3PCToOriginMap.h"
+ #include "DFGNode.h"
+ #include "LinkBuffer.h"
++#if ENABLE(WEBASSEMBLY)
+ #include "WasmOpcodeOrigin.h"
++#endif
+ #include <wtf/TZoneMallocInlines.h>
+ 
+ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+diff --git a/Source/JavaScriptCore/jit/PCToCodeOriginMap.h b/Source/JavaScriptCore/jit/PCToCodeOriginMap.h
+index 43aee044e18e..f9db60caa3f1 100644
+--- a/Source/JavaScriptCore/jit/PCToCodeOriginMap.h
++++ b/Source/JavaScriptCore/jit/PCToCodeOriginMap.h
+@@ -33,7 +33,9 @@
+ #include <JavaScriptCore/CodeOrigin.h>
+ #include <JavaScriptCore/MacroAssembler.h>
+ #include <JavaScriptCore/VM.h>
++#if ENABLE(WEBASSEMBLY)
+ #include <JavaScriptCore/WasmOpcodeOrigin.h>
++#endif
+ #include <wtf/StdLibExtras.h>
+ #include <wtf/ValidatedReinterpretCast.h>
+ #include <wtf/Vector.h>
+@@ -44,6 +46,7 @@ class PCToOriginMap;
+ }
+ 
+ namespace Wasm {
++#if ENABLE(WEBASSEMBLY)
+ class WasmOrigin {
+     MAKE_VALIDATED_REINTERPRET_CAST
+ public:
+@@ -59,5 +62,6 @@ public:
+ };
+ 
+ MAKE_VALIDATED_REINTERPRET_CAST_IMPL("WasmOrigin", WasmOrigin)
++#endif
+ 
+ } // namespace Wasm

@@ -97,7 +97,7 @@ profile is identified by:
 
 - Android/Bionic API level;
 - CPU architecture and Android ABI;
-- JavaScriptCore JIT and WebAssembly tiers;
+- JavaScriptCore JIT tiers and the WAMR WebAssembly runtime;
 - C++ runtime SONAME/ABI;
 - kernel primitives required by WebKit helper processes and JIT mappings.
 
@@ -137,7 +137,8 @@ Each device mapping lives in `system/config/wpe/devices/<device>.env`. Build wit
 Android builds. It retains the browser capabilities used by KaiOS 2.5/3
 applications, including HTML audio/video, AudioContext, MediaSource,
 getUserMedia/WebRTC, MediaRecorder, notifications, geolocation, fullscreen,
-WebGL, and WebAssembly. XR, gamepad, PDF.js, WebDriver, and OOS-owned browser
+and WebGL. JSC WebAssembly is disabled because WAMR provides that API through
+the WebProcess extension. XR, gamepad, PDF.js, WebDriver, and OOS-owned browser
 shell facilities remain disabled.
 
 The Android Cerbero recipe receives this list through a build environment
@@ -177,27 +178,20 @@ Both current profiles retain and verify:
 
 - JavaScriptCore Baseline JIT;
 - JavaScriptCore DFG JIT;
-- WebAssembly with the ARMv7 BBQ JIT;
+- JSC WebAssembly disabled;
+- the WAMR WebProcess extension with interpreter and AOT loading support;
 - accelerated compositing, EGL, GLES, and WebGL;
 - WPE's Android GPU-buffer producer backend.
 
-The current ARMv7 profiles set `JSC_useEagerBBQCompilation=true`. Module
-instantiation therefore waits until every internal function has compiled with
-BBQ. This trades startup latency for stable execution latency and makes JIT
-compilation failures visible before application code runs. ARMv7 retains BBQ
-as its only executable WebAssembly tier; loop OSR entrypoints remain disabled.
-
-FTL and WebAssembly OMG are disabled because WebKit does not support those
-optimizing tiers on this 32-bit ARM target. The C-loop interpreter is disabled,
-so accidentally losing JIT support fails the build instead of shipping a slow
-fallback.
+FTL remains disabled because WebKit does not support that optimizing JavaScript
+tier on this 32-bit ARM target. The C-loop JavaScript interpreter is disabled,
+so accidentally losing Baseline/DFG support fails the build instead of shipping
+a slow fallback. These choices no longer affect WebAssembly execution.
 
 Android shared-library boundaries use the base AAPCS softfp ABI. JSC-generated
-ARMv7 code uses `aapcs-vfp` only for its internal operation calls and matching
-function-pointer wrappers. Public and system ABI boundaries remain softfp.
-
-The eager mode changes compilation timing, not generated-code correctness. A
-known ARM32 BBQ miscompilation found with OmniJ2ME is tracked in
+JavaScript code uses `aapcs-vfp` only for internal operation calls and matching
+function-pointer wrappers. WAMR and all public/system ABI boundaries remain
+softfp. The migration rationale and validation status are tracked in
 [wpe-arm32-wasm.md](wpe-arm32-wasm.md).
 
 ## New Device Admission

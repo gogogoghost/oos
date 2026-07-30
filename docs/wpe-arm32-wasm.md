@@ -1,68 +1,69 @@
-# ARM32 WPE WebAssembly Status
+# ARM32 WebAssembly Runtime Status
 
-## Scope
+## Runtime Decision
 
-OmniJ2ME exposes a deterministic JavaScriptCore miscompilation on the Nokia
-8110 4G WPE profile. The failure has only been reproduced in the ARM32
-`WasmBBQJIT32_64` path. The same compiler produces correct output on a 64-bit
-host, but that does not prove every non-ARM32 JSC target is unaffected.
+WPE WebKit is built with `ENABLE_WEBASSEMBLY=OFF` on every OOS device. JSC
+continues to provide modern JavaScript with its Baseline and DFG tiers, while a
+WebProcess extension supplies the browser `WebAssembly` API through the pinned
+WAMR 2.4.4 runtime. This keeps the WebAssembly implementation identical across
+local and ARM32 profiles and removes JSC's ARM32 Wasm code generator from the
+runtime.
 
-This is not an 8110-specific application or file-transport failure. The Nokia
-2780 Flip also uses the ARM32 BBQ path and must be treated as potentially
-affected until the same regression is run there.
+The previous JSC policy used eager BBQ compilation and disabled Wasm loop OSR.
+It was removed together with its source patches and environment options. Those
+options changed compilation timing but could not detect or prevent silently
+incorrect generated code.
 
-## Reproduction Evidence
+## Reason For Migration
 
-The original optimized compiler validates and instantiates. Its exported
-compile function then either fails early or emits a structurally valid but
-incorrect J2BC root map:
+OmniJ2ME exposed a reproducible JSC `WasmBBQJIT32_64` miscompilation on the
+Nokia 8110 4G. The optimized compiler module instantiated successfully, but
+generated incorrect J2BC root-map liveness masks. `-O1`, disabling optimization
+for the liveness function, or changing its bitsets from 64-bit to 32-bit made
+the output match the host. Requiring those application-specific workarounds
+would not provide general KaiOS compatibility.
 
-| Compiler build | Nokia 8110 result |
-| --- | --- |
-| Original `-O3 -flto` | early compiler failure reported as `manifest` |
-| `-O3` without LTO | wrong J2BC root masks |
-| `-O2` | wrong J2BC root masks |
-| `-O1` | byte-identical to the host result |
-| `-O2`, liveness function `optnone` | byte-identical to the host result |
-| `-O2`, liveness bitsets changed to `uint32_t` | byte-identical to host |
+The reduced test established that HTML transport, the application package,
+and the JavaScript glue were not the cause. The failure was specific to the
+JSC ARM32 Wasm execution path, so OOS no longer ships that path.
 
-The reduced one-class JAR makes each device run about 1.5 seconds:
+## WAMR Web Bridge
 
-| Result | Size | FNV-1a |
-| --- | ---: | --- |
-| Host / O1 / O2 `optnone` / O2 `uint32_t` | 13496 | `ccef553c` |
-| Unmodified O2 on ARM32 | 13336 | `dc880111` |
+`system/runtime/wamr-web` installs a default-world WebProcess extension before
+application scripts run. It provides `Module`, `Instance`, `Memory`,
+`validate`, `compile`, `instantiate`, and both streaming helpers. Function and
+fixed-memory imports are connected through WAMR's C API.
 
-For the complete test JAR, sections before `ROOT_MAP` are identical. Method
-bytecode and all 17113 safepoint PCs are identical; only reference liveness
-masks diverge. The corresponding source expression is:
+Linear memory is allocated as a JSC ArrayBuffer first. WAMR's allocator then
+uses the same backing address, so typed-array access in JavaScript and guest
+loads/stores do not require a byte-buffer copy. The current profile requires
+`initial == maximum`; `grow()` fails explicitly. This matches the two
+Emscripten modules in the compatibility fixture and avoids relocating a JSC
+ArrayBuffer behind application views.
 
-```c
-next_in = current_use[word] | (next_out[word] & ~current_def[word]);
-```
+The bridge currently covers the core numeric function and memory surface used
+by KaiOS Emscripten applications. Browser-facing Table, Global, reference
+values, BigInt i64 conversion, memory growth, and custom-section contents
+remain explicit follow-up work. Unsupported imports fail with a LinkError
+instead of returning success-shaped placeholders.
 
-Generic 32-bit and 64-bit liveness probes pass at O1 and O2. A second probe
-with four live `uint64_t` values crossing Wasm calls also passes. The remaining
-trigger is the optimized function's combination of high register pressure,
-large branch tables, loop backedges, and 64-bit temporary values at control
-flow joins.
+## Validation
 
-## Runtime Policy
+The local x86 profile has been validated in interpreter mode through:
 
-OOS adds `JSC_useEagerBBQCompilation` and enables it for WPE children. On
-ARM32, module instantiation compiles all internal functions before resolving.
-This improves timing predictability and reports JIT compilation failures at
-load time, but it cannot detect silently incorrect machine code and does not
-fix this issue by itself.
+- a deterministic API test covering synchronous and asynchronous module
+  creation, JS function imports, and zero-copy imported-memory identity;
+- a 32 MiB pre-allocation regression for JSC native-class lifetime;
+- OmniJ2ME 97.16's 321,699-byte compiler module and 1,372,428-byte runtime
+  module; and
+- installation and interactive play of a 240x320 JAR through the real
+  `omnij2me.localhost:8080` application origin.
 
-The only validated temporary workarounds are changes to the affected Wasm:
+Both OmniJ2ME modules compiled and instantiated through WAMR, with 11/11 and
+40/62 import/export counts respectively. The application rendered and accepted
+input for the full interactive test.
 
-- compile with `-O1`;
-- disable optimization on `j2me_post_analyze_liveness`; or
-- implement that liveness bitset with 32-bit words.
-
-Those workarounds are useful for diagnosis but cannot be required of arbitrary
-third-party KaiOS applications. The engine fix remains open. Continue by
-reducing the real optimized function to standalone WAT, then audit ARM32 BBQ
-GPR-pair allocation across control-flow merges. Validate the final patch with
-both the original packaged compiler and runtime Wasm on the 8110 and 2780.
+The ARM32 build and QEMU execution test are intentionally still pending. The
+device build pipeline now builds and packages the same extension with the WAMR
+interpreter and AOT loader enabled, but that target must not be marked validated
+until its ELF is run under the Android 23 ARM userspace and then on hardware.

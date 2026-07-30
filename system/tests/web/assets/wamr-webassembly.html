@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OOS WAMR WebAssembly test</title>
+<style>
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: #121417;
+  color: #f5f7fa;
+}
+body {
+  display: grid;
+  place-items: center;
+  font: 700 22px sans-serif;
+}
+main { padding: 20px; text-align: center; }
+.pass { color: #45d483; }
+.fail { color: #ff6b6b; }
+</style>
+<main>
+  WAMR WebAssembly
+  <p id="result">Running...</p>
+</main>
+<script>
+const result = document.getElementById('result');
+
+const addModule = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+  0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
+  0x03, 0x02, 0x01, 0x00,
+  0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
+  0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b
+]);
+
+const importModule = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60,
+  0x01, 0x7f, 0x01, 0x7f, 0x02, 0x1b, 0x02, 0x01, 0x61, 0x06, 0x6d, 0x65,
+  0x6d, 0x6f, 0x72, 0x79, 0x02, 0x01, 0x01, 0x01, 0x01, 0x61, 0x08, 0x63,
+  0x61, 0x6c, 0x6c, 0x62, 0x61, 0x63, 0x6b, 0x00, 0x00, 0x03, 0x02, 0x01,
+  0x00, 0x07, 0x10, 0x02, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x01, 0x06, 0x6d,
+  0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x0a, 0x0e, 0x01, 0x0c, 0x00,
+  0x20, 0x00, 0x10, 0x00, 0x41, 0x00, 0x28, 0x02, 0x00, 0x6a, 0x0b, 0x00,
+  0x12, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x01, 0x0b, 0x01, 0x00, 0x08, 0x63,
+  0x61, 0x6c, 0x6c, 0x62, 0x61, 0x63, 0x6b
+]);
+
+async function run() {
+  // OmniJ2ME creates a 32 MiB memory before its first module. Keep this here
+  // to catch collection of the native JSC class prototypes under memory
+  // pressure.
+  const largeMemory = new WebAssembly.Memory({ initial: 512, maximum: 512 });
+  if (largeMemory.buffer.byteLength !== 32 * 1024 * 1024)
+    throw new Error('large fixed memory has the wrong size');
+
+  if (!WebAssembly.validate(addModule))
+    throw new Error('validate rejected a valid module');
+  const compiled = new WebAssembly.Module(addModule);
+  if (WebAssembly.Module.exports(compiled)[0]?.name !== 'add' ||
+      new WebAssembly.Instance(compiled).exports.add(20, 22) !== 42)
+    throw new Error('synchronous Module/Instance API failed');
+  const add = await WebAssembly.instantiate(addModule);
+  if (add.instance.exports.add(19, 23) !== 42)
+    throw new Error('exported function returned the wrong value');
+
+  const memory = new WebAssembly.Memory({ initial: 1, maximum: 1 });
+  new Uint32Array(memory.buffer)[0] = 7;
+  let callbackInput = null;
+  const linked = await WebAssembly.instantiate(importModule, {
+    a: {
+      memory,
+      callback: value => {
+        callbackInput = value;
+        return value * 2;
+      }
+    }
+  });
+  const linkedResult = linked.instance.exports.run(10);
+  const memoryValue = new Uint32Array(memory.buffer)[0];
+  if (linkedResult !== 27)
+    throw new Error(`function import or shared memory failed: result=${linkedResult}, callback=${callbackInput}, memory=${memoryValue}`);
+  if (linked.instance.exports.memory !== memory ||
+      linked.instance.exports.memory.buffer !== memory.buffer)
+    throw new Error('imported memory identity was not preserved');
+
+  result.className = 'pass';
+  result.textContent = 'PASS';
+  console.log('OOS_WAMR_WEB_CHECK result=pass runtime=wamr memory=zero-copy');
+}
+
+run().catch(error => {
+  result.className = 'fail';
+  result.textContent = `FAIL: ${error.message}`;
+  console.error('OOS_WAMR_WEB_CHECK result=fail', error);
+}).finally(() => setTimeout(() => window.close(), 250));
+</script>
+</html>

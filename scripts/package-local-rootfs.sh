@@ -12,11 +12,13 @@ required=(
   "$ROOT_DIR/build/local/bin/oos-web-local"
   "$ROOT_DIR/build/native-apps/launcher.wasm"
   "$ROOT_DIR/apps/web-launcher/dist/index.html"
+  "$ROOT_DIR/system/tests/web/assets/wamr-webassembly.html"
   "$ROOT_DIR/system/devices/local/config/keymap.conf"
   "$ROOT_DIR/system/assets/boot/nokia-2780-flip/boot-splash.png"
   "$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
   "$ROOT_DIR/system/assets/fonts/LICENSE.txt"
   "$OOS_PREFIX/lib/libWPEWebKit-2.0.so"
+  "$OOS_PREFIX/lib/oos/web-process-extensions/liboos-wamr-web-process.so"
   "$OOS_PREFIX/libexec/wpe-webkit-2.0/WPEWebProcess")
 for path in "${required[@]}"; do
   [[ -f "$path" ]] || {
@@ -26,6 +28,7 @@ for path in "${required[@]}"; do
 done
 
 mkdir -p "$OOS_PREFIX/bin" "$OOS_PREFIX/apps/web-launcher" \
+  "$OOS_PREFIX/tests" \
   "$OOS_PREFIX/packages/org.orangeos.launcher" \
   "$OOS_PREFIX/etc" "$OOS_PREFIX/share/oos" \
   "$OOS_PREFIX/share/fonts" "$OOS_PREFIX/share/licenses/oos" \
@@ -46,6 +49,8 @@ install -m 0755 "$ROOT_DIR/build/local/bin/oos-web-local" \
   --output "$OOS_PREFIX/packages/org.orangeos.launcher/application.zip"
 install -m 0644 "$ROOT_DIR/apps/web-launcher/dist/index.html" \
   "$OOS_PREFIX/apps/web-launcher/index.html"
+install -m 0644 "$ROOT_DIR/system/tests/web/assets/wamr-webassembly.html" \
+  "$OOS_PREFIX/tests/wamr-webassembly.html"
 install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
   "$OOS_PREFIX/etc/local-keymap.conf"
 install -m 0644 \

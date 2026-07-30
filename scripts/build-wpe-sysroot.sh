@@ -136,13 +136,15 @@ oos_wpe_verify_features "$WPE_BUILD_DIR/cmakeconfig.h" \
   "$WPE_BUILD_DIR/CMakeCache.txt"
 
 for jit_object in \
-  Source/JavaScriptCore/CMakeFiles/JavaScriptCore.dir/dfg/DFGSpeculativeJIT32_64.cpp.o \
-  Source/JavaScriptCore/CMakeFiles/JavaScriptCore.dir/wasm/WasmBBQJIT32_64.cpp.o; do
+  Source/JavaScriptCore/CMakeFiles/JavaScriptCore.dir/dfg/DFGSpeculativeJIT32_64.cpp.o; do
   if [[ ! -f "$WPE_BUILD_DIR/$jit_object" ]]; then
     echo "WPE feature verification failed: missing $jit_object" >&2
     exit 1
   fi
 done
-echo "Verified ARMv7 Baseline/DFG JIT and WebAssembly BBQ JIT build artifacts."
+echo "Verified ARMv7 Baseline/DFG JIT with JavaScriptCore WebAssembly disabled."
+env WPE_NDK="$WPE_NDK" OOS_WAMR_WEB_JIT=OFF \
+  WAMR_WEB_BUILD_JOBS="$WPE_BUILD_JOBS" \
+  "$ROOT_DIR/scripts/build-wamr-web.sh" "$DEVICE"
 mv "$WPE_PREFIX/.oos-wpe-profile.pending" "$WPE_PREFIX/.oos-wpe-profile"
 echo "WPE sysroot ready: device=$DEVICE profile=$OOS_WPE_PROFILE prefix=$WPE_PREFIX"

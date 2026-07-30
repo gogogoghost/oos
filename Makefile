@@ -3,9 +3,11 @@
 DEVICE ?= nokia-2780-flip
 VERSION ?=
 CMAKE_ARGS ?=
+CCACHE_DIR ?= $(CURDIR)/build/ccache
+export CCACHE_DIR
 
 .PHONY: help native-apps native-app-aot web-launcher verify-wit test-wasm \
-	fetch-wpe wpe-local configure-local local local-rootfs run-local \
+	fetch-wpe wpe-local wamr-web wamr-web-local configure-local local local-rootfs run-local \
 	run-web-local configure system package-scaffold package-res
 
 help:
@@ -17,6 +19,8 @@ help:
 		'make test-wasm         Run the WAMR host integration suite' \
 		'make fetch-wpe         Fetch and verify pinned WPE sources' \
 		'make wpe-local         Build the pinned local WPE sysroot' \
+		'make wamr-web DEVICE=  Build the device WAMR WebProcess extension' \
+		'make wamr-web-local    Build the WAMR WebAssembly WebProcess extension' \
 		'make local             Build OOS for the local device' \
 		'make local-rootfs      Prepare the local /opt/oos rootfs' \
 		'make run-local         Run the WIT launcher in a user namespace' \
@@ -47,7 +51,13 @@ fetch-wpe:
 wpe-local:
 	./scripts/build-wpe-local.sh
 
-configure-local: native-apps web-launcher wpe-local
+wamr-web-local: wpe-local
+	./scripts/build-wamr-web.sh local
+
+wamr-web:
+	./scripts/build-wamr-web.sh "$(DEVICE)"
+
+configure-local: native-apps web-launcher wamr-web-local
 	cmake -S system -B build/local \
 		-DBUILD_NOKIA_2780_FLIP=OFF \
 		-DBUILD_NOKIA_8110_4G=OFF \

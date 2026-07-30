@@ -147,11 +147,6 @@ pid_t startRunner(const apps::AppLaunch &launch,
     close(host_surface_fd);
     close(host_input_fd);
     close(host_api_fd);
-    // ARM32 has no usable IPInt or OMG fallback. Compile every Wasm function
-    // with BBQ before instantiation, while avoiding the unreliable loop OSR
-    // entrypoint on the KaiOS JSC port.
-    setenv("JSC_useEagerBBQCompilation", "true", 1);
-    setenv("JSC_useWasmOSR", "false", 1);
     if (environmentEnabled("OOS_ENABLE_INSPECTOR")) {
       setenv("WEBKIT_INSPECTOR_HTTP_SERVER",
              environmentOr("OOS_INSPECTOR_ADDRESS", "127.0.0.1:9222"), 1);
