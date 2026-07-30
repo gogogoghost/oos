@@ -25,6 +25,7 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-libdrm-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-webassembly-off-jit-build.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-localhost-http-scheme.patch"
 )
 SOURCE_PATCH_SHA=$(sha256sum "${SOURCE_PATCHES[@]}" | awk '{print $1}' |
   sha256sum | awk '{print $1}')
@@ -73,6 +74,14 @@ source_patch_is_ready() {
         grep -Fq '#include "WasmOpcodeOrigin.h"' \
           "$ROOT_DIR/third_party/wpewebkit/Source/JavaScriptCore/jit/PCToCodeOriginMap.cpp"
       ;;
+    wpewebkit-localhost-http-scheme.patch)
+      grep -Fq 'canonicalizedScheme.value() != "http"_s' \
+        "$ROOT_DIR/third_party/wpewebkit/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp" &&
+        grep -Fq 'endsWithIgnoringASCIICase(".localhost"_s)' \
+          "$ROOT_DIR/third_party/wpewebkit/Source/WebKit/WebProcess/Network/WebLoaderStrategy.cpp" &&
+        grep -Fq 'request.url().protocolIs("http"_s)' \
+          "$ROOT_DIR/third_party/wpewebkit/Source/WebKit/WebProcess/Network/WebLoaderStrategy.cpp"
+      ;;
     *)
       return 1
       ;;
@@ -109,8 +118,8 @@ required_packages=(
   egl epoxy fontconfig freetype2 gio-2.0 glib-2.0 gnutls
   gstreamer-1.0 gstreamer-app-1.0 gstreamer-audio-1.0
   gstreamer-gl-1.0 gstreamer-pbutils-1.0 gstreamer-video-1.0
-  gstreamer-webrtc-1.0 harfbuzz icu-i18n libgcrypt libjpeg libpng
-  libpsl libsoup-3.0 libsecret-1 libtasn1 libwebp libxml-2.0 libxslt
+  harfbuzz icu-i18n libgcrypt libjpeg libpng
+  libpsl libsoup-3.0 libsecret-1 libtasn1 libwebp libxml-2.0
   sqlite3 wayland-client wayland-egl xkbcommon zlib)
 missing_packages=()
 for package in "${required_packages[@]}"; do

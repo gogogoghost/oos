@@ -1,10 +1,10 @@
 #include "oos/compositor/surface.h"
 #include "oos/compositor/surface_transport.h"
 #include "oos/web/kaios_api_bridge.h"
-#include "oos/web/local_app_server.h"
 #include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_key_input.h"
 #include "oos/web/wpe_surface_host.h"
+#include "oos/web/zip_app_source.h"
 
 #include <glib-unix.h>
 #include <glib.h>
@@ -39,6 +39,7 @@ struct RunnerOptions {
   const char *app_id = nullptr;
   const char *package_path = nullptr;
   const char *entrypoint = nullptr;
+  const char *package_kind = nullptr;
   const char *api_profile = nullptr;
   const char *data_directory = nullptr;
   const char *cache_directory = nullptr;
@@ -53,7 +54,8 @@ struct RunnerOptions {
 void printUsage(const char *program) {
   std::fprintf(stderr,
                "usage: %s --id ID --package APP.zip --entrypoint PATH "
-               "--api-profile PROFILE --data DIR --cache DIR "
+               "--package-kind KIND --api-profile PROFILE --data DIR "
+               "--cache DIR "
                "--surface-fd FD --input-fd FD --api-fd FD "
                "[--permission NAME ...] "
                "--width PIXELS --height PIXELS\n",
@@ -107,6 +109,8 @@ bool parseOptions(int argc, char **argv, RunnerOptions &options) {
       options.package_path = value;
     else if (std::strcmp(name, "--entrypoint") == 0)
       options.entrypoint = value;
+    else if (std::strcmp(name, "--package-kind") == 0)
+      options.package_kind = value;
     else if (std::strcmp(name, "--api-profile") == 0)
       options.api_profile = value;
     else if (std::strcmp(name, "--permission") == 0)
@@ -135,10 +139,10 @@ bool parseOptions(int argc, char **argv, RunnerOptions &options) {
     }
   }
   return options.app_id && options.package_path && options.entrypoint &&
-         options.api_profile && options.data_directory &&
-         options.cache_directory && options.surface_fd >= 0 &&
-         options.input_fd >= 0 && options.api_fd >= 0 && options.width &&
-         options.height;
+         options.package_kind && options.api_profile &&
+         options.data_directory && options.cache_directory &&
+         options.surface_fd >= 0 && options.input_fd >= 0 &&
+         options.api_fd >= 0 && options.width && options.height;
 }
 
 class TransportSurfaceSink final : public oos::compositor::SurfaceSink {
@@ -323,19 +327,36 @@ int main(int argc, char **argv) {
     g_main_loop_unref(loop);
     return 1;
   }
-  oos::web::LocalAppServer app_server(options.app_id, options.package_path,
-                                      options.entrypoint);
-  if (!app_server.start()) {
-    std::fprintf(stderr, "initialize KaiOS app HTTP origin failed: %s\n",
-                 app_server.lastError().c_str());
-    g_main_loop_unref(loop);
-    return 1;
-  }
   oos::web::WpeAppProfile profile(options.app_id, options.data_directory,
                                   options.cache_directory);
   if (!profile.initialize()) {
     std::fprintf(stderr, "initialize WPE app profile failed: %s\n",
                  profile.lastError().c_str());
+    g_main_loop_unref(loop);
+    return 1;
+  }
+  oos::apps::PackageKind package_kind;
+  if (std::strcmp(options.package_kind, "kaios-v2") == 0)
+    package_kind = oos::apps::PackageKind::KaiOs2;
+  else if (std::strcmp(options.package_kind, "kaios-v3") == 0)
+    package_kind = oos::apps::PackageKind::KaiOs3;
+  else {
+    std::fprintf(stderr, "unsupported WPE package kind: %s\n",
+                 options.package_kind);
+    g_main_loop_unref(loop);
+    return 1;
+  }
+  if (std::strcmp(oos::apps::packageKindName(package_kind),
+                  options.api_profile) != 0) {
+    std::fprintf(stderr, "WPE package kind and API profile do not match\n");
+    g_main_loop_unref(loop);
+    return 1;
+  }
+  oos::web::ZipAppSource app_source(options.app_id, options.package_path,
+                                    options.entrypoint, package_kind);
+  if (!app_source.initialize(webkit_web_context_get_default())) {
+    std::fprintf(stderr, "initialize packaged KaiOS app origin failed: %s\n",
+                 app_source.lastError().c_str());
     g_main_loop_unref(loop);
     return 1;
   }
@@ -365,7 +386,7 @@ int main(int argc, char **argv) {
       receiveInput, &state);
   g_unix_signal_add(SIGINT, stopRunner, loop);
   g_unix_signal_add(SIGTERM, stopRunner, loop);
-  const std::string uri = app_server.urlFor(options.entrypoint);
+  const std::string uri = app_source.uriFor(options.entrypoint);
   webkit_web_view_load_uri(view, uri.c_str());
   std::fprintf(stderr, "OOS WPE app started: id=%s profile=%s uri=%s\n",
                options.app_id, options.api_profile, uri.c_str());

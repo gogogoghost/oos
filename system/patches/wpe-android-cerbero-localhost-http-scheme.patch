@@ -1,0 +1,11 @@
+diff --git a/recipes/wpewebkit.recipe b/recipes/wpewebkit.recipe
+--- a/recipes/wpewebkit.recipe
++++ b/recipes/wpewebkit.recipe
+@@ -62,6 +62,7 @@ class Recipe(recipe.Recipe):
+         'wpewebkit/0006-OOS-libdrm-off-build.patch',
+         'wpewebkit/0007-OOS-context-menus-off-link-build.patch',
+         'wpewebkit/0008-OOS-webassembly-off-jit-build.patch',
++        'wpewebkit/0009-OOS-localhost-http-scheme.patch',
+     ]
+ 
+     files_libs = [

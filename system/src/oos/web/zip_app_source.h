@@ -1,7 +1,9 @@
 #pragma once
 
+#include "oos/apps/app_manifest.h"
 #include "oos/apps/zip_archive.h"
 
+#include <memory>
 #include <string>
 
 typedef struct _WebKitWebContext WebKitWebContext;
@@ -9,12 +11,15 @@ typedef struct _WebKitURISchemeRequest WebKitURISchemeRequest;
 
 namespace oos::web {
 
+struct ZipAppArchiveState;
+
 class ZipAppSource {
 public:
-  ZipAppSource(std::string app_id, std::string package_path);
+  ZipAppSource(std::string app_id, std::string package_path,
+               std::string entrypoint, apps::PackageKind package_kind);
 
   bool initialize(WebKitWebContext *context);
-  std::string uriFor(const std::string &entrypoint) const;
+  std::string uriFor(const std::string &path) const;
   const std::string &lastError() const { return error_; }
 
 private:
@@ -23,7 +28,11 @@ private:
 
   std::string app_id_;
   std::string package_path_;
-  apps::ZipArchive archive_;
+  std::string entrypoint_;
+  apps::PackageKind package_kind_;
+  std::string scheme_;
+  std::string host_;
+  std::shared_ptr<ZipAppArchiveState> archive_;
   std::string error_;
 };
 

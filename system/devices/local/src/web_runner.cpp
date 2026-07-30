@@ -10,9 +10,9 @@
 #include "oos/web/device_api_service.h"
 #include "oos/web/device_api_transport.h"
 #include "oos/web/kaios_api_bridge.h"
-#include "oos/web/local_app_server.h"
 #include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_surface_host.h"
+#include "oos/web/zip_app_source.h"
 
 #include <glib-unix.h>
 #include <glib.h>
@@ -187,25 +187,26 @@ int main(int argc, char **argv) {
       use_registered_app
           ? registered_app.cache_directory
           : std::string(data_root) + "/cache/web/" + app_id + "/webkit-2.52";
-  std::unique_ptr<oos::web::LocalAppServer> app_server;
+  std::unique_ptr<oos::web::ZipAppSource> app_source;
   std::string registered_uri;
-  if (use_registered_app) {
-    app_server = std::make_unique<oos::web::LocalAppServer>(
-        app_id, registered_app.app.package_path,
-        registered_app.app.manifest.entrypoint);
-    if (!app_server->start()) {
-      std::fprintf(stderr, "failed to serve WPE ZIP application: %s\n",
-                   app_server->lastError().c_str());
-      return 1;
-    }
-    registered_uri = app_server->urlFor(registered_app.app.manifest.entrypoint);
-    path = registered_uri.c_str();
-  }
   oos::web::WpeAppProfile profile(app_id, data_directory, cache_directory);
   if (!profile.initialize()) {
     std::fprintf(stderr, "failed to initialize WPE app profile: %s\n",
                  profile.lastError().c_str());
     return 1;
+  }
+  if (use_registered_app) {
+    app_source = std::make_unique<oos::web::ZipAppSource>(
+        app_id, registered_app.app.package_path,
+        registered_app.app.manifest.entrypoint,
+        registered_app.app.manifest.package_kind);
+    if (!app_source->initialize(webkit_web_context_get_default())) {
+      std::fprintf(stderr, "failed to load WPE ZIP application: %s\n",
+                   app_source->lastError().c_str());
+      return 1;
+    }
+    registered_uri = app_source->uriFor(registered_app.app.manifest.entrypoint);
+    path = registered_uri.c_str();
   }
   GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
   int api_sockets[2] = {-1, -1};

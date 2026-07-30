@@ -66,7 +66,7 @@ if(OOS_LOCAL_WPE)
   add_executable(oos-web-local src/web_runner.cpp)
   target_sources(oos-web-local PRIVATE
     "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
-    "${CMAKE_SOURCE_DIR}/src/oos/web/local_app_server.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp")
   target_include_directories(oos-web-local PRIVATE ${OOS_LOCAL_WPE_INCLUDES})
   target_link_libraries(oos-web-local PRIVATE

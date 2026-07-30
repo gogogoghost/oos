@@ -6,7 +6,7 @@
 
 namespace oos::apps {
 
-enum class PackageKind { OosWasmV1, KaiOs25, KaiOs3 };
+enum class PackageKind { OosWasmV1, KaiOs2, KaiOs3 };
 enum class RuntimeKind { Wamr, Wpe };
 
 struct AppHandler {

@@ -12,7 +12,7 @@ directory at boot.
 | Package | Manifest | Runtime | API profile |
 | --- | --- | --- | --- |
 | OOS native app | `oos-manifest.json` | WAMR core Wasm or ARMv7 AOT | `oos-wit-0.1` |
-| KaiOS 2.5 app | `manifest.webapp` | WPE WebKit | `kaios-b2g48` |
+| KaiOS 2.5 app | `manifest.webapp` | WPE WebKit | `kaios-v2` |
 | KaiOS 3 app | `manifest.webmanifest` | WPE WebKit | `kaios-v3` |
 
 An OOS package declares its stable ID. KaiOS packages currently require the
@@ -52,10 +52,10 @@ resolves this record, then prepares one of two contexts:
 
 - WAMR extracts only the selected AOT/Wasm entry to
   `/data/cache/aot/<content-key>/app.*` and maps it from there.
-- WPE keeps the package zipped and serves requested HTML, CSS, JavaScript,
-  image, font, and Wasm entries from `http://<app-id>.localhost:8080`. The
-  embedded loopback HTTP server is static-package transport only; it never
-  exposes device files or privileged operations as HTTP routes.
+- WPE keeps the package zipped and resolves requested HTML, CSS, JavaScript,
+  image, font, and Wasm entries directly. KaiOS 2 uses
+  `app://<app-id>/...`; KaiOS 3 uses
+  `http://<normalized-app-id>.localhost/...` without opening a listener.
 
 WPE API shims must be selected from `api_profile`; a KaiOS 2.5 application
 must not receive the KaiOS 3 bridge by accident. On Android, `oos` starts one
@@ -69,7 +69,8 @@ calls travel from the KaiOS 2.5 `navigator.moz*` surface, the KaiOS 3
 `navigator.b2g` surface, or a supported 3.0 daemon-service adapter through a
 WebKit message handler and a private OOS control socket. DeviceCapability and
 managed KaiOS 3 services use their documented `lib_session` daemon factories.
-The OOS host performs the operation; HTTP remains unaware of it. Battery and
+The OOS host performs the operation; the package resource handler remains
+unaware of it. Battery and
 vibration remain baseline Web capabilities. Granted manifest permissions are
 loaded from the registry, passed as individual runner arguments, checked again
 by the host, and used to select every sensitive injected surface. Unsupported
@@ -107,9 +108,15 @@ dedicated ordered workers. Hardware discovery therefore does not block WebKit
 input dispatch or the host compositor. Frame transport is unchanged and never
 crosses this JSON control channel.
 
-Packaged Web applications use `http://<app-id>.localhost:8080`. The unprivileged
-port is identical in local and device builds, and the KaiOS bridge is injected
-at document start by WebKit rather than by rewriting application HTML.
+WPE intercepts only the active KaiOS 3 application's `http://*.localhost`
+origin; ordinary HTTP requests continue through the network process. KaiOS 2
+packages use the `app:` scheme. Both paths read validated ZIP entries in the
+UIProcess. A shared GLib worker performs `pread` and decompression so resource
+loading cannot block input dispatch; completion transfers ownership of the
+same decompressed buffer directly to a GLib input stream. The KaiOS bridge is
+injected at document start without rewriting application HTML. Responses are
+immutable because the WebKit cache directory is keyed by package content;
+`HEAD` reads only ZIP metadata and does not inflate the resource.
 
 ## Persistent Storage
 

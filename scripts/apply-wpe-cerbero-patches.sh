@@ -5,6 +5,8 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CERBERO_DIR=${WPE_CERBERO_DIR:-"$ROOT_DIR/third_party/wpe-android-cerbero"}
 PATCH_FILES=(
   "$ROOT_DIR/system/patches/wpe-android-cerbero-kaios-minimal.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-xslt-off-dependency.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-webrtc-off.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-kaios-performance.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-use-installed-ndk.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-buffer.patch"
@@ -13,6 +15,7 @@ PATCH_FILES=(
   "$ROOT_DIR/system/patches/wpe-android-cerbero-libdrm-off.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-context-menus-link.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-webassembly-off-jit-build.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-localhost-http-scheme.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-wpebackend-seqpacket.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-wavpack.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-flac.patch"
@@ -26,6 +29,7 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-libdrm-off-build.patch:recipes/wpewebkit/0006-OOS-libdrm-off-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-context-menus-off-link-build.patch:recipes/wpewebkit/0007-OOS-context-menus-off-link-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-webassembly-off-jit-build.patch:recipes/wpewebkit/0008-OOS-webassembly-off-jit-build.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-localhost-http-scheme.patch:recipes/wpewebkit/0009-OOS-localhost-http-scheme.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-gralloc0.patch:recipes/wpebackend-android/0001-OOS-RGB565-and-Android23-buffer.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-seqpacket-ipc.patch:recipes/wpebackend-android/0002-OOS-seqpacket-renderer-IPC.patch"
   "$ROOT_DIR/system/patches/libtasn1-android-opaque-file.patch:recipes/libtasn1/0002-Android-opaque-FILE.patch"
@@ -55,6 +59,16 @@ for patch_file in "${PATCH_FILES[@]}"; do
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-kaios-minimal.patch ]] && \
        rg -q -- "OOS_WPE_FEATURE_OPTIONS" "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
     echo "Cerbero patch has the shared feature-profile bridge."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-xslt-off-dependency.patch ]] && \
+       ! rg -q -- "^[[:space:]]*'libxslt',$" \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe omits the disabled XSLT dependency."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-webrtc-off.patch ]] && \
+       rg -q -- "'webrtc': 'disabled'" \
+         "$CERBERO_DIR/recipes/gst-plugins-bad-1.0.recipe" && \
+       ! rg -q -- "^[[:space:]]*'libsrtp',|webrtc-audio-processing" \
+         "$CERBERO_DIR/recipes/gst-plugins-bad-1.0.recipe"; then
+    echo "Cerbero recipe omits the disabled WebRTC plugin chain."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-kaios-performance.patch ]] && \
        rg -q -- '0003-KaiOS-Android-ARMv7-JIT.patch' \
          "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
@@ -80,6 +94,10 @@ for patch_file in "${PATCH_FILES[@]}"; do
        rg -q -- '0008-OOS-webassembly-off-jit-build.patch' \
          "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
     echo "Cerbero recipe supports building JSC with WebAssembly disabled."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-localhost-http-scheme.patch ]] && \
+       rg -q -- '0009-OOS-localhost-http-scheme.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe supports packaged .localhost HTTP origins."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-wpebackend-seqpacket.patch ]] && \
        rg -q -- '0002-OOS-seqpacket-renderer-IPC.patch' \
          "$CERBERO_DIR/recipes/wpebackend-android.recipe"; then

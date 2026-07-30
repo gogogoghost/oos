@@ -89,8 +89,8 @@ int main(int argc, char **argv) {
     success &= check(repository.install(argv[2], kaios25, &webapp),
                      repository.lastError().c_str());
     success &=
-        check(webapp.manifest.package_kind == oos::apps::PackageKind::KaiOs25 &&
-                  webapp.manifest.api_profile == "kaios-b2g48",
+        check(webapp.manifest.package_kind == oos::apps::PackageKind::KaiOs2 &&
+                  webapp.manifest.api_profile == "kaios-v2",
               "KaiOS 2.5 runtime discriminator");
     success &= check(hasPermission(webapp, "device-storage:sdcard") &&
                          hasPermission(webapp, "wifi-manage") &&

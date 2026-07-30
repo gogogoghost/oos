@@ -57,11 +57,15 @@ The local x86 profile has been validated in interpreter mode through:
 - OmniJ2ME 97.16's 321,699-byte compiler module and 1,372,428-byte runtime
   module; and
 - installation and interactive play of a 240x320 JAR through the real
-  `omnij2me.localhost:8080` application origin.
+  packaged KaiOS application path before the port-free origin refactor.
 
 Both OmniJ2ME modules compiled and instantiated through WAMR, with 11/11 and
 40/62 import/export counts respectively. The application rendered and accepted
 input for the full interactive test.
+
+The port-free `http://omnij2me.localhost/` resource handler requires a fresh
+WPE build and end-to-end smoke test before it can be included in this validation
+record.
 
 The ARM32 build and QEMU execution test are intentionally still pending. The
 device build pipeline now builds and packages the same extension with the WAMR

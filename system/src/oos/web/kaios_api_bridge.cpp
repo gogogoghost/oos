@@ -261,7 +261,7 @@ bool KaiOsApiBridge::initialize(CloseCallback close_callback,
                                 void *close_context) {
   error_.clear();
   if (app_id_.empty() || api_fd_ < 0 ||
-      (api_profile_ != "kaios-b2g48" && api_profile_ != "kaios-v3")) {
+      (api_profile_ != "kaios-v2" && api_profile_ != "kaios-v3")) {
     error_ = "unsupported or empty KaiOS API profile";
     return false;
   }

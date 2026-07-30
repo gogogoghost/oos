@@ -107,7 +107,7 @@ add_library(oos::web ALIAS oos_wpe_surface_host)
 add_executable(oos-wpe
   "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_runner.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
-  "${CMAKE_SOURCE_DIR}/src/oos/web/local_app_server.cpp"
+  "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_key_input.cpp")
 target_include_directories(oos-wpe PRIVATE ${NOKIA_2780_WPE_INCLUDES})

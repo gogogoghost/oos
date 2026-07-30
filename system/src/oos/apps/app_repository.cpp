@@ -72,13 +72,20 @@ bool parseRecord(storage::SqliteStatement &statement, AppRecord &record) {
   parsed.manifest.id = id;
   parsed.manifest.name = name;
   parsed.manifest.version = version;
-  parsed.manifest.package_kind =
-      std::strcmp(package_kind, "oos-wasm-v1") == 0 ? PackageKind::OosWasmV1
-      : std::strcmp(package_kind, "kaios-2.5") == 0 ? PackageKind::KaiOs25
-                                                    : PackageKind::KaiOs3;
-  parsed.manifest.runtime_kind = std::strcmp(runtime_kind, "wamr") == 0
-                                     ? RuntimeKind::Wamr
-                                     : RuntimeKind::Wpe;
+  if (std::strcmp(package_kind, "oos-wasm-v1") == 0)
+    parsed.manifest.package_kind = PackageKind::OosWasmV1;
+  else if (std::strcmp(package_kind, "kaios-v2") == 0)
+    parsed.manifest.package_kind = PackageKind::KaiOs2;
+  else if (std::strcmp(package_kind, "kaios-v3") == 0)
+    parsed.manifest.package_kind = PackageKind::KaiOs3;
+  else
+    return false;
+  if (std::strcmp(runtime_kind, "wamr") == 0)
+    parsed.manifest.runtime_kind = RuntimeKind::Wamr;
+  else if (std::strcmp(runtime_kind, "wpe") == 0)
+    parsed.manifest.runtime_kind = RuntimeKind::Wpe;
+  else
+    return false;
   parsed.manifest.api_profile = api_profile;
   parsed.manifest.entrypoint = entrypoint;
   parsed.manifest.fallback_entrypoint = fallback ? fallback : "";
@@ -238,7 +245,7 @@ bool AppRepository::install(const char *package_path,
     manifest_name = "oos-manifest.json";
   } else if (archive.find("manifest.webapp")) {
     manifest_name = "manifest.webapp";
-    detected_kind = PackageKind::KaiOs25;
+    detected_kind = PackageKind::KaiOs2;
   } else if (archive.find("manifest.webmanifest")) {
     manifest_name = "manifest.webmanifest";
     detected_kind = PackageKind::KaiOs3;

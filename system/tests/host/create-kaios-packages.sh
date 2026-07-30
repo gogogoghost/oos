@@ -20,12 +20,21 @@ cat > "$staging/kaios25/index.html" <<'EOF'
 <body>RUNNING<script>
 (async () => {
   try {
-    if (globalThis.__oosRuntime?.apiProfile !== 'kaios-b2g48' ||
+    if (globalThis.__oosRuntime?.apiProfile !== 'kaios-v2' ||
+        location.protocol !== 'app:' ||
+        location.hostname !== 'org.kaios.apnconfig' ||
         navigator.b2g || !navigator.mozApps || !navigator.mozWifiManager ||
         typeof navigator.getDeviceStorage !== 'function' ||
         typeof navigator.getDataStores !== 'function' ||
         typeof navigator.getFeature !== 'function')
       throw new Error('invalid KaiOS 2.5 API profile');
+    const manifest = await fetch('/manifest.webapp').then(response =>
+      response.json());
+    if (manifest.name !== 'APN Config')
+      throw new Error('KaiOS 2 packaged resource fetch failed');
+    const manifestHead = await fetch('/manifest.webapp', { method: 'HEAD' });
+    if (!manifestHead.ok || !manifestHead.headers.get('content-length'))
+      throw new Error('KaiOS 2 packaged resource HEAD failed');
     try {
       await navigator.mozWifiManager.refresh();
       throw new Error('Wi-Fi control unexpectedly succeeded');
@@ -70,6 +79,7 @@ cat > "$staging/kaios25/index.html" <<'EOF'
     if (!(await ownerStore.get(ownerId))?.owner)
       throw new Error('DataStore readonly declaration semantics failed');
     document.body.textContent = 'PASS';
+    console.log(`OOS_KAIOS_ORIGIN_CHECK result=pass profile=kaios-v2 origin=${location.origin}`);
     await new Promise(resolve => requestAnimationFrame(() =>
       requestAnimationFrame(resolve)));
     setTimeout(() => window.close(), 100);
@@ -89,12 +99,27 @@ cat > "$staging/kaios3/main.html" <<'EOF'
 (async () => {
   try {
     if (globalThis.__oosRuntime?.apiProfile !== 'kaios-v3' ||
+        location.protocol !== 'http:' || location.port ||
+        location.hostname !== 'org.kaios.calculator.localhost' ||
         !navigator.b2g || navigator.mozApps ||
         typeof navigator.b2g.cameras?.refresh !== 'function' ||
         typeof globalThis.lib_devicecapability?.DeviceCapabilityManager?.get !==
           'function' ||
         typeof navigator.getDeviceStorage === 'function')
       throw new Error('invalid KaiOS 3 API profile');
+    const manifest = await fetch('/manifest.webmanifest').then(response =>
+      response.json());
+    if (manifest.name !== 'Calculator')
+      throw new Error('KaiOS 3 packaged resource fetch failed');
+    const manifestHead = await fetch('/manifest.webmanifest', { method: 'HEAD' });
+    if (!manifestHead.ok || !manifestHead.headers.get('content-length'))
+      throw new Error('KaiOS 3 packaged resource HEAD failed');
+    const syncManifest = new XMLHttpRequest();
+    syncManifest.open('GET', '/manifest.webmanifest', false);
+    syncManifest.send();
+    if (syncManifest.status !== 200 ||
+        JSON.parse(syncManifest.responseText).name !== 'Calculator')
+      throw new Error('KaiOS 3 packaged resource sync XHR failed');
     const capability = await lib_devicecapability.DeviceCapabilityManager
       .get(new lib_session.Session());
     if (await capability.get('camera-capture') !== 'validated')
@@ -118,6 +143,7 @@ cat > "$staging/kaios3/main.html" <<'EOF'
       .get(new lib_session.Session());
     await settings.set([{ name: 'oos.test', value: 3 }]);
     document.body.textContent = 'PASS';
+    console.log(`OOS_KAIOS_ORIGIN_CHECK result=pass profile=kaios-v3 origin=${location.origin}`);
     await new Promise(resolve => requestAnimationFrame(() =>
       requestAnimationFrame(resolve)));
     setTimeout(() => window.close(), 100);

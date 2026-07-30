@@ -211,10 +211,10 @@ const char *packageKindName(PackageKind kind) {
   switch (kind) {
   case PackageKind::OosWasmV1:
     return "oos-wasm-v1";
-  case PackageKind::KaiOs25:
-    return "kaios-2.5";
+  case PackageKind::KaiOs2:
+    return "kaios-v2";
   case PackageKind::KaiOs3:
-    return "kaios-3";
+    return "kaios-v3";
   }
   return "unknown";
 }
@@ -264,9 +264,9 @@ bool parseAppManifest(const std::string &json, AppManifest &manifest,
   }
   if (package_kind == "oos-wasm-v1")
     parsed.package_kind = PackageKind::OosWasmV1;
-  else if (package_kind == "kaios-2.5")
-    parsed.package_kind = PackageKind::KaiOs25;
-  else if (package_kind == "kaios-3")
+  else if (package_kind == "kaios-v2")
+    parsed.package_kind = PackageKind::KaiOs2;
+  else if (package_kind == "kaios-v3")
     parsed.package_kind = PackageKind::KaiOs3;
   else {
     error = "unsupported package_kind: " + package_kind;
@@ -299,7 +299,7 @@ bool parseAppManifest(const std::string &json, AppManifest &manifest,
 bool parseKaiOsManifest(const std::string &json, PackageKind kind,
                         const std::string &app_id, AppManifest &manifest,
                         std::string &error) {
-  if (kind != PackageKind::KaiOs25 && kind != PackageKind::KaiOs3) {
+  if (kind != PackageKind::KaiOs2 && kind != PackageKind::KaiOs3) {
     error = "invalid KaiOS package kind";
     return false;
   }
@@ -313,8 +313,7 @@ bool parseKaiOsManifest(const std::string &json, PackageKind kind,
   parsed.id = app_id;
   parsed.package_kind = kind;
   parsed.runtime_kind = RuntimeKind::Wpe;
-  parsed.api_profile =
-      kind == PackageKind::KaiOs25 ? "kaios-b2g48" : "kaios-v3";
+  parsed.api_profile = packageKindName(kind);
   if (!validIdentifier(parsed.id) ||
       !requiredString(root, "name", parsed.name, error)) {
     if (error.empty())
@@ -333,7 +332,7 @@ bool parseKaiOsManifest(const std::string &json, PackageKind kind,
     return false;
   }
   const char *entry_name =
-      kind == PackageKind::KaiOs25 ? "launch_path" : "start_url";
+      kind == PackageKind::KaiOs2 ? "launch_path" : "start_url";
   const JsonValue *entrypoint = root.get(entry_name);
   parsed.entrypoint = entrypoint && entrypoint->isString()
                           ? entrypoint->stringValue()
@@ -367,7 +366,7 @@ bool parseKaiOsManifest(const std::string &json, PackageKind kind,
       !collectMessages(messages, parsed, error) ||
       !collectActivities(activities, parsed, error))
     return false;
-  if (kind == PackageKind::KaiOs25 &&
+  if (kind == PackageKind::KaiOs2 &&
       (!collectDataStores(root.get("datastores-owned"), "datastore-owned",
                           parsed, error) ||
        !collectDataStores(root.get("datastores-access"), "datastore-access",

@@ -58,20 +58,23 @@ and multi-surface transactions remain OOS policy and can be expanded without
 changing WPE or device HAL ownership.
 
 Registered web applications keep their original package as
-`/data/packages/<id>/<version>/<content-key>/application.zip`. The WPE runner
-serves one requested ZIP entry at a time from the loopback-only
-`http://<id>.localhost:8080` origin,
-so installing or launching does not expand a complete application tree. Each
+`/data/packages/<id>/<version>/<content-key>/application.zip`. WPE resolves one
+requested ZIP entry at a time from `app://<id>/...` for KaiOS 2 or the
+port-free `http://<normalized-id>.localhost/...` origin for KaiOS 3, so
+installing or launching does not expand a complete application tree. ZIP reads
+and inflation use the GLib worker pool, then move the same output buffer into
+the URI response on the UIProcess main context. Each
 app receives a persistent `WebKitNetworkSession` rooted at
 `/data/users/0/web/<id>` and a content-versioned cache below
-`/data/cache/web/<id>`. Package type selects `kaios-b2g48` or `kaios-v3`.
-The HTTP listener serves only package resources. Privileged KaiOS calls use an
+`/data/cache/web/<id>`. Package type selects `kaios-v2` or `kaios-v3`.
+The WPE resource handler accepts only the active package origin and safe ZIP
+paths. Privileged KaiOS calls use an
 injected WebKit message handler and a separate inherited control socket to the
 OOS host. DeviceStorage, power, vibration, camera, device-capability, managed
 system services, and KaiOS 2.5 application-owned DataStore operations use this
 path. Wi-Fi/IP, Bluetooth, and mobile-network requests are rejected at this
 boundary; future
-capabilities must follow the same pattern instead of adding HTTP endpoints.
+capabilities must follow the same pattern instead of adding resource routes.
 The bridge preserves the API-version boundary: 2.5 uses the legacy navigator
 names, 3.0 uses `navigator.b2g` where KaiOS defines it, and 3.0
 DeviceCapability is exposed through its documented daemon-service factory.
@@ -136,10 +139,12 @@ Each device mapping lives in `system/config/wpe/devices/<device>.env`. Build wit
 `system/config/wpe/features.conf` is the only WPE feature source for local and
 Android builds. It retains the browser capabilities used by KaiOS 2.5/3
 applications, including HTML audio/video, AudioContext, MediaSource,
-getUserMedia/WebRTC, MediaRecorder, notifications, geolocation, fullscreen,
-and WebGL. JSC WebAssembly is disabled because WAMR provides that API through
-the WebProcess extension. XR, gamepad, PDF.js, WebDriver, and OOS-owned browser
-shell facilities remain disabled.
+getUserMedia, MediaRecorder, notifications, geolocation, fullscreen, and
+WebGL. JSC WebAssembly is disabled because WAMR provides that API through the
+WebProcess extension. WebRTC, XSLT, MathML, XR, gamepad, PDF.js, WebDriver, and
+OOS-owned browser shell facilities remain disabled. Disabling WebRTC retains
+local MediaStream capture but removes `RTCPeerConnection` and the GStreamer
+WebRTC dependency; disabling XSLT also removes the `libxslt` dependency.
 
 The Android Cerbero recipe receives this list through a build environment
 bridge. Device patches contain only toolchain, dependency, Bionic, JIT codegen,
