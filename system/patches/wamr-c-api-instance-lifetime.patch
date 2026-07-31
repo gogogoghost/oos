@@ -1,0 +1,37 @@
+diff --git a/core/iwasm/common/wasm_c_api.c b/core/iwasm/common/wasm_c_api.c
+index 24500cf4..11111111 100644
+--- a/core/iwasm/common/wasm_c_api.c
++++ b/core/iwasm/common/wasm_c_api.c
+@@ -5046,6 +5046,7 @@ wasm_instance_new_with_args_ex(wasm_store_t *store, const wasm_module_t *module,
+                  "Failed to malloc instance");
+         goto failed;
+     }
++    instance->store = store;
+ 
+     /* executes the instantiate-time linking if provided */
+     if (imports) {
+@@ -5257,8 +5258,23 @@ wasm_instance_delete_internal(wasm_instance_t *instance)
+ void
+ wasm_instance_delete(wasm_instance_t *inst)
+ {
++    uint32 i;
++    wasm_instance_t *owned_instance = NULL;
++
++    if (!inst || !inst->store || !inst->store->instances)
++        return;
++
+     DELETE_HOST_INFO(inst)
+-    /* will release instance when releasing the store */
++
++    for (i = 0; i < inst->store->instances->num_elems; i++) {
++        if (inst->store->instances->data[i] != inst)
++            continue;
++
++        if (bh_vector_remove((Vector *)inst->store->instances, i,
++                             &owned_instance))
++            wasm_instance_delete_internal(owned_instance);
++        return;
++    }
+ }
+ 
+ void

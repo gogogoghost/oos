@@ -8,6 +8,10 @@
 // wasm_export.h must define WAMR's extended allocator API first.
 #include <wasm_c_api.h>
 
+#if OOS_WAMR_WEB_UNSAFE_FAST
+#include <wasm_c_api_internal.h>
+#endif
+
 #include "audio_thread_priority.h"
 
 #include <atomic>
@@ -1035,6 +1039,9 @@ JSCValue *module_instantiate(ModuleHandle *module, JSCValue *imports_object) {
     instance_release(instance);
     return throw_error(state->context, "WebAssembly.LinkError", message);
   }
+#if OOS_WAMR_WEB_UNSAFE_FAST
+  wasm_runtime_set_bounds_checks(instance->instance->inst_comm_rt, false);
+#endif
   wasm_instance_exports(instance->instance, &instance->exports);
   if (test_diagnostics_enabled()) {
     std::fprintf(stderr,
@@ -1194,6 +1201,15 @@ constexpr const char kWebAssemblyShim[] = R"JS(
   const moduleHandle = Symbol('oos.wamr.module');
   const memoryHandle = Symbol('oos.wamr.memory');
   const memoryCache = new Map();
+  const memoryFinalizer = new FinalizationRegistry(id => {
+    const reference = memoryCache.get(id);
+    if (!reference || reference.deref() === undefined)
+      memoryCache.delete(id);
+  });
+  const cacheMemory = (id, memory) => {
+    memoryCache.set(id, new WeakRef(memory));
+    memoryFinalizer.register(memory, id);
+  };
 
   class CompileError extends Error { constructor(message) { super(message); this.name = 'WebAssembly.CompileError'; } }
   class LinkError extends Error { constructor(message) { super(message); this.name = 'WebAssembly.LinkError'; } }
@@ -1216,15 +1232,15 @@ constexpr const char kWebAssemblyShim[] = R"JS(
         throw new RangeError('The fixed-memory WAMR profile requires maximum to equal initial');
       }
       this[memoryHandle] = native.createMemory(descriptor);
-      memoryCache.set(this[memoryHandle].id, this);
+      cacheMemory(this[memoryHandle].id, this);
       Object.defineProperty(this, '__oosWamrNativeMemory', { value: this[memoryHandle] });
     }
     static fromNative(value) {
-      let wrapper = memoryCache.get(value.id);
+      let wrapper = memoryCache.get(value.id)?.deref();
       if (!wrapper) {
         wrapper = Object.create(Memory.prototype);
         wrapper[memoryHandle] = value;
-        memoryCache.set(value.id, wrapper);
+        cacheMemory(value.id, wrapper);
         Object.defineProperty(wrapper, '__oosWamrNativeMemory', { value });
       }
       return wrapper;

@@ -33,6 +33,12 @@ target_include_directories(oos_wamr_host PUBLIC
   "${WAMR_ROOT_DIR}/core/iwasm/include")
 target_link_libraries(oos_wamr_host PUBLIC dl m pthread)
 
+add_executable(oos_wamr_c_api_lifetime_test wamr_c_api_lifetime_test.cpp)
+target_include_directories(oos_wamr_c_api_lifetime_test PRIVATE
+  "${WAMR_ROOT_DIR}/core/iwasm/common")
+target_compile_options(oos_wamr_c_api_lifetime_test PRIVATE -UNDEBUG)
+target_link_libraries(oos_wamr_c_api_lifetime_test PRIVATE oos_wamr_host)
+
 add_executable(oos_wasm_runtime_test
   wasm_runtime_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"

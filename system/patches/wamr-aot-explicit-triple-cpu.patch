@@ -1,0 +1,33 @@
+diff --git a/core/iwasm/compilation/aot_llvm.c b/core/iwasm/compilation/aot_llvm.c
+index 761e4a5..48237cb 100644
+--- a/core/iwasm/compilation/aot_llvm.c
++++ b/core/iwasm/compilation/aot_llvm.c
+@@ -2838,12 +2838,13 @@ aot_create_comp_context(AOTCompData *comp_data, aot_comp_option_t option)
+             features = option->cpu_features;
+         }
+         else {
+-            /* Form a target triple */
++            /* Keep CPU tuning with an explicit target triple. The triple is
++               still authoritative for architecture, OS and ABI. */
+             triple = option->target_arch;
+             arch = NULL;
+             abi = NULL;
+-            cpu = NULL;
+-            features = NULL;
++            cpu = option->target_cpu;
++            features = option->cpu_features;
+         }
+ 
+         opt_level = option->opt_level;
+diff --git a/wamr-compiler/main.c b/wamr-compiler/main.c
+index 051654a..dce71d9 100644
+--- a/wamr-compiler/main.c
++++ b/wamr-compiler/main.c
+@@ -117,5 +117,6 @@ print_help()
+     printf("                            <sub> = for ex. on arm or thumb: v5, v6m, v7a, v7m, etc.\n");
+     printf("                            Use --target=help to list supported targets\n");
+     printf("                            Or, provide a triple in the format of <arch>-<vendor>-<os>-<abi>.\n");
+-    printf("                            By doing this, --target-abi, --cpu, and --cpu-features will be ignored.\n");
++    printf("                            By doing this, --target-abi will be ignored; --cpu and\n");
++    printf("                            --cpu-features still tune code for the selected processor.\n");
+     printf("                            The triple will only be normalized without any further verification.\n");

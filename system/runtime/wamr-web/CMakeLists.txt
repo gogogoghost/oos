@@ -12,6 +12,8 @@ set(OOS_WAMR_WEB_TARGET "X86_64" CACHE STRING "WAMR target")
 set(OOS_WAMR_WEB_AOT_NAMESPACE "wamr-unknown/unknown" CACHE STRING
     "Relative namespace below each WebAssembly AOT cache root")
 option(OOS_WAMR_WEB_JIT "Use the WAMR LLVM JIT for WebAssembly" ON)
+option(OOS_WAMR_WEB_UNSAFE_FAST
+  "Disable WebAssembly bounds checks for trusted applications" OFF)
 
 if(NOT EXISTS "${OOS_REPO_ROOT}/third_party/wasm-micro-runtime/core/iwasm/include/wasm_c_api.h")
   message(FATAL_ERROR "OOS_REPO_ROOT does not contain the pinned WAMR checkout")
@@ -47,6 +49,9 @@ set(WAMR_BUILD_REF_TYPES 1)
 set(WAMR_BUILD_SIMD 0)
 set(WAMR_BUILD_ALLOC_WITH_USAGE 1)
 set(WAMR_BUILD_ALLOC_WITH_USER_DATA 1)
+if(OOS_WAMR_WEB_UNSAFE_FAST)
+  set(WAMR_CONFIGURABLE_BOUNDS_CHECKS 1)
+endif()
 
 include("${WAMR_ROOT_DIR}/build-scripts/runtime_lib.cmake")
 
@@ -56,10 +61,18 @@ add_library(oos-wamr-web-process MODULE
   ${WAMR_RUNTIME_LIB_SOURCE})
 target_compile_definitions(oos-wamr-web-process PRIVATE
   OOS_WAMR_WEB_AOT_NAMESPACE="${OOS_WAMR_WEB_AOT_NAMESPACE}")
+if(OOS_WAMR_WEB_UNSAFE_FAST)
+  target_compile_definitions(oos-wamr-web-process PRIVATE
+    OOS_WAMR_WEB_UNSAFE_FAST=1)
+endif()
 target_include_directories(oos-wamr-web-process PRIVATE
   "${WAMR_ROOT_DIR}/core/iwasm/include"
   "${OOS_WPE_PREFIX}/include/wpe-webkit-2.0"
   "${OOS_WPE_PREFIX}/include/wpe-1.0")
+if(OOS_WAMR_WEB_UNSAFE_FAST)
+  target_include_directories(oos-wamr-web-process PRIVATE
+    "${WAMR_ROOT_DIR}/core/iwasm/common")
+endif()
 if(OOS_WAMR_WEB_PLATFORM STREQUAL "linux")
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0 gobject-2.0)

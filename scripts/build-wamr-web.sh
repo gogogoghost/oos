@@ -3,12 +3,26 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  set -a
+  source "$ROOT_DIR/.env"
+  set +a
+fi
 PROFILE=${1:-local}
 JOBS=${WAMR_WEB_BUILD_JOBS:-$(nproc)}
 export CCACHE_DISABLE=${CCACHE_DISABLE:-1}
-WAMR_PATCH="$ROOT_DIR/system/patches/wamr-c-api-import-memory.patch"
 source "$ROOT_DIR/third_party/versions.env"
 WAMR_RELEASE=${WAMR_VERSION#WAMR-}
+UNSAFE_FAST=${OOS_WAMR_WEB_UNSAFE_FAST:-OFF}
+
+case "$UNSAFE_FAST" in
+  ON|1|true|TRUE) UNSAFE_FAST=ON ;;
+  OFF|0|false|FALSE) UNSAFE_FAST=OFF ;;
+  *)
+    echo "OOS_WAMR_WEB_UNSAFE_FAST must be ON or OFF" >&2
+    exit 2
+    ;;
+esac
 
 case "$PROFILE" in
   local)
@@ -16,7 +30,11 @@ case "$PROFILE" in
     WPE_PREFIX="$WPE_SYSROOT/opt/oos"
     WAMR_PLATFORM=linux
     WAMR_TARGET=X86_64
-    AOT_NAMESPACE="wamr-$WAMR_RELEASE/x86_64-nosimd-bounds-checks"
+    if [[ $UNSAFE_FAST == ON ]]; then
+      AOT_NAMESPACE="wamr-$WAMR_RELEASE/x86_64-nosimd-no-bounds"
+    else
+      AOT_NAMESPACE="wamr-$WAMR_RELEASE/x86_64-nosimd-bounds-checks"
+    fi
     ENABLE_JIT=${OOS_WAMR_WEB_JIT:-ON}
     TOOLCHAIN_ARGS=()
     ;;
@@ -26,7 +44,15 @@ case "$PROFILE" in
     WPE_PREFIX="$ROOT_DIR/build/wpe-sysroot/$OOS_WPE_SYSROOT_KEY"
     WAMR_PLATFORM=android
     WAMR_TARGET=ARMV7A
-    AOT_NAMESPACE="wamr-$WAMR_RELEASE/armv7a-nosimd-bounds-checks"
+    AOT_CPU=${OOS_WAMR_AOT_CPU:-generic}
+    if [[ $AOT_CPU == generic && $UNSAFE_FAST == OFF ]]; then
+      # Preserve the namespace used by existing generic, checked artifacts.
+      AOT_NAMESPACE="wamr-$WAMR_RELEASE/armv7a-nosimd-bounds-checks"
+    elif [[ $UNSAFE_FAST == ON ]]; then
+      AOT_NAMESPACE="wamr-$WAMR_RELEASE/armv7-$AOT_CPU-nosimd-no-bounds"
+    else
+      AOT_NAMESPACE="wamr-$WAMR_RELEASE/armv7-$AOT_CPU-nosimd-bounds-checks"
+    fi
     ENABLE_JIT=${OOS_WAMR_WEB_JIT:-OFF}
     WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
     TOOLCHAIN_FILE="$WPE_NDK/build/cmake/android.toolchain.cmake"
@@ -52,20 +78,7 @@ BUILD_DIR=${OOS_WAMR_WEB_BUILD_DIR:-"$ROOT_DIR/build/wamr-web/$PROFILE"}
   exit 1
 }
 
-if grep -Fq 'imported_memory_interp->u.memory.is_linked = true;' \
-    "$ROOT_DIR/third_party/wasm-micro-runtime/core/iwasm/common/wasm_c_api.c" &&
-   grep -Fq '&& !memory->is_linked' \
-    "$ROOT_DIR/third_party/wasm-micro-runtime/core/iwasm/interpreter/wasm_runtime.c"; then
-  echo "WAMR C API imported-memory patch is ready"
-elif patch --batch --silent --dry-run -d \
-    "$ROOT_DIR/third_party/wasm-micro-runtime" -p1 <"$WAMR_PATCH"; then
-  patch --batch --silent -d "$ROOT_DIR/third_party/wasm-micro-runtime" \
-    -p1 <"$WAMR_PATCH"
-  echo "Applied WAMR C API imported-memory patch"
-else
-  echo "Pinned WAMR source does not match $(basename "$WAMR_PATCH")" >&2
-  exit 1
-fi
+"$ROOT_DIR/scripts/apply-wamr-web-patches.sh"
 
 cmake_args=(
   -S "$ROOT_DIR/system/runtime/wamr-web"
@@ -77,6 +90,7 @@ cmake_args=(
   -DOOS_WAMR_WEB_PLATFORM="$WAMR_PLATFORM"
   -DOOS_WAMR_WEB_TARGET="$WAMR_TARGET"
   -DOOS_WAMR_WEB_AOT_NAMESPACE="$AOT_NAMESPACE"
+  -DOOS_WAMR_WEB_UNSAFE_FAST="$UNSAFE_FAST"
   -DOOS_WAMR_WEB_JIT="$ENABLE_JIT")
 cmake_args+=("${TOOLCHAIN_ARGS[@]}")
 

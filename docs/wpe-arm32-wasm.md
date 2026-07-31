@@ -41,6 +41,13 @@ loads/stores do not require a byte-buffer copy. The current profile requires
 Emscripten modules in the compatibility fixture and avoids relocating a JSC
 ArrayBuffer behind application views.
 
+The JavaScript identity cache holds `WebAssembly.Memory` wrappers weakly. When
+the application drops its last instance, export, and memory references, the
+bridge removes the WAMR instance from its process-wide store and immediately
+deinstantiates it. This releases the linear-memory backing without waiting for
+the WebProcess to exit, which is required for failed loads, application
+switches, and repeated module instantiation on low-memory devices.
+
 The bridge currently covers the core numeric function and memory surface used
 by KaiOS Emscripten applications. Browser-facing Table, Global, reference
 values, BigInt i64 conversion, memory growth, and custom-section contents
@@ -75,3 +82,25 @@ the same cache behavior as URL-loaded modules. Cache misses fall back to the
 interpreter without changing the browser API. Compiler and runtime modules load
 from AOT, instantiate their JavaScript imports, install a JAR, and run the game
 on device.
+
+## Trusted-application performance profile
+
+Set `OOS_WAMR_WEB_UNSAFE_FAST=ON` to build the opt-in performance profile. It
+uses the target CPU and ABI declared by the device WPE configuration and stores
+artifacts in a separate `no-bounds` namespace. Build cache entries from the raw
+Wasm files so runtime lookup remains SHA-256 based:
+
+```sh
+OOS_WAMR_WEB_UNSAFE_FAST=ON \
+  ./scripts/build-webassembly-aot-cache.sh nokia-8110-4g \
+  compiler.wasm runtime.wasm
+```
+
+The Nokia 8110 profile emits ARMv7A code scheduled for Cortex-A7 with VFPv4
+and hardware division. NEON is disabled because LLVM vectorization through
+WAMR 2.4.4 can turn valid unaligned Wasm accesses into faulting ARM loads.
+
+This profile removes Wasm memory, native-stack, and auxiliary-stack checks. A
+malformed module can corrupt or terminate the WebProcess instead of producing a
+WebAssembly trap, so it is only suitable while OOS treats installed packages as
+trusted. Leave the variable unset to retain the checked runtime and AOT cache.

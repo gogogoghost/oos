@@ -56,6 +56,9 @@ const importModule = new Uint8Array([
 ]);
 
 async function run() {
+  if (typeof WeakRef !== 'function' || typeof FinalizationRegistry !== 'function')
+    throw new Error('weak WebAssembly.Memory identity cache is unavailable');
+
   let rejectedFractionalMemory = false;
   try {
     new WebAssembly.Memory({ initial: 1.5, maximum: 1.5 });

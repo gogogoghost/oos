@@ -19,6 +19,7 @@ fi
 WAMR_DIR="$ROOT_DIR/third_party/wasm-micro-runtime"
 BUILD_DIR="$ROOT_DIR/build/host-wamrc"
 WAMR_AOT_C_API_PATCH="$ROOT_DIR/system/patches/wamr-aot-c-api-import-arm32.patch"
+WAMR_AOT_CPU_PATCH="$ROOT_DIR/system/patches/wamr-aot-explicit-triple-cpu.patch"
 
 if grep -Fq 'INT8_PTR_TYPE, "c_api_params"' \
     "$WAMR_DIR/core/iwasm/compilation/aot_emit_function.c"; then
@@ -29,6 +30,18 @@ elif patch --batch --silent --dry-run -d "$WAMR_DIR" -p1 \
   echo "Applied WAMR ARM32 C API import compiler patch"
 else
   echo "Pinned WAMR source does not match $(basename "$WAMR_AOT_C_API_PATCH")" >&2
+  exit 1
+fi
+
+if grep -Fq 'Keep CPU tuning with an explicit target triple' \
+    "$WAMR_DIR/core/iwasm/compilation/aot_llvm.c"; then
+  echo "WAMR explicit-triple CPU tuning patch is ready"
+elif patch --batch --silent --dry-run -d "$WAMR_DIR" -p1 \
+    <"$WAMR_AOT_CPU_PATCH"; then
+  patch --batch --silent -d "$WAMR_DIR" -p1 <"$WAMR_AOT_CPU_PATCH"
+  echo "Applied WAMR explicit-triple CPU tuning patch"
+else
+  echo "Pinned WAMR source does not match $(basename "$WAMR_AOT_CPU_PATCH")" >&2
   exit 1
 fi
 
