@@ -16,6 +16,8 @@ public:
   explicit Compositor(device::Display &display);
 
   bool presentSurface(const SurfaceFrame &frame) override;
+  bool detachRenderContext();
+  bool attachRenderContext();
 
   uint32_t width() const override;
   uint32_t height() const override;

@@ -94,10 +94,12 @@ case "$DEVICE" in
   nokia-2780-flip)
     HWC_SERVICE=vendor.hwcomposer-2-1
     REMOVABLE_STORAGE=/storage/sdcard1
+    AUDIO_READY_MODE=
     ;;
   nokia-8110-4g)
     HWC_SERVICE=
     REMOVABLE_STORAGE=/storage/sdcard
+    AUDIO_READY_MODE=android6-qcom
     ;;
 esac
 
@@ -105,6 +107,7 @@ printf '%s\n' \
   "OOS_SCAFFOLD_FORMAT=2" \
   "OOS_DEVICE=$DEVICE" \
   "OOS_HWC_SERVICE=$HWC_SERVICE" \
+  "OOS_AUDIO_READY_MODE=$AUDIO_READY_MODE" \
   "OOS_INTERNAL_STORAGE=/storage/emulated/0" \
   "OOS_REMOVABLE_STORAGE_CANDIDATES=$REMOVABLE_STORAGE" \
   > "$STAGING/bootstrap.conf"

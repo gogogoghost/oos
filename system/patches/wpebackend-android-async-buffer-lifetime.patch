@@ -1,0 +1,62 @@
+From 8e1b63df54420aec156c7dde1dfb7858f4e4f919 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Fri, 31 Jul 2026 11:00:00 +0800
+Subject: [PATCH] WPEBackend Android: retain committed buffers until release
+
+OOS acknowledges compositor buffers asynchronously. A replacement allocation
+can therefore arrive while the old buffer in the same pool slot is still
+locked by the embedder. Keep that old object alive until the embedder releases
+it instead of leaving the commit callback with a dangling pointer.
+
+Also reject commits for missing buffers and treat an orderly renderer IPC EOF
+as channel closure rather than a malformed packet.
+
+---
+
+diff --git a/src/ipc.cpp b/src/ipc.cpp
+index 50acc68..290ad58 100644
+--- a/src/ipc.cpp
++++ b/src/ipc.cpp
+@@ -202,6 +202,11 @@ gboolean Client::socketCallback(GSocket* socket, GIOCondition condition, gpointe
+         return FALSE;
+     }
+ 
++    if (!len) {
++        g_free(buffer);
++        return FALSE;
++    }
++
+     if (len != Message::size) {
+         g_warning("WPEBackend Android client received an invalid IPC packet: %zd bytes, expected %zu", len, Message::size);
+         g_free(buffer);
+diff --git a/src/renderer-host.cpp b/src/renderer-host.cpp
+index 4c811f7..61c89c0 100644
+--- a/src/renderer-host.cpp
++++ b/src/renderer-host.cpp
+@@ -197,8 +197,12 @@ void RendererHostClientProxy::bufferAllocation(AHardwareBuffer* hardwareBuffer,
+     }
+ 
+     auto* oldBuffer = bufferPool->releaseBuffer(bufferID);
+-    if (oldBuffer)
+-        delete oldBuffer;
++    if (oldBuffer) {
++        if (oldBuffer->locked())
++            oldBuffer->setSPendingDelete(true);
++        else
++            delete oldBuffer;
++    }
+ 
+     auto* buffer = new Buffer(hardwareBuffer, poolID, bufferID);
+     bufferPool->setBuffer(bufferID, buffer);
+@@ -212,6 +217,11 @@ void RendererHostClientProxy::bufferCommit(uint32_t poolID, uint32_t bufferID, i
+ 
+     auto* buffer = bufferPool->getBuffer(bufferID);
+ 
++    if (!buffer) {
++        close(fenceFD);
++        return;
++    }
++
+     auto* viewBackend = m_host.findViewBackend(poolID);
+     if (viewBackend) {
+         auto* androidBackend = viewBackend->androidBackend();

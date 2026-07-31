@@ -16,9 +16,9 @@ int AHardwareBuffer_recvHandleFromUnixSocket(int socket_fd,
 
 enum {
   OOS_SURFACE_TRANSPORT_MAGIC = 0x4f535446,
-  OOS_SURFACE_TRANSPORT_VERSION = 3,
+  OOS_SURFACE_TRANSPORT_VERSION = 4,
   OOS_SURFACE_PACKET_FRAME = 1,
-  OOS_SURFACE_PACKET_ACKNOWLEDGE = 2,
+  OOS_SURFACE_PACKET_BUFFER_RELEASED = 2,
   OOS_SURFACE_PACKET_KEY = 3,
 };
 
@@ -29,8 +29,8 @@ typedef struct OosSurfaceTransportPacket {
   uint32_t reserved;
   union {
     OosSurfaceTransportFrame frame;
+    OosSurfaceTransportRelease release;
     OosSurfaceTransportKey key;
-    uint8_t accepted;
   } payload;
 } OosSurfaceTransportPacket;
 
@@ -50,14 +50,60 @@ static int send_packet(int socket_fd, const OosSurfaceTransportPacket *packet) {
   return send_packet_with_flags(socket_fd, packet, 0);
 }
 
+static int send_packet_with_fd(int socket_fd,
+                               const OosSurfaceTransportPacket *packet,
+                               int descriptor) {
+  if (descriptor < 0)
+    return send_packet(socket_fd, packet);
+
+  char control[CMSG_SPACE(sizeof(descriptor))];
+  memset(control, 0, sizeof(control));
+  struct iovec vector = {
+      .iov_base = (void *)packet,
+      .iov_len = sizeof(*packet),
+  };
+  struct msghdr message = {
+      .msg_iov = &vector,
+      .msg_iovlen = 1,
+      .msg_control = control,
+      .msg_controllen = sizeof(control),
+  };
+  struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+  header->cmsg_level = SOL_SOCKET;
+  header->cmsg_type = SCM_RIGHTS;
+  header->cmsg_len = CMSG_LEN(sizeof(descriptor));
+  memcpy(CMSG_DATA(header), &descriptor, sizeof(descriptor));
+
+  ssize_t sent;
+  do {
+    sent = sendmsg(socket_fd, &message, MSG_NOSIGNAL);
+  } while (sent < 0 && errno == EINTR);
+  return sent == (ssize_t)sizeof(*packet) ? 0 : (sent < 0 ? -errno : -EIO);
+}
+
 static int receive_packet(int socket_fd, OosSurfaceTransportPacket *packet,
-                          int timeout_ms) {
+                          int *received_fd, int timeout_ms) {
+  if (received_fd)
+    *received_fd = -1;
   int result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
   if (result)
     return result;
+
+  char control[CMSG_SPACE(sizeof(int))];
+  memset(control, 0, sizeof(control));
+  struct iovec vector = {
+      .iov_base = packet,
+      .iov_len = sizeof(*packet),
+  };
+  struct msghdr message = {
+      .msg_iov = &vector,
+      .msg_iovlen = 1,
+      .msg_control = control,
+      .msg_controllen = sizeof(control),
+  };
   ssize_t received;
   do {
-    received = recv(socket_fd, packet, sizeof(*packet), 0);
+    received = recvmsg(socket_fd, &message, MSG_CMSG_CLOEXEC);
   } while (received < 0 && errno == EINTR);
   if (received == 0)
     return 0;
@@ -66,6 +112,18 @@ static int receive_packet(int socket_fd, OosSurfaceTransportPacket *packet,
   if (packet->magic != OOS_SURFACE_TRANSPORT_MAGIC ||
       packet->version != OOS_SURFACE_TRANSPORT_VERSION)
     return -EPROTO;
+  for (struct cmsghdr *header = CMSG_FIRSTHDR(&message); header;
+       header = CMSG_NXTHDR(&message, header)) {
+    if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS ||
+        header->cmsg_len < CMSG_LEN(sizeof(int)))
+      continue;
+    int descriptor = -1;
+    memcpy(&descriptor, CMSG_DATA(header), sizeof(descriptor));
+    if (received_fd && *received_fd < 0)
+      *received_fd = descriptor;
+    else if (descriptor >= 0)
+      close(descriptor);
+  }
   return 1;
 }
 
@@ -173,25 +231,19 @@ int oos_surface_transport_connect(const char *socket_path, int timeout_ms) {
   return result;
 }
 
-int oos_surface_transport_send(int socket_fd,
-                               const OosSurfaceTransportFrame *frame,
-                               AHardwareBuffer *buffer, int acquire_fence_fd,
-                               int timeout_ms) {
+int oos_surface_transport_submit(int socket_fd,
+                                 const OosSurfaceTransportFrame *frame,
+                                 AHardwareBuffer *buffer,
+                                 int acquire_fence_fd) {
   const int sends_buffer =
       frame && (frame->flags & OOS_SURFACE_FRAME_NEW_BUFFER);
   if (socket_fd < 0 || !frame || !frame->surface_id || !frame->buffer_id ||
-      !frame->width || !frame->height ||
-      (frame->flags & ~OOS_SURFACE_FRAME_NEW_BUFFER) ||
+      !frame->sequence || frame->submitted_at_ns <= 0 || !frame->width ||
+      !frame->height || (frame->flags & ~OOS_SURFACE_FRAME_NEW_BUFFER) ||
       (sends_buffer && !buffer)) {
     if (acquire_fence_fd >= 0)
       close(acquire_fence_fd);
     return -EINVAL;
-  }
-  if (acquire_fence_fd >= 0) {
-    const int fence_result = wait_for_fd(acquire_fence_fd, POLLIN, timeout_ms);
-    close(acquire_fence_fd);
-    if (fence_result)
-      return fence_result;
   }
   const OosSurfaceTransportPacket packet = {
       .magic = OOS_SURFACE_TRANSPORT_MAGIC,
@@ -199,7 +251,9 @@ int oos_surface_transport_send(int socket_fd,
       .type = OOS_SURFACE_PACKET_FRAME,
       .payload.frame = *frame,
   };
-  int result = send_packet(socket_fd, &packet);
+  int result = send_packet_with_fd(socket_fd, &packet, acquire_fence_fd);
+  if (acquire_fence_fd >= 0)
+    close(acquire_fence_fd);
   if (result)
     return result;
   if (sends_buffer) {
@@ -207,50 +261,86 @@ int oos_surface_transport_send(int socket_fd,
     if (result)
       return result;
   }
-  OosSurfaceTransportPacket response;
-  result = receive_packet(socket_fd, &response, timeout_ms);
-  if (result <= 0)
-    return result == 0 ? -EPIPE : result;
-  if (response.type != OOS_SURFACE_PACKET_ACKNOWLEDGE)
-    return -EPROTO;
-  return response.payload.accepted ? 0 : -ECANCELED;
+  return 0;
 }
 
 int oos_surface_transport_receive(int socket_fd,
                                   OosSurfaceTransportFrame *frame,
-                                  AHardwareBuffer **buffer, int timeout_ms) {
-  if (socket_fd < 0 || !frame || !buffer)
+                                  AHardwareBuffer **buffer,
+                                  int *acquire_fence_fd, int timeout_ms) {
+  if (socket_fd < 0 || !frame || !buffer || !acquire_fence_fd)
     return -EINVAL;
   *buffer = NULL;
+  *acquire_fence_fd = -1;
   OosSurfaceTransportPacket packet;
-  int result = receive_packet(socket_fd, &packet, timeout_ms);
+  int result = receive_packet(socket_fd, &packet, acquire_fence_fd, timeout_ms);
   if (result <= 0)
     return result;
   if (packet.type != OOS_SURFACE_PACKET_FRAME ||
       !packet.payload.frame.surface_id || !packet.payload.frame.buffer_id ||
+      !packet.payload.frame.sequence ||
+      packet.payload.frame.submitted_at_ns <= 0 ||
       !packet.payload.frame.width || !packet.payload.frame.height ||
-      (packet.payload.frame.flags & ~OOS_SURFACE_FRAME_NEW_BUFFER))
+      (packet.payload.frame.flags & ~OOS_SURFACE_FRAME_NEW_BUFFER)) {
+    if (*acquire_fence_fd >= 0) {
+      close(*acquire_fence_fd);
+      *acquire_fence_fd = -1;
+    }
     return -EPROTO;
+  }
   if (packet.payload.frame.flags & OOS_SURFACE_FRAME_NEW_BUFFER) {
     result = wait_for_fd(socket_fd, POLLIN, timeout_ms);
-    if (result)
+    if (result) {
+      if (*acquire_fence_fd >= 0) {
+        close(*acquire_fence_fd);
+        *acquire_fence_fd = -1;
+      }
       return result;
+    }
     result = AHardwareBuffer_recvHandleFromUnixSocket(socket_fd, buffer);
-    if (result)
+    if (result) {
+      if (*acquire_fence_fd >= 0) {
+        close(*acquire_fence_fd);
+        *acquire_fence_fd = -1;
+      }
       return result;
+    }
   }
   *frame = packet.payload.frame;
   return 1;
 }
 
-int oos_surface_transport_acknowledge(int socket_fd, int accepted) {
+int oos_surface_transport_release(int socket_fd,
+                                  const OosSurfaceTransportRelease *release) {
+  if (socket_fd < 0 || !release || !release->sequence || release->accepted > 1)
+    return -EINVAL;
   const OosSurfaceTransportPacket packet = {
       .magic = OOS_SURFACE_TRANSPORT_MAGIC,
       .version = OOS_SURFACE_TRANSPORT_VERSION,
-      .type = OOS_SURFACE_PACKET_ACKNOWLEDGE,
-      .payload.accepted = accepted ? 1 : 0,
+      .type = OOS_SURFACE_PACKET_BUFFER_RELEASED,
+      .payload.release = *release,
   };
   return send_packet(socket_fd, &packet);
+}
+
+int oos_surface_transport_receive_release(int socket_fd,
+                                          OosSurfaceTransportRelease *release,
+                                          int timeout_ms) {
+  if (socket_fd < 0 || !release)
+    return -EINVAL;
+  OosSurfaceTransportPacket packet;
+  int unexpected_fd = -1;
+  const int result =
+      receive_packet(socket_fd, &packet, &unexpected_fd, timeout_ms);
+  if (unexpected_fd >= 0)
+    close(unexpected_fd);
+  if (result <= 0)
+    return result;
+  if (packet.type != OOS_SURFACE_PACKET_BUFFER_RELEASED ||
+      !packet.payload.release.sequence || packet.payload.release.accepted > 1)
+    return -EPROTO;
+  *release = packet.payload.release;
+  return 1;
 }
 
 int oos_surface_transport_send_key(int socket_fd,
@@ -272,7 +362,7 @@ int oos_surface_transport_receive_key(int socket_fd,
   if (socket_fd < 0 || !key)
     return -EINVAL;
   OosSurfaceTransportPacket packet;
-  const int result = receive_packet(socket_fd, &packet, timeout_ms);
+  const int result = receive_packet(socket_fd, &packet, NULL, timeout_ms);
   if (result <= 0)
     return result;
   if (packet.type != OOS_SURFACE_PACKET_KEY || packet.payload.key.action > 2)

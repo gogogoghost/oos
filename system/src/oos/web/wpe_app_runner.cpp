@@ -1,6 +1,6 @@
 #include "oos/compositor/surface.h"
-#include "oos/compositor/surface_transport.h"
 #include "oos/web/kaios_api_bridge.h"
+#include "oos/web/transport_surface_sink.h"
 #include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_key_input.h"
 #include "oos/web/wpe_surface_host.h"
@@ -22,7 +22,6 @@
 #include <signal.h>
 #include <string>
 #include <unistd.h>
-#include <unordered_map>
 #include <vector>
 
 extern "C" {
@@ -144,44 +143,6 @@ bool parseOptions(int argc, char **argv, RunnerOptions &options) {
          options.surface_fd >= 0 && options.input_fd >= 0 &&
          options.api_fd >= 0 && options.width && options.height;
 }
-
-class TransportSurfaceSink final : public oos::compositor::SurfaceSink {
-public:
-  explicit TransportSurfaceSink(int socket_fd) : socket_fd_(socket_fd) {}
-  ~TransportSurfaceSink() override {
-    if (socket_fd_ >= 0)
-      close(socket_fd_);
-  }
-
-  bool presentSurface(const oos::compositor::SurfaceFrame &frame) override {
-    const auto [buffer_id, inserted] =
-        buffer_ids_.try_emplace(frame.buffer, next_buffer_id_++);
-    OosSurfaceTransportFrame transport_frame = {
-        .surface_id = frame.surface_id,
-        .buffer_id = buffer_id->second,
-        .width = frame.width,
-        .height = frame.height,
-        .flags = inserted ? OOS_SURFACE_FRAME_NEW_BUFFER : 0u,
-        .reserved = 0,
-    };
-    const int result =
-        oos_surface_transport_send(socket_fd_, &transport_frame,
-                                   static_cast<AHardwareBuffer *>(frame.buffer),
-                                   frame.acquire_fence_fd, 5000);
-    if (result != 0) {
-      if (inserted)
-        buffer_ids_.erase(buffer_id);
-      std::fprintf(stderr, "WPE surface transport failed: %d (%s)\n", result,
-                   std::strerror(-result));
-    }
-    return result == 0;
-  }
-
-private:
-  int socket_fd_ = -1;
-  uint64_t next_buffer_id_ = 1;
-  std::unordered_map<void *, uint64_t> buffer_ids_;
-};
 
 struct RunnerState {
   GMainLoop *loop = nullptr;
@@ -309,7 +270,11 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  TransportSurfaceSink surface_sink(options.surface_fd);
+  oos::web::TransportSurfaceSink surface_sink(options.surface_fd);
+  if (!surface_sink.initialize()) {
+    std::fprintf(stderr, "initialize WPE surface transport failed\n");
+    return 1;
+  }
   oos::web::WpeSurfaceHost surface(surface_sink, kWebSurfaceId, options.width,
                                    options.height);
   if (!surface.initialize()) {
@@ -376,6 +341,13 @@ int main(int argc, char **argv) {
     webkit_settings_set_enable_write_console_messages_to_stdout(settings, TRUE);
   }
   RunnerState state{loop, surface.viewBackend(), view, options.input_fd};
+  surface_sink.setFailureHandler(
+      [](void *data) {
+        auto *state = static_cast<RunnerState *>(data);
+        state->web_process_failed = true;
+        g_main_loop_quit(state->loop);
+      },
+      &state);
   state.trace_keys = std::getenv("OOS_TRACE_KEYS") != nullptr;
   g_signal_connect(view, "load-changed", G_CALLBACK(loadChanged), &state);
   g_signal_connect(view, "load-failed", G_CALLBACK(loadFailed), &state);

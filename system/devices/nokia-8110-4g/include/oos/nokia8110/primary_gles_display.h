@@ -21,6 +21,8 @@ public:
   bool initialize() override;
   bool showBootFrame(const uint16_t *rgb565_pixels) override;
   bool presentSurface(const compositor::SurfaceFrame &frame) override;
+  bool detachRenderContext() override;
+  bool attachRenderContext() override;
   void refresh() override;
   void shutdown() override;
 

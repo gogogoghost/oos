@@ -13,14 +13,30 @@ WPEWebProcess -> WpeSurfaceHost (producer process)
               -> RGB565 scanout -> HWC -> panel
 ```
 
-`WpeSurfaceHost` is part of the WPE producer. It waits for the acquire fence
-and sends each opaque GPU handle once over `SOCK_SEQPACKET`. Later frames refer
-to that connection-local allocation by `buffer_id`; the OOS host retains the
-import until the producer disconnects and acknowledges every frame only after
-composition. This avoids per-frame FD transfer and gralloc registration while
-preserving producer backpressure. WPE's release/frame-complete replies use the
-per-EGLTarget channel so WebKit receives them on its compositor thread, as
-required by `ThreadedCompositor`.
+`WpeSurfaceHost` is part of the WPE producer. It submits without waiting for
+composition and transfers the acquire-fence FD with the frame packet. Each
+opaque GPU handle is sent once over `SOCK_SEQPACKET`; later frames refer to the
+connection-local allocation by `buffer_id`. The OOS host retains that import
+until the producer disconnects and returns a sequence-numbered release only
+after presentation or an explicit drop. This avoids per-frame handle transfer
+and gralloc registration while preserving buffer ownership. WPE's
+release/frame-complete replies use the per-EGLTarget channel so WebKit receives
+them on its compositor thread, as required by `ThreadedCompositor`.
+
+The OOS main thread only receives and validates frames. A dedicated
+presentation thread owns the EGL context while a WPE application is active.
+Its queue keeps at most two waiting frames in addition to the frame being
+presented; when saturated, the oldest waiting frame is released as dropped so
+input and device API traffic cannot be blocked behind stale visual work. Both
+phone backends rotate between two RGB565 client targets and wait for a target's
+HWC release/present fence only when that target is reused.
+
+The Nokia 8110 EGL driver does not expose `EGL_ANDROID_native_fence_sync`.
+WPE must therefore finish GPU production before it commits a gralloc buffer,
+and OOS waits an external acquire fence when one exists. The asynchronous
+transport and double scanout targets still keep those waits off the OOS control
+thread. Android 10 can transfer a native acquire fence through the same
+protocol without changing the producer contract.
 
 The processes deliberately have separate library paths: WPE uses its isolated
 sysroot and the host uses the stock graphics stack. This prevents C++ ABI and
@@ -89,9 +105,17 @@ Long device discovery calls cannot stall key dispatch or frame composition.
 
 On Android the formal process boundary is `oos` plus one foreground
 `oos-wpe`. The host creates the surface socket, launches the producer from the
-resolved registry record, acknowledges every imported frame after composition,
-and sends key events in the reverse direction. Closing the app or stopping OOS
-terminates the producer and removes the runtime socket.
+resolved registry record, releases every imported frame after composition,
+and sends key events in the reverse direction. During shutdown the host keeps
+all channels open while `oos-wpe` destroys its WebKit view, then closes the
+channels and imported buffers after the child exits. This ordering avoids two
+concurrent WebKit shutdown paths from socket HUP and `SIGTERM`.
+
+Set `OOS_PROFILE_WPE_FRAMES=1` in `/data/oos/system/runtime.conf` to print
+five-second p50/p95/p99 queue, presentation, and end-to-end latency samples.
+`OOS_TRACE_WPE_FRAMES=1` additionally logs every sequence and HWC fence and is
+intended only for short diagnostics. The animated shared smoke page provides a
+continuous `requestAnimationFrame` workload for this path.
 
 ## Android WebAudio
 

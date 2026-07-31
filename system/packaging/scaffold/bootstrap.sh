@@ -174,3 +174,55 @@ wait_for_service() {
     sleep 0.1
   done
 }
+
+android_audio_calibration_ready() {
+  media_pids=$(ps | awk \
+    '$NF == "/system/bin/mediaserver" || $NF == "/system/bin/audioserver" { print $2 }')
+  for media_pid in $media_pids; do
+    process_dir="/proc/$media_pid"
+    for descriptor in "$process_dir"/fd/*; do
+      [ "$(readlink "$descriptor" 2>/dev/null || true)" = \
+        /dev/msm_audio_cal ] && return 0
+    done
+  done
+  return 1
+}
+
+wait_for_audio_runtime() {
+  case "$1" in
+    android6-qcom) ;;
+    *)
+      echo "unsupported audio readiness mode: $1" >&2
+      return 1
+      ;;
+  esac
+
+  attempt=0
+  while ! service check media.audio_flinger 2>/dev/null | grep -q found ||
+      ! android_audio_calibration_ready; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 150 ]; then
+      echo "Android audio calibration did not become ready; keep b2g running or reboot after a failed media-service restart" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  # Service registration happens before mediaserver starts its Binder thread
+  # pool. A bounded dump proves that OpenSL calls will actually be serviced.
+  timeout_command=$(command -v timeout 2>/dev/null || true)
+  if [ -z "$timeout_command" ]; then
+    echo "audio readiness checks require a timeout command" >&2
+    return 1
+  fi
+  binder_attempt=0
+  while ! "$timeout_command" 3 /system/bin/dumpsys \
+      media.audio_flinger >/dev/null 2>&1; do
+    binder_attempt=$((binder_attempt + 1))
+    if [ "$binder_attempt" -ge 3 ]; then
+      echo "AudioFlinger is registered but not responding; keep b2g running until Android media initialization completes" >&2
+      return 1
+    fi
+    sleep 0.5
+  done
+}

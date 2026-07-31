@@ -132,6 +132,14 @@ the same ZIP. Selecting a registered KaiOS application starts the packaged
 input ownership. Each Web app receives separate persistent WebKit data and
 content-versioned cache directories.
 
+On Nokia 8110, `start.sh` waits for both a responsive AudioFlinger Binder
+service and an initialized Qualcomm ACDB calibration handle before stopping
+`b2g`. Registering `media.audio_flinger` alone is not sufficient: Android 6
+registers it before mediaserver starts its Binder pool. Starting OOS in that
+window can leave OpenSL accepting buffers while the PCM device never opens.
+Do not restart mediaserver repeatedly after an ACDB allocation failure; the
+driver can retain calibration blocks until the next device reboot.
+
 ## WPE Inspector
 
 Remote inspector support is built into WPE but remains disabled at runtime.
@@ -158,6 +166,11 @@ WebAudio diagnostics use the same file. `OOS_TRACE_WEBAUDIO=1` logs WebCore PCM
 burst boundaries, and `OOS_WEB_AUDIO_NICE` controls the nice value applied only
 to WPE audio feeder threads (`-10` by default, `0` to disable adjustment).
 Leave tracing disabled outside a diagnostic run.
+
+WPE compositor diagnostics are also runtime switches.
+`OOS_PROFILE_WPE_FRAMES=1` reports five-second latency distributions and drop
+counts with low log volume. `OOS_TRACE_WPE_FRAMES=1` logs each frame and HWC
+fence and should be enabled only for a short capture.
 
 ## Upgrade
 

@@ -110,6 +110,7 @@ if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
 
   add_executable(oos-wpe
     "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_runner.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/transport_surface_sink.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
@@ -216,13 +217,16 @@ target_link_libraries(oos_nokia_8110_device PUBLIC
 if(OOS_BUILD_DEVICE_TESTS)
   add_executable(oos_test_nokia_8110_surface_transport_key
     "${CMAKE_SOURCE_DIR}/tests/web/surface_transport_key_test.cpp")
+  oos_nokia_8110_android_target(oos_test_nokia_8110_surface_transport_key)
   target_link_libraries(oos_test_nokia_8110_surface_transport_key PRIVATE
-    oos_surface_transport oos_android23_hardware_buffer)
+    oos_surface_transport oos_android23_hardware_buffer
+    "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 
   if(TARGET oos_wpe_surface_host AND
      EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so")
     add_executable(oos_test_nokia_8110_4g_wpe_producer
       "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp"
+      "${CMAKE_SOURCE_DIR}/src/oos/web/transport_surface_sink.cpp"
       "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
       "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
     oos_nokia_8110_android_target(oos_test_nokia_8110_4g_wpe_producer)

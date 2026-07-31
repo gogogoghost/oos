@@ -106,6 +106,7 @@ add_library(oos::web ALIAS oos_wpe_surface_host)
 
 add_executable(oos-wpe
   "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_runner.cpp"
+  "${CMAKE_SOURCE_DIR}/src/oos/web/transport_surface_sink.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
@@ -278,6 +279,7 @@ if(OOS_BUILD_DEVICE_TESTS)
 
   add_executable(oos_test_nokia_2780_wpe_producer
     "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/web/transport_surface_sink.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
     "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
   oos_nokia_2780_android_target(oos_test_nokia_2780_wpe_producer)
@@ -311,6 +313,7 @@ if(OOS_BUILD_DEVICE_TESTS)
     ${NOKIA_2780_WPE_INCLUDES})
   target_link_libraries(oos_test_nokia_2780_key_input PRIVATE
     oos::platform
+    oos_compositor
     oos_input
     oos_wpe_surface_host
     "${NOKIA_2780_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"

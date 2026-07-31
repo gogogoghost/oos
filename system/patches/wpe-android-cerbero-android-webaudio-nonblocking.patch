@@ -1,0 +1,11 @@
+diff --git a/recipes/wpewebkit.recipe b/recipes/wpewebkit.recipe
+--- a/recipes/wpewebkit.recipe
++++ b/recipes/wpewebkit.recipe
+@@ -64,6 +64,7 @@ class Recipe(recipe.Recipe):
+         'wpewebkit/0008-OOS-webassembly-off-jit-build.patch',
+         'wpewebkit/0009-OOS-localhost-http-scheme.patch',
+         'wpewebkit/0010-OOS-Android-continuous-WebAudio.patch',
++        'wpewebkit/0011-OOS-Android-nonblocking-WebAudio.patch',
+     ]
+ 
+     files_libs = [

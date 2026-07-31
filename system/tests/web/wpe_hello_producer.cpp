@@ -8,10 +8,9 @@
 #include <cstring>
 #include <string>
 #include <unistd.h>
-#include <unordered_map>
 
-#include "oos/compositor/surface.h"
 #include "oos/compositor/surface_transport.h"
+#include "oos/web/transport_surface_sink.h"
 #include "oos/web/wpe_app_profile.h"
 #include "oos/web/wpe_surface_host.h"
 
@@ -37,44 +36,6 @@ uint32_t environmentDimension(const char *name, uint32_t fallback) {
   return value > 0 && value <= UINT32_MAX ? static_cast<uint32_t>(value)
                                           : fallback;
 }
-
-class TransportSurfaceSink final : public oos::compositor::SurfaceSink {
-public:
-  explicit TransportSurfaceSink(int socket_fd) : socket_fd_(socket_fd) {}
-  ~TransportSurfaceSink() override {
-    if (socket_fd_ >= 0)
-      close(socket_fd_);
-  }
-
-  bool presentSurface(const oos::compositor::SurfaceFrame &frame) override {
-    const auto [buffer_id, inserted] =
-        buffer_ids_.try_emplace(frame.buffer, next_buffer_id_++);
-    OosSurfaceTransportFrame transport_frame = {
-        .surface_id = frame.surface_id,
-        .buffer_id = buffer_id->second,
-        .width = frame.width,
-        .height = frame.height,
-        .flags = inserted ? OOS_SURFACE_FRAME_NEW_BUFFER : 0u,
-        .reserved = 0,
-    };
-    const int result =
-        oos_surface_transport_send(socket_fd_, &transport_frame,
-                                   static_cast<AHardwareBuffer *>(frame.buffer),
-                                   frame.acquire_fence_fd, 5000);
-    if (result != 0) {
-      if (inserted)
-        buffer_ids_.erase(buffer_id);
-      std::fprintf(stderr, "WPE surface transport failed: %d (%s)\n", result,
-                   std::strerror(-result));
-    }
-    return result == 0;
-  }
-
-private:
-  int socket_fd_ = -1;
-  uint64_t next_buffer_id_ = 1;
-  std::unordered_map<void *, uint64_t> buffer_ids_;
-};
 
 struct TestState {
   GMainLoop *loop = nullptr;
@@ -135,7 +96,11 @@ int main() {
                  socket_fd, std::strerror(-socket_fd));
     return 1;
   }
-  TransportSurfaceSink surface_sink(socket_fd);
+  oos::web::TransportSurfaceSink surface_sink(socket_fd);
+  if (!surface_sink.initialize()) {
+    std::fprintf(stderr, "failed to initialize surface transport\n");
+    return 1;
+  }
   const uint32_t width = environmentDimension("OOS_SURFACE_WIDTH", 240);
   const uint32_t height = environmentDimension("OOS_SURFACE_HEIGHT", 320);
   oos::web::WpeSurfaceHost surface(surface_sink, kWebSurfaceId, width, height);

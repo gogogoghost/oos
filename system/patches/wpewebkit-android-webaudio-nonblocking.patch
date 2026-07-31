@@ -1,0 +1,66 @@
+From 15a6a3e8f6ec98b616b9b11cf7d2c2fb5ab0c789 Mon Sep 17 00:00:00 2001
+From: OOS <oos@example.invalid>
+Date: Fri, 31 Jul 2026 11:45:00 +0800
+Subject: [PATCH] WPE: make Android WebAudio state changes nonblocking
+
+Android OpenSL can wait indefinitely for AudioFlinger while a GStreamer
+pipeline enters PLAYING or READY. Do not run that wait on the WebProcess main
+thread. Let GStreamer finish the state change asynchronously and keep latency
+messages enabled on the regular pipeline bus callback.
+---
+diff --git a/Source/WebCore/platform/audio/gstreamer/AudioDestinationGStreamer.cpp b/Source/WebCore/platform/audio/gstreamer/AudioDestinationGStreamer.cpp
+index de85d2cd58..3d8e59775c 100644
+--- a/Source/WebCore/platform/audio/gstreamer/AudioDestinationGStreamer.cpp
++++ b/Source/WebCore/platform/audio/gstreamer/AudioDestinationGStreamer.cpp
+@@ -149,7 +149,11 @@ void AudioDestinationGStreamer::initializePipeline()
+         RefPtr destination = weakThis.get();
+         if (!destination)
+             return;
+-        destination->handleMessage(message, false);
++#if OS(ANDROID)
++        destination->handleMessage(message, true);
++#else
++        destination->handleMessage(message, false);
++#endif
+     });
+ 
+     m_src = GST_ELEMENT_CAST(g_object_new(WEBKIT_TYPE_WEB_AUDIO_SRC, nullptr));
+@@ -256,12 +260,20 @@ void AudioDestinationGStreamer::startRendering(CompletionHandler<void(bool)>&& c
+         return;
+     }
+ 
++#if OS(ANDROID)
++    // OpenSL can block forever while AudioFlinger or another platform media
++    // service is unavailable. Let GStreamer complete the state transition on
++    // its streaming threads so WebAudio startup never blocks the WebProcess.
++    auto stateChangeReturn = gst_element_set_state(m_pipeline.get(), GST_STATE_PLAYING);
++    notifyStartupResult(stateChangeReturn != GST_STATE_CHANGE_FAILURE);
++#else
+     notifyStartupResult(webkitGstSetElementStateSynchronously(m_pipeline.get(), GST_STATE_PLAYING, [weakThis = ThreadSafeWeakPtr { *this }](GstMessage* message) -> bool {
+         RefPtr destination = weakThis.get();
+         if (!destination)
+             return false;
+         return destination->handleMessage(message, true);
+     }));
++#endif
+ }
+ 
+ void AudioDestinationGStreamer::stop(CompletionHandler<void(bool)>&& completionHandler)
+@@ -293,12 +305,17 @@ void AudioDestinationGStreamer::stopRendering(CompletionHandler<void(bool)>&& co
+         return;
+     }
+ 
++#if OS(ANDROID)
++    auto stateChangeReturn = gst_element_set_state(m_pipeline.get(), GST_STATE_READY);
++    notifyStopResult(stateChangeReturn != GST_STATE_CHANGE_FAILURE);
++#else
+     notifyStopResult(webkitGstSetElementStateSynchronously(m_pipeline.get(), GST_STATE_READY, [weakThis = ThreadSafeWeakPtr { *this }](GstMessage* message) -> bool {
+         RefPtr destination = weakThis.get();
+         if (!destination)
+             return false;
+         return destination->handleMessage(message, true);
+     }));
++#endif
+ }
+ 
+ void AudioDestinationGStreamer::notifyStartupResult(bool success)

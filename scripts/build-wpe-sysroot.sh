@@ -107,7 +107,7 @@ if [[ -f "$WPE_BUILD_DIR/cmakeconfig.h" &&
 fi
 
 if [[ $OOS_WPE_ANDROID_API -lt 26 ]]; then
-  "$ROOT_DIR/scripts/configure-android.sh" "$DEVICE" -DOOS_BUILD_DEVICE_TESTS=OFF
+  "$ROOT_DIR/scripts/configure-android.sh" "$DEVICE" -DOOS_BUILD_DEVICE_TESTS=ON
   cmake --build "$ROOT_DIR/build/android-$DEVICE" \
     --target oos_android23_hardware_buffer -j "$WPE_BUILD_JOBS"
   mkdir -p "$WPE_PREFIX/lib"

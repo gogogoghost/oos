@@ -25,6 +25,14 @@ bool Compositor::presentSurface(const SurfaceFrame &frame) {
   return display_.presentSurface(frame);
 }
 
+bool Compositor::detachRenderContext() {
+  return display_.detachRenderContext();
+}
+
+bool Compositor::attachRenderContext() {
+  return display_.attachRenderContext();
+}
+
 uint32_t Compositor::width() const { return display_.width(); }
 
 uint32_t Compositor::height() const { return display_.height(); }

@@ -40,25 +40,43 @@ bool testRetainedBufferTransport() {
     close(sockets[0]);
     OosSurfaceTransportFrame received_frame = {};
     AHardwareBuffer *retained_buffer = nullptr;
+    int acquire_fence = -1;
     const int allocation = oos_surface_transport_receive(
-        sockets[1], &received_frame, &retained_buffer, 2000);
+        sockets[1], &received_frame, &retained_buffer, &acquire_fence, 2000);
     const bool first_valid =
         allocation == 1 && retained_buffer && received_frame.buffer_id == 7 &&
+        received_frame.sequence == 11 && acquire_fence >= 0 &&
         (received_frame.flags & OOS_SURFACE_FRAME_NEW_BUFFER);
-    if (oos_surface_transport_acknowledge(sockets[1], first_valid) != 0) {
+    if (acquire_fence >= 0)
+      close(acquire_fence);
+    const OosSurfaceTransportRelease first_release = {
+        .sequence = received_frame.sequence,
+        .presented_at_ns = 200,
+        .accepted = static_cast<uint8_t>(first_valid),
+        .reserved = {},
+    };
+    if (oos_surface_transport_release(sockets[1], &first_release) != 0) {
       if (retained_buffer)
         AHardwareBuffer_release(retained_buffer);
       _exit(1);
     }
 
     AHardwareBuffer *unexpected_buffer = nullptr;
+    acquire_fence = -1;
     const int reference = oos_surface_transport_receive(
-        sockets[1], &received_frame, &unexpected_buffer, 2000);
-    const bool second_valid = reference == 1 && !unexpected_buffer &&
-                              received_frame.buffer_id == 7 &&
-                              received_frame.flags == 0;
+        sockets[1], &received_frame, &unexpected_buffer, &acquire_fence, 2000);
+    const bool second_valid =
+        reference == 1 && !unexpected_buffer && acquire_fence < 0 &&
+        received_frame.buffer_id == 7 && received_frame.sequence == 12 &&
+        received_frame.flags == 0;
+    const OosSurfaceTransportRelease second_release = {
+        .sequence = received_frame.sequence,
+        .presented_at_ns = 300,
+        .accepted = static_cast<uint8_t>(second_valid),
+        .reserved = {},
+    };
     const bool consumer_success =
-        oos_surface_transport_acknowledge(sockets[1], second_valid) == 0 &&
+        oos_surface_transport_release(sockets[1], &second_release) == 0 &&
         first_valid && second_valid;
     if (retained_buffer)
       AHardwareBuffer_release(retained_buffer);
@@ -73,28 +91,51 @@ bool testRetainedBufferTransport() {
   }
   close(sockets[1]);
 
+  int fence_pipe[2] = {-1, -1};
+  if (pipe(fence_pipe) != 0) {
+    AHardwareBuffer_release(producer_buffer);
+    close(sockets[0]);
+    return false;
+  }
+  const char signal = 1;
+  (void)write(fence_pipe[1], &signal, sizeof(signal));
+  close(fence_pipe[1]);
+
   OosSurfaceTransportFrame frame = {
       .surface_id = 1,
       .buffer_id = 7,
+      .sequence = 11,
+      .submitted_at_ns = 100,
       .width = 16,
       .height = 16,
       .flags = OOS_SURFACE_FRAME_NEW_BUFFER,
       .reserved = 0,
   };
-  const int allocation =
-      oos_surface_transport_send(sockets[0], &frame, producer_buffer, -1, 2000);
-  frame.flags = 0;
-  const int reference =
+  const int allocation = oos_surface_transport_submit(
+      sockets[0], &frame, producer_buffer, fence_pipe[0]);
+  OosSurfaceTransportRelease release = {};
+  const int first_released =
       allocation == 0
-          ? oos_surface_transport_send(sockets[0], &frame, nullptr, -1, 2000)
+          ? oos_surface_transport_receive_release(sockets[0], &release, 2000)
           : allocation;
+  frame.flags = 0;
+  frame.sequence = 12;
+  const int reference =
+      first_released == 1 && release.sequence == 11 && release.accepted
+          ? oos_surface_transport_submit(sockets[0], &frame, nullptr, -1)
+          : -1;
+  const int second_released =
+      reference == 0
+          ? oos_surface_transport_receive_release(sockets[0], &release, 2000)
+          : reference;
   int consumer_status = 0;
   while (waitpid(consumer, &consumer_status, 0) < 0 && errno == EINTR) {
   }
   AHardwareBuffer_release(producer_buffer);
   close(sockets[0]);
-  return allocation == 0 && reference == 0 && WIFEXITED(consumer_status) &&
-         WEXITSTATUS(consumer_status) == 0;
+  return allocation == 0 && first_released == 1 && reference == 0 &&
+         second_released == 1 && release.sequence == 12 && release.accepted &&
+         WIFEXITED(consumer_status) && WEXITSTATUS(consumer_status) == 0;
 }
 
 } // namespace

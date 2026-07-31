@@ -14,11 +14,16 @@
 
 #include <android/hardware_buffer.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <deque>
+#include <mutex>
 #include <signal.h>
 #include <string>
 #include <sys/wait.h>
@@ -38,7 +43,9 @@ namespace {
 
 constexpr int kFramePollMs = 16;
 constexpr int kChildStopSlices = 50;
+constexpr size_t kMaxQueuedFrames = 2;
 constexpr useconds_t kChildStopSliceUs = 20000;
+constexpr int64_t kMetricsReportIntervalNs = 5000000000LL;
 
 const char *environmentOr(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
@@ -58,6 +65,258 @@ bool childExited(pid_t child, int &status) {
   const pid_t result = waitpid(child, &status, WNOHANG);
   return result == child || (result < 0 && errno == ECHILD);
 }
+
+int64_t monotonicTimeNs() {
+  timespec time{};
+  return clock_gettime(CLOCK_MONOTONIC, &time) == 0
+             ? static_cast<int64_t>(time.tv_sec) * 1000000000LL + time.tv_nsec
+             : 0;
+}
+
+class FrameMetrics {
+public:
+  explicit FrameMetrics(bool enabled) : enabled_(enabled) {
+    queue_us_.reserve(512);
+    present_us_.reserve(512);
+    total_us_.reserve(512);
+  }
+
+  void record(int64_t submitted_ns, int64_t queued_ns, int64_t started_ns,
+              int64_t finished_ns, bool presented) {
+    if (!enabled_)
+      return;
+    std::lock_guard lock(mutex_);
+    queue_us_.push_back((started_ns - queued_ns) / 1000);
+    present_us_.push_back((finished_ns - started_ns) / 1000);
+    total_us_.push_back((finished_ns - submitted_ns) / 1000);
+    presented ? ++presented_ : ++dropped_;
+    if (!last_report_ns_)
+      last_report_ns_ = finished_ns;
+    if (finished_ns - last_report_ns_ >= kMetricsReportIntervalNs)
+      report(finished_ns);
+  }
+
+  void recordDropped() {
+    if (!enabled_)
+      return;
+    std::lock_guard lock(mutex_);
+    ++dropped_;
+  }
+
+  void finish() {
+    std::lock_guard lock(mutex_);
+    if (enabled_ && (!queue_us_.empty() || dropped_))
+      report(monotonicTimeNs());
+  }
+
+private:
+  static int64_t percentile(const std::vector<int64_t> &samples,
+                            size_t percent) {
+    if (samples.empty())
+      return 0;
+    std::vector<int64_t> sorted = samples;
+    std::sort(sorted.begin(), sorted.end());
+    const size_t index = (sorted.size() - 1) * percent / 100;
+    return sorted[index];
+  }
+
+  static void printDistribution(const char *name,
+                                const std::vector<int64_t> &samples) {
+    std::fprintf(stderr, " %s_us[p50=%lld p95=%lld p99=%lld]", name,
+                 static_cast<long long>(percentile(samples, 50)),
+                 static_cast<long long>(percentile(samples, 95)),
+                 static_cast<long long>(percentile(samples, 99)));
+  }
+
+  void report(int64_t now_ns) {
+    std::fprintf(stderr, "OOS WPE frame profile: presented=%llu dropped=%llu",
+                 static_cast<unsigned long long>(presented_),
+                 static_cast<unsigned long long>(dropped_));
+    printDistribution("queue", queue_us_);
+    printDistribution("present", present_us_);
+    printDistribution("total", total_us_);
+    std::fprintf(stderr, "\n");
+    std::fflush(stderr);
+    queue_us_.clear();
+    present_us_.clear();
+    total_us_.clear();
+    presented_ = 0;
+    dropped_ = 0;
+    last_report_ns_ = now_ns;
+  }
+
+  bool enabled_ = false;
+  std::mutex mutex_;
+  int64_t last_report_ns_ = 0;
+  uint64_t presented_ = 0;
+  uint64_t dropped_ = 0;
+  std::vector<int64_t> queue_us_;
+  std::vector<int64_t> present_us_;
+  std::vector<int64_t> total_us_;
+};
+
+class SurfacePresentationQueue {
+public:
+  SurfacePresentationQueue(compositor::Compositor &compositor, int socket_fd,
+                           bool trace_frames, bool profile_frames)
+      : compositor_(compositor), socket_fd_(socket_fd),
+        trace_frames_(trace_frames), metrics_(profile_frames) {}
+
+  ~SurfacePresentationQueue() { stop(); }
+
+  bool start() {
+    if (!compositor_.detachRenderContext())
+      return false;
+    context_transferred_ = true;
+    worker_ = std::thread([this] { run(); });
+    std::unique_lock lock(start_mutex_);
+    start_ready_.wait(lock, [this] { return start_complete_; });
+    if (start_success_)
+      return true;
+    lock.unlock();
+    if (worker_.joinable())
+      worker_.join();
+    context_transferred_ = false;
+    compositor_.attachRenderContext();
+    return false;
+  }
+
+  bool enqueue(const compositor::SurfaceFrame &frame, int64_t submitted_ns) {
+    QueuedFrame dropped;
+    bool has_dropped = false;
+    {
+      std::lock_guard lock(queue_mutex_);
+      if (stopping_) {
+        if (frame.acquire_fence_fd >= 0)
+          close(frame.acquire_fence_fd);
+        return false;
+      }
+      if (queue_.size() >= kMaxQueuedFrames) {
+        dropped = queue_.front();
+        queue_.pop_front();
+        has_dropped = true;
+      }
+      queue_.push_back({frame, submitted_ns, monotonicTimeNs()});
+    }
+    if (has_dropped) {
+      if (dropped.frame.acquire_fence_fd >= 0)
+        close(dropped.frame.acquire_fence_fd);
+      metrics_.recordDropped();
+      sendRelease(dropped.frame.sequence, false);
+    }
+    queue_ready_.notify_one();
+    return healthy_;
+  }
+
+  void stop() {
+    std::deque<QueuedFrame> canceled;
+    {
+      std::lock_guard lock(queue_mutex_);
+      if (stopping_ && !worker_.joinable())
+        return;
+      stopping_ = true;
+      canceled.swap(queue_);
+    }
+    for (const QueuedFrame &frame : canceled) {
+      if (frame.frame.acquire_fence_fd >= 0)
+        close(frame.frame.acquire_fence_fd);
+      metrics_.recordDropped();
+      sendRelease(frame.frame.sequence, false);
+    }
+    queue_ready_.notify_all();
+    if (worker_.joinable())
+      worker_.join();
+    if (context_transferred_) {
+      if (!compositor_.attachRenderContext())
+        healthy_ = false;
+      context_transferred_ = false;
+    }
+    metrics_.finish();
+  }
+
+  bool healthy() const { return healthy_; }
+  uint64_t presentedFrames() const { return presented_frames_; }
+
+private:
+  struct QueuedFrame {
+    compositor::SurfaceFrame frame;
+    int64_t submitted_ns = 0;
+    int64_t queued_ns = 0;
+  };
+
+  void run() {
+    const bool attached = compositor_.attachRenderContext();
+    {
+      std::lock_guard lock(start_mutex_);
+      start_success_ = attached;
+      start_complete_ = true;
+    }
+    start_ready_.notify_one();
+    if (!attached)
+      return;
+    while (true) {
+      QueuedFrame queued;
+      {
+        std::unique_lock lock(queue_mutex_);
+        queue_ready_.wait(lock,
+                          [this] { return stopping_ || !queue_.empty(); });
+        if (queue_.empty()) {
+          if (stopping_)
+            break;
+          continue;
+        }
+        queued = queue_.front();
+        queue_.pop_front();
+      }
+      const int64_t started_ns = monotonicTimeNs();
+      const bool presented = compositor_.presentSurface(queued.frame);
+      const int64_t finished_ns = monotonicTimeNs();
+      metrics_.record(queued.submitted_ns, queued.queued_ns, started_ns,
+                      finished_ns, presented);
+      if (presented)
+        ++presented_frames_;
+      if (!sendRelease(queued.frame.sequence, presented) || !presented)
+        healthy_ = false;
+      if (trace_frames_) {
+        std::fprintf(stderr,
+                     "OOS WPE host completed sequence=%llu presented=%d\n",
+                     static_cast<unsigned long long>(queued.frame.sequence),
+                     presented ? 1 : 0);
+      }
+    }
+    if (!compositor_.detachRenderContext())
+      healthy_ = false;
+  }
+
+  bool sendRelease(uint64_t sequence, bool accepted) {
+    const OosSurfaceTransportRelease release = {
+        .sequence = sequence,
+        .presented_at_ns = monotonicTimeNs(),
+        .accepted = static_cast<uint8_t>(accepted),
+        .reserved = {},
+    };
+    std::lock_guard lock(send_mutex_);
+    return oos_surface_transport_release(socket_fd_, &release) == 0;
+  }
+
+  compositor::Compositor &compositor_;
+  int socket_fd_ = -1;
+  bool trace_frames_ = false;
+  FrameMetrics metrics_;
+  std::mutex queue_mutex_;
+  std::mutex send_mutex_;
+  std::mutex start_mutex_;
+  std::condition_variable queue_ready_;
+  std::condition_variable start_ready_;
+  std::deque<QueuedFrame> queue_;
+  std::thread worker_;
+  std::atomic<bool> stopping_{false};
+  std::atomic<bool> healthy_{true};
+  std::atomic<uint64_t> presented_frames_{0};
+  bool context_transferred_ = false;
+  bool start_complete_ = false;
+  bool start_success_ = false;
+};
 
 void stopChild(pid_t child) {
   int status = 0;
@@ -276,21 +535,34 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
 
   int child_status = 0;
   bool success = true;
-  uint64_t presented_frames = 0;
   std::unordered_map<uint64_t, AHardwareBuffer *> surface_buffers;
   const bool trace_frames = environmentEnabled("OOS_TRACE_WPE_FRAMES");
+  SurfacePresentationQueue presentation_queue(
+      compositor_, surface_sockets[0], trace_frames,
+      environmentEnabled("OOS_PROFILE_WPE_FRAMES"));
+  if (!presentation_queue.start()) {
+    error_ = "transfer display context to WPE presentation thread failed";
+    success = false;
+  }
   KeyDispatchContext key_context{input_sockets[0], 0,
                                  std::getenv("OOS_TRACE_KEYS") != nullptr};
-  while (!(stop_requested && *stop_requested) && !input_.stopRequested()) {
+  while (success && !(stop_requested && *stop_requested) &&
+         !input_.stopRequested()) {
     if (!device_api_success) {
       error_ = device_api_error;
       success = false;
       break;
     }
+    if (!presentation_queue.healthy()) {
+      error_ = "WPE surface presentation queue failed";
+      success = false;
+      break;
+    }
     OosSurfaceTransportFrame packet = {};
     AHardwareBuffer *buffer = nullptr;
+    int acquire_fence_fd = -1;
     const int received = oos_surface_transport_receive(
-        surface_sockets[0], &packet, &buffer, kFramePollMs);
+        surface_sockets[0], &packet, &buffer, &acquire_fence_fd, kFramePollMs);
     if (received == 0)
       break;
     if (received < 0 && received != -ETIMEDOUT) {
@@ -309,6 +581,8 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       }
       auto buffer_entry = surface_buffers.find(packet.buffer_id);
       if (buffer_entry == surface_buffers.end()) {
+        if (acquire_fence_fd >= 0)
+          close(acquire_fence_fd);
         error_ = "WPE frame referenced an unknown surface buffer";
         success = false;
         break;
@@ -318,26 +592,18 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       AHardwareBuffer_describe(buffer, &description);
       compositor::SurfaceFrame frame;
       frame.surface_id = packet.surface_id;
+      frame.sequence = packet.sequence;
       frame.buffer = buffer;
       frame.buffer_width = description.width;
       frame.buffer_height = description.height;
       frame.buffer_stride = description.stride;
+      frame.acquire_fence_fd = acquire_fence_fd;
       frame.width = packet.width;
       frame.height = packet.height;
-      const bool presented = compositor_.presentSurface(frame);
-      const int acknowledged =
-          oos_surface_transport_acknowledge(surface_sockets[0], presented);
-      if (!presented || acknowledged != 0) {
-        error_ = !presented ? "OOS compositor rejected the WPE surface"
-                            : errorText("acknowledge WPE frame", acknowledged);
+      if (!presentation_queue.enqueue(frame, packet.submitted_at_ns)) {
+        error_ = "enqueue WPE surface frame failed";
         success = false;
         break;
-      }
-      ++presented_frames;
-      if (trace_frames) {
-        std::fprintf(stderr, "OOS WPE host presented frame=%llu\n",
-                     static_cast<unsigned long long>(presented_frames));
-        std::fflush(stderr);
       }
     }
     if (input_.poll(0, sendKey, &key_context) < 0 || key_context.result != 0) {
@@ -351,20 +617,29 @@ bool WpeAppHost::run(const apps::AppLaunch &launch,
       break;
   }
 
-  close(surface_sockets[0]);
-  close(input_sockets[0]);
-  for (const auto &[buffer_id, retained_buffer] : surface_buffers) {
-    (void)buffer_id;
-    AHardwareBuffer_release(retained_buffer);
+  presentation_queue.stop();
+  const uint64_t presented_frames = presentation_queue.presentedFrames();
+  if (!presentation_queue.healthy() && success) {
+    error_ = "WPE surface presentation queue failed";
+    success = false;
   }
   const bool externally_stopped =
       (stop_requested && *stop_requested) || input_.stopRequested();
+  // Keep all service channels alive while the runner tears down WebKit. Closing
+  // them first makes both the GLib HUP sources and SIGTERM initiate shutdown at
+  // once, which is unsafe in the Android WPE backend during view destruction.
   if (!childExited(child, child_status))
     stopChild(child);
   else if (!externally_stopped &&
            (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)) {
     error_ = "WPE runner exited unsuccessfully";
     success = false;
+  }
+  close(surface_sockets[0]);
+  close(input_sockets[0]);
+  for (const auto &[buffer_id, retained_buffer] : surface_buffers) {
+    (void)buffer_id;
+    AHardwareBuffer_release(retained_buffer);
   }
   stopDeviceApi();
   if (!device_api_success) {

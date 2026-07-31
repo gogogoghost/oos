@@ -41,6 +41,9 @@ if [ -f "$OOS_PERSIST_DIR/system/runtime.conf" ]; then
   if [ -z "${OOS_TRACE_WPE_FRAMES+x}" ]; then
     OOS_TRACE_WPE_FRAMES=$(runtime_config_value OOS_TRACE_WPE_FRAMES)
   fi
+  if [ -z "${OOS_PROFILE_WPE_FRAMES+x}" ]; then
+    OOS_PROFILE_WPE_FRAMES=$(runtime_config_value OOS_PROFILE_WPE_FRAMES)
+  fi
   if [ -z "${OOS_TRACE_WEBAUDIO+x}" ]; then
     OOS_TRACE_WEBAUDIO=$(runtime_config_value OOS_TRACE_WEBAUDIO)
   fi
@@ -53,7 +56,8 @@ if [ -f "$OOS_PERSIST_DIR/system/runtime.conf" ]; then
 fi
 for runtime_switch in "${OOS_ENABLE_INSPECTOR:-0}" \
   "${OOS_TRACE_WEB_CONSOLE:-0}" "${OOS_TRACE_DEVICE_API:-0}" \
-  "${OOS_TRACE_WPE_FRAMES:-0}" "${OOS_TRACE_WEBAUDIO:-0}"; do
+  "${OOS_TRACE_WPE_FRAMES:-0}" "${OOS_PROFILE_WPE_FRAMES:-0}" \
+  "${OOS_TRACE_WEBAUDIO:-0}"; do
   case "$runtime_switch" in
     0|1) ;;
     *) echo "invalid boolean in runtime.conf: $runtime_switch" >&2; exit 1 ;;
@@ -74,9 +78,14 @@ if [ "$OOS_WEB_AUDIO_NICE" -lt -20 ] || [ "$OOS_WEB_AUDIO_NICE" -gt 19 ]; then
 fi
 export OOS_ENABLE_INSPECTOR OOS_TRACE_WEB_CONSOLE OOS_TRACE_DEVICE_API
 export OOS_TRACE_WPE_FRAMES
+export OOS_PROFILE_WPE_FRAMES
 export OOS_TRACE_WEBAUDIO
 export OOS_INSPECTOR_ADDRESS
 export OOS_WEB_AUDIO_NICE
+
+if [ -n "${OOS_AUDIO_READY_MODE:-}" ]; then
+  wait_for_audio_runtime "$OOS_AUDIO_READY_MODE"
+fi
 
 setprop ctl.stop b2g 2>/dev/null || true
 setprop ctl.stop b2gkillerd 2>/dev/null || true

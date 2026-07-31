@@ -17,7 +17,9 @@ PATCH_FILES=(
   "$ROOT_DIR/system/patches/wpe-android-cerbero-webassembly-off-jit-build.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-localhost-http-scheme.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android-webaudio-continuous.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-android-webaudio-nonblocking.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-wpebackend-seqpacket.patch"
+  "$ROOT_DIR/system/patches/wpe-android-cerbero-wpebackend-async-buffer.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-wavpack.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-android23-flac.patch"
   "$ROOT_DIR/system/patches/wpe-android-cerbero-openssl3.patch"
@@ -32,8 +34,10 @@ SOURCE_PATCHES=(
   "$ROOT_DIR/system/patches/wpewebkit-webassembly-off-jit-build.patch:recipes/wpewebkit/0008-OOS-webassembly-off-jit-build.patch"
   "$ROOT_DIR/system/patches/wpewebkit-localhost-http-scheme.patch:recipes/wpewebkit/0009-OOS-localhost-http-scheme.patch"
   "$ROOT_DIR/system/patches/wpewebkit-android-webaudio-continuous.patch:recipes/wpewebkit/0010-OOS-Android-continuous-WebAudio.patch"
+  "$ROOT_DIR/system/patches/wpewebkit-android-webaudio-nonblocking.patch:recipes/wpewebkit/0011-OOS-Android-nonblocking-WebAudio.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-gralloc0.patch:recipes/wpebackend-android/0001-OOS-RGB565-and-Android23-buffer.patch"
   "$ROOT_DIR/system/patches/wpebackend-android-seqpacket-ipc.patch:recipes/wpebackend-android/0002-OOS-seqpacket-renderer-IPC.patch"
+  "$ROOT_DIR/system/patches/wpebackend-android-async-buffer-lifetime.patch:recipes/wpebackend-android/0003-OOS-async-buffer-lifetime.patch"
   "$ROOT_DIR/system/patches/libtasn1-android-opaque-file.patch:recipes/libtasn1/0002-Android-opaque-FILE.patch"
 )
 
@@ -117,10 +121,18 @@ for patch_file in "${PATCH_FILES[@]}"; do
        rg -q -- '0010-OOS-Android-continuous-WebAudio.patch' \
          "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
     echo "Cerbero recipe preserves continuous Android WebAudio output."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-android-webaudio-nonblocking.patch ]] && \
+       rg -q -- '0011-OOS-Android-nonblocking-WebAudio.patch' \
+         "$CERBERO_DIR/recipes/wpewebkit.recipe"; then
+    echo "Cerbero recipe keeps Android WebAudio state changes nonblocking."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-wpebackend-seqpacket.patch ]] && \
        rg -q -- '0002-OOS-seqpacket-renderer-IPC.patch' \
          "$CERBERO_DIR/recipes/wpebackend-android.recipe"; then
     echo "WPEBackend Android recipe preserves IPC boundaries and compositor-thread replies."
+  elif [[ $(basename "$patch_file") == wpe-android-cerbero-wpebackend-async-buffer.patch ]] && \
+       rg -q -- '0003-OOS-async-buffer-lifetime.patch' \
+         "$CERBERO_DIR/recipes/wpebackend-android.recipe"; then
+    echo "WPEBackend Android recipe preserves asynchronously committed buffer lifetimes."
   elif [[ $(basename "$patch_file") == wpe-android-cerbero-android23-wavpack.patch ]] && \
        rg -q -- 'HAVE_FSEEKO=OFF' "$CERBERO_DIR/recipes/wavpack.recipe"; then
     echo "Cerbero recipe has the Android 23 WavPack compatibility fix."

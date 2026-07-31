@@ -26,10 +26,15 @@
 #include <memory>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 struct AHardwareBuffer;
-extern "C" EGLClientBuffer EGLAPIENTRY
+extern "C" {
+void AHardwareBuffer_acquire(AHardwareBuffer *buffer);
+void AHardwareBuffer_release(AHardwareBuffer *buffer);
+EGLClientBuffer EGLAPIENTRY
 eglGetNativeClientBufferANDROID(const AHardwareBuffer *buffer);
+}
 
 #include "HWC2.h"
 #include "oos/nokia2780/display_control.h"
@@ -38,6 +43,7 @@ namespace oos::nokia2780 {
 namespace {
 
 constexpr useconds_t kPanelTransferSettleUs = 150000;
+constexpr size_t kTargetBufferCount = 2;
 constexpr char kPrimaryBacklight[] = "/sys/class/leds/lcd-backlight/brightness";
 
 class DisplayCallback final : public HWC2::ComposerCallback {
@@ -98,9 +104,29 @@ bool finiteRect(const OosGfxDrawCommand &command) {
 
 class PrimaryGlesDisplay::Impl final : public runtime::GlesFrameTarget {
 public:
+  struct TargetBuffer {
+    android::sp<android::GraphicBuffer> buffer;
+    android::sp<android::Fence> present_fence;
+    EGLImageKHR image = EGL_NO_IMAGE_KHR;
+    GLuint texture = 0;
+  };
+
   Impl() : gles_(*this) {}
 
   ~Impl() { shutdown(); }
+
+  bool detachRenderContext() {
+    return egl_display_ != EGL_NO_DISPLAY &&
+           eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                          EGL_NO_CONTEXT) == EGL_TRUE;
+  }
+
+  bool attachRenderContext() {
+    return egl_display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT &&
+           pbuffer_ != EGL_NO_SURFACE &&
+           eglMakeCurrent(egl_display_, pbuffer_, pbuffer_, context_) ==
+               EGL_TRUE;
+  }
 
   bool initialize() {
     if (initialized_)
@@ -137,18 +163,21 @@ public:
       return false;
     }
 
-    target_ = new android::GraphicBuffer(
-        PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight,
-        android::PIXEL_FORMAT_RGB_565, 1,
-        static_cast<uint64_t>(GRALLOC_USAGE_HW_RENDER |
-                              GRALLOC_USAGE_HW_COMPOSER),
-        "oos-wasm-primary-target");
-    if (target_->initCheck() != android::NO_ERROR || !target_->handle ||
-        !initializeEgl() || !initializeProgram()) {
-      return false;
+    for (TargetBuffer &target : targets_) {
+      target.buffer = new android::GraphicBuffer(
+          PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight,
+          android::PIXEL_FORMAT_RGB_565, 1,
+          static_cast<uint64_t>(GRALLOC_USAGE_HW_RENDER |
+                                GRALLOC_USAGE_HW_COMPOSER),
+          "oos-wasm-primary-target");
+      if (target.buffer->initCheck() != android::NO_ERROR ||
+          !target.buffer->handle) {
+        return false;
+      }
     }
+    if (!initializeEgl() || !initializeProgram() || !beginFrame())
+      return false;
 
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
     glViewport(0, 0, PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight);
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -158,9 +187,10 @@ public:
     usleep(kPanelTransferSettleUs);
     initialized_ = true;
     std::fprintf(stderr,
-                 "OOS GLES display initialized: RGB565 %ux%u, GLES=%s\n",
+                 "OOS GLES display initialized: RGB565 %ux%u targets=%zu, "
+                 "GLES=%s\n",
                  PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight,
-                 glGetString(GL_VERSION));
+                 targets_.size(), glGetString(GL_VERSION));
     return true;
   }
 
@@ -214,20 +244,20 @@ public:
         eglGetProcAddress("glEGLImageTargetTexture2DOES"));
     if (!create_image_ || !destroy_image_ || !image_target_)
       return false;
-    target_image_ = create_image_(
-        egl_display_, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
-        reinterpret_cast<EGLClientBuffer>(target_->getNativeBuffer()), nullptr);
-    if (target_image_ == EGL_NO_IMAGE_KHR)
-      return false;
-    glGenTextures(1, &target_texture_);
-    glBindTexture(GL_TEXTURE_2D, target_texture_);
-    image_target_(GL_TEXTURE_2D,
-                  reinterpret_cast<GLeglImageOES>(target_image_));
+    for (TargetBuffer &target : targets_) {
+      target.image = create_image_(
+          egl_display_, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
+          reinterpret_cast<EGLClientBuffer>(target.buffer->getNativeBuffer()),
+          nullptr);
+      if (target.image == EGL_NO_IMAGE_KHR)
+        return false;
+      glGenTextures(1, &target.texture);
+      glBindTexture(GL_TEXTURE_2D, target.texture);
+      image_target_(GL_TEXTURE_2D,
+                    reinterpret_cast<GLeglImageOES>(target.image));
+    }
     glGenFramebuffers(1, &framebuffer_);
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           target_texture_, 0);
-    return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    return bindTarget(render_target_);
   }
 
   bool initializeProgram() {
@@ -315,7 +345,8 @@ public:
         static_cast<uint8_t>(clear_rgba >> 16),
         static_cast<uint8_t>(clear_rgba >> 24),
     };
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    if (!beginFrame())
+      return false;
     glViewport(0, 0, PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight);
     glDisable(GL_SCISSOR_TEST);
     glClearColor(clear[0] / 255.0f, clear[1] / 255.0f, clear[2] / 255.0f,
@@ -407,7 +438,10 @@ public:
         {{240, 320}, {1, 1}, {255, 255, 255, 255}},
     };
     constexpr uint16_t indices[] = {0, 1, 2, 2, 1, 3};
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    if (!beginFrame()) {
+      glDeleteTextures(1, &texture);
+      return false;
+    }
     glViewport(0, 0, PrimaryGlesDisplay::kWidth, PrimaryGlesDisplay::kHeight);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
@@ -440,8 +474,7 @@ public:
         frame.buffer_type !=
             compositor::NativeBufferType::AndroidHardwareBuffer ||
         frame.buffer_width != PrimaryGlesDisplay::kWidth ||
-        frame.buffer_height != PrimaryGlesDisplay::kHeight ||
-        !waitPresentFence()) {
+        frame.buffer_height != PrimaryGlesDisplay::kHeight || !beginFrame()) {
       if (frame.acquire_fence_fd >= 0)
         close(frame.acquire_fence_fd);
       return false;
@@ -454,29 +487,11 @@ public:
         return false;
       }
     }
-    EGLClientBuffer native = eglGetNativeClientBufferANDROID(
-        static_cast<AHardwareBuffer *>(frame.buffer));
-    if (!native) {
-      std::fprintf(stderr, "OOS failed to obtain Android native buffer\n");
+    ExternalSurface *external =
+        externalSurface(static_cast<AHardwareBuffer *>(frame.buffer));
+    if (!external)
       return false;
-    }
-    const EGLImageKHR image =
-        create_image_(egl_display_, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
-                      native, nullptr);
-    if (image == EGL_NO_IMAGE_KHR) {
-      std::fprintf(stderr, "OOS external eglCreateImageKHR failed: 0x%x\n",
-                   eglGetError());
-      return false;
-    }
-
-    GLuint texture = 0;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    image_target_(GL_TEXTURE_2D, reinterpret_cast<GLeglImageOES>(image));
+    glBindTexture(GL_TEXTURE_2D, external->texture);
 
     constexpr OosGfxVertex vertices[] = {
         {{0, 0}, {0, 0}, {255, 255, 255, 255}},
@@ -509,8 +524,6 @@ public:
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
     glFinish();
-    glDeleteTextures(1, &texture);
-    destroy_image_(egl_display_, image);
     const GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
       std::fprintf(stderr, "OOS external surface GL error: 0x%x\n", error);
@@ -524,7 +537,7 @@ public:
       return false;
     if (!revealed_) {
       usleep(kPanelTransferSettleUs);
-      if (!presentTarget())
+      if (!repeatLastTarget())
         return false;
       usleep(kPanelTransferSettleUs);
       if (!setBacklight(255))
@@ -536,11 +549,15 @@ public:
     return true;
   }
 
-  bool waitPresentFence() {
-    if (!present_fence_ || !present_fence_->isValid())
+  bool waitPresentFence(size_t target_index) {
+    if (target_index >= targets_.size() ||
+        !targets_[target_index].present_fence ||
+        !targets_[target_index].present_fence->isValid()) {
       return true;
-    const int result = present_fence_->waitForever("oos-compositor-present");
-    present_fence_.clear();
+    }
+    const int result = targets_[target_index].present_fence->waitForever(
+        "oos-compositor-present");
+    targets_[target_index].present_fence.clear();
     if (result == android::NO_ERROR)
       return true;
     std::fprintf(stderr, "OOS HWC2 present fence wait failed: %d\n", result);
@@ -548,11 +565,27 @@ public:
   }
 
   bool presentTarget() {
-    if (!waitPresentFence())
+    const size_t target_index = render_target_;
+    if (!presentTarget(target_index))
       return false;
-    if (display_->setClientTarget(0, target_, android::Fence::NO_FENCE,
-                                  android::ui::Dataspace::UNKNOWN) !=
-        HWC2::Error::None) {
+    last_presented_target_ = target_index;
+    render_target_ = (render_target_ + 1) % targets_.size();
+    return true;
+  }
+
+  bool repeatLastTarget() {
+    return last_presented_target_ < targets_.size() &&
+           presentTarget(last_presented_target_);
+  }
+
+  bool presentTarget(size_t target_index) {
+    if (target_index >= targets_.size() || !targets_[target_index].buffer ||
+        !waitPresentFence(target_index)) {
+      return false;
+    }
+    if (display_->setClientTarget(
+            0, targets_[target_index].buffer, android::Fence::NO_FENCE,
+            android::ui::Dataspace::UNKNOWN) != HWC2::Error::None) {
       return false;
     }
     uint32_t changes = 0;
@@ -564,7 +597,8 @@ public:
     }
     if ((validation != HWC2::Error::None &&
          validation != HWC2::Error::HasChanges) ||
-        display_->present(&present_fence_) != HWC2::Error::None) {
+        display_->present(&targets_[target_index].present_fence) !=
+            HWC2::Error::None) {
       std::fprintf(
           stderr,
           "OOS HWC present failed: validate=%d changes=%u requests=%u\n",
@@ -574,19 +608,41 @@ public:
     return true;
   }
 
+  bool bindTarget(size_t target_index) {
+    if (target_index >= targets_.size() || !framebuffer_ ||
+        !targets_[target_index].texture) {
+      return false;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           targets_[target_index].texture, 0);
+    return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+  }
+
+  bool beginFrame() {
+    return waitPresentFence(render_target_) && bindTarget(render_target_);
+  }
+
+  void waitAllPresentFences() {
+    for (size_t index = 0; index < targets_.size(); ++index)
+      waitPresentFence(index);
+  }
+
   void refresh() {
-    if (initialized_)
-      presentTarget();
+    if (initialized_ && last_presented_target_ < targets_.size())
+      repeatLastTarget();
   }
 
   void shutdown() {
     if (owns_display_state_)
       setBacklight(0);
+    waitAllPresentFences();
     const bool context_current =
         egl_display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT &&
         pbuffer_ != EGL_NO_SURFACE &&
         eglMakeCurrent(egl_display_, pbuffer_, pbuffer_, context_) == EGL_TRUE;
     if (context_current) {
+      clearExternalSurfaces(true);
       gles_.reset();
       if (program_)
         glDeleteProgram(program_);
@@ -596,11 +652,18 @@ public:
         glDeleteRenderbuffers(1, &depth_buffer_);
       if (framebuffer_)
         glDeleteFramebuffers(1, &framebuffer_);
-      if (target_texture_)
-        glDeleteTextures(1, &target_texture_);
+      for (TargetBuffer &target : targets_) {
+        if (target.texture)
+          glDeleteTextures(1, &target.texture);
+      }
+    } else
+      clearExternalSurfaces(false);
+    if (destroy_image_) {
+      for (TargetBuffer &target : targets_) {
+        if (target.image != EGL_NO_IMAGE_KHR)
+          destroy_image_(egl_display_, target.image);
+      }
     }
-    if (target_image_ != EGL_NO_IMAGE_KHR && destroy_image_)
-      destroy_image_(egl_display_, target_image_);
     if (egl_display_ != EGL_NO_DISPLAY) {
       eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE,
                      EGL_NO_CONTEXT);
@@ -616,18 +679,16 @@ public:
       (void)display_->setPowerMode(HWC2::PowerMode::Off);
     if (power_ && owns_display_state_)
       power_->setInteractive(false);
-    target_.clear();
+    for (TargetBuffer &target : targets_)
+      target = {};
     callback_.reset();
     device_.reset();
     display_ = nullptr;
     layer_ = nullptr;
     power_.clear();
-    present_fence_.clear();
     egl_display_ = EGL_NO_DISPLAY;
     context_ = EGL_NO_CONTEXT;
     pbuffer_ = EGL_NO_SURFACE;
-    target_image_ = EGL_NO_IMAGE_KHR;
-    target_texture_ = 0;
     framebuffer_ = 0;
     depth_buffer_ = 0;
     stencil_buffer_ = 0;
@@ -635,10 +696,94 @@ public:
     initialized_ = false;
     revealed_ = false;
     owns_display_state_ = false;
+    render_target_ = 0;
+    last_presented_target_ = targets_.size();
   }
 
 private:
   friend class PrimaryGlesDisplay;
+
+  struct ExternalSurface {
+    AHardwareBuffer *buffer = nullptr;
+    EGLImageKHR image = EGL_NO_IMAGE_KHR;
+    GLuint texture = 0;
+    uint64_t last_used = 0;
+  };
+
+  void destroyExternalSurface(ExternalSurface &surface, bool destroy_egl) {
+    if (destroy_egl && surface.texture)
+      glDeleteTextures(1, &surface.texture);
+    if (destroy_egl && surface.image != EGL_NO_IMAGE_KHR && destroy_image_)
+      destroy_image_(egl_display_, surface.image);
+    if (surface.buffer)
+      AHardwareBuffer_release(surface.buffer);
+    surface = {};
+  }
+
+  void clearExternalSurfaces(bool destroy_egl) {
+    if (destroy_egl && !external_surfaces_.empty())
+      glFinish();
+    for (ExternalSurface &surface : external_surfaces_)
+      destroyExternalSurface(surface, destroy_egl);
+    external_surfaces_.clear();
+  }
+
+  ExternalSurface *externalSurface(AHardwareBuffer *buffer) {
+    for (ExternalSurface &surface : external_surfaces_) {
+      if (surface.buffer == buffer) {
+        surface.last_used = ++external_surface_epoch_;
+        return &surface;
+      }
+    }
+
+    constexpr size_t kMaximumCachedSurfaces = 8;
+    if (external_surfaces_.size() >= kMaximumCachedSurfaces) {
+      auto oldest = std::min_element(
+          external_surfaces_.begin(), external_surfaces_.end(),
+          [](const ExternalSurface &left, const ExternalSurface &right) {
+            return left.last_used < right.last_used;
+          });
+      glFinish();
+      destroyExternalSurface(*oldest, true);
+      external_surfaces_.erase(oldest);
+    }
+
+    EGLClientBuffer native = eglGetNativeClientBufferANDROID(buffer);
+    if (!native) {
+      std::fprintf(stderr, "OOS failed to obtain Android native buffer\n");
+      return nullptr;
+    }
+    ExternalSurface surface;
+    surface.buffer = buffer;
+    AHardwareBuffer_acquire(buffer);
+    surface.image = create_image_(egl_display_, EGL_NO_CONTEXT,
+                                  EGL_NATIVE_BUFFER_ANDROID, native, nullptr);
+    if (surface.image == EGL_NO_IMAGE_KHR) {
+      std::fprintf(stderr, "OOS external eglCreateImageKHR failed: 0x%x\n",
+                   eglGetError());
+      destroyExternalSurface(surface, false);
+      return nullptr;
+    }
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    glGenTextures(1, &surface.texture);
+    glBindTexture(GL_TEXTURE_2D, surface.texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    image_target_(GL_TEXTURE_2D,
+                  reinterpret_cast<GLeglImageOES>(surface.image));
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+      std::fprintf(stderr, "OOS external EGLImage bind failed: 0x%x\n", error);
+      destroyExternalSurface(surface, true);
+      return nullptr;
+    }
+    surface.last_used = ++external_surface_epoch_;
+    external_surfaces_.push_back(surface);
+    return &external_surfaces_.back();
+  }
 
   bool makeGlesContextCurrent() override {
     return egl_display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT &&
@@ -649,7 +794,8 @@ private:
   bool bindGlesSurface(bool require_depth, bool require_stencil) override {
     while (glGetError() != GL_NO_ERROR) {
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    if (!beginFrame())
+      return false;
     bool created_depth = false;
     bool created_stencil = false;
     if (require_depth && !depth_buffer_) {
@@ -707,16 +853,13 @@ private:
   std::unique_ptr<DisplayCallback> callback_;
   HWC2::Display *display_ = nullptr;
   HWC2::Layer *layer_ = nullptr;
-  android::sp<android::GraphicBuffer> target_;
-  android::sp<android::Fence> present_fence_;
+  std::array<TargetBuffer, kTargetBufferCount> targets_;
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
   EGLContext context_ = EGL_NO_CONTEXT;
   EGLSurface pbuffer_ = EGL_NO_SURFACE;
-  EGLImageKHR target_image_ = EGL_NO_IMAGE_KHR;
   PFNEGLCREATEIMAGEKHRPROC create_image_ = nullptr;
   PFNEGLDESTROYIMAGEKHRPROC destroy_image_ = nullptr;
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_target_ = nullptr;
-  GLuint target_texture_ = 0;
   GLuint framebuffer_ = 0;
   GLuint depth_buffer_ = 0;
   GLuint stencil_buffer_ = 0;
@@ -728,6 +871,10 @@ private:
   bool initialized_ = false;
   bool revealed_ = false;
   bool owns_display_state_ = false;
+  size_t render_target_ = 0;
+  size_t last_presented_target_ = kTargetBufferCount;
+  uint64_t external_surface_epoch_ = 0;
+  std::vector<ExternalSurface> external_surfaces_;
 };
 
 PrimaryGlesDisplay::PrimaryGlesDisplay() : impl_(std::make_unique<Impl>()) {}
@@ -742,6 +889,14 @@ bool PrimaryGlesDisplay::showBootFrame(const uint16_t *rgb565_pixels) {
 
 bool PrimaryGlesDisplay::presentSurface(const compositor::SurfaceFrame &frame) {
   return impl_->presentSurface(frame);
+}
+
+bool PrimaryGlesDisplay::detachRenderContext() {
+  return impl_->detachRenderContext();
+}
+
+bool PrimaryGlesDisplay::attachRenderContext() {
+  return impl_->attachRenderContext();
 }
 
 void PrimaryGlesDisplay::refresh() { impl_->refresh(); }

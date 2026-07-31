@@ -137,10 +137,12 @@ static int probe_egl(void) {
   }
 
   const char *extensions = eglQueryString(display, EGL_EXTENSIONS);
-  printf("EGL: version=%d.%d vendor=%s native_buffer=%d image_base=%d\n", major,
-         minor, eglQueryString(display, EGL_VENDOR),
+  printf("EGL: version=%d.%d vendor=%s native_buffer=%d image_base=%d "
+         "native_fence=%d\n",
+         major, minor, eglQueryString(display, EGL_VENDOR),
          has_extension(extensions, "EGL_ANDROID_image_native_buffer"),
-         has_extension(extensions, "EGL_KHR_image_base"));
+         has_extension(extensions, "EGL_KHR_image_base"),
+         has_extension(extensions, "EGL_ANDROID_native_fence_sync"));
 
   const EGLint config_attributes[] = {EGL_SURFACE_TYPE,
                                       EGL_PBUFFER_BIT,

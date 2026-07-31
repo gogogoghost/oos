@@ -67,8 +67,9 @@ int main() {
   while (true) {
     OosSurfaceTransportFrame packet{};
     AHardwareBuffer *buffer = nullptr;
-    const int receive_result =
-        oos_surface_transport_receive(connection, &packet, &buffer, 15000);
+    int acquire_fence_fd = -1;
+    const int receive_result = oos_surface_transport_receive(
+        connection, &packet, &buffer, &acquire_fence_fd, 15000);
     if (receive_result == 0)
       break;
     if (receive_result < 0) {
@@ -98,13 +99,21 @@ int main() {
     AHardwareBuffer_describe(buffer, &description);
     oos::compositor::SurfaceFrame frame;
     frame.surface_id = packet.surface_id;
+    frame.sequence = packet.sequence;
     frame.buffer = buffer;
     frame.buffer_width = description.width;
     frame.buffer_height = description.height;
+    frame.acquire_fence_fd = acquire_fence_fd;
     frame.width = packet.width;
     frame.height = packet.height;
     const bool presented = compositor.presentSurface(frame);
-    if (oos_surface_transport_acknowledge(connection, presented) != 0) {
+    const OosSurfaceTransportRelease release = {
+        .sequence = packet.sequence,
+        .presented_at_ns = packet.submitted_at_ns,
+        .accepted = static_cast<uint8_t>(presented),
+        .reserved = {},
+    };
+    if (oos_surface_transport_release(connection, &release) != 0) {
       success = false;
       break;
     }
