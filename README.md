@@ -8,11 +8,13 @@ fallback.
 
 This branch is deliberately browser-free. It contains no WPE WebKit runtime,
 JavaScript engine, HTML launcher, or KaiOS Web application compatibility layer.
-The production Launcher is Rust/egui compiled through the OOS WIT SDK.
+The production SystemUI is process-local C++/LVGL. Dear ImGui has a native
+GPU-mesh backend for diagnostics and system tools. Rust/egui remains the first
+WIT framework adapter and regression application for third-party Wasm apps.
 
 ## Repository Layout
 
-- `apps/launcher`: the production egui Launcher guest.
+- `apps/launcher`: the egui/WIT framework integration application.
 - `apps/sdk`: versioned WIT interfaces and Rust framework adapters.
 - `system/src/oos`: native runtime, compositor, application registry, storage,
   services, and device-independent hardware contracts.
@@ -45,15 +47,15 @@ Build the native guest and both device targets:
 
 ```sh
 ./scripts/fetch-wamr.sh
-make native-app-aot
+./scripts/fetch-ui-frameworks.sh
 make system DEVICE=nokia-2780-flip
 make system DEVICE=nokia-8110-4g
 ```
 
 Useful outputs are:
 
-- `build/native-apps/launcher.wasm`: portable Launcher module.
-- `build/native-apps/launcher.aot`: ARMv7 WAMR AOT Launcher.
+- `build/native-apps/launcher.wasm`: portable egui SDK test module.
+- `build/native-apps/launcher.aot`: ARMv7 WAMR AOT SDK test module.
 - `build/android-<device>/bin/oos`: device-specific system process.
 - `build/android-<device>/bin/tests/<device>/`: device tests, when enabled.
 
@@ -106,8 +108,8 @@ resource directory:
   --device nokia-2780-flip --activate --tgz
 ```
 
-The resource package contains `oos`, the native Launcher package, fonts, and
-licenses. The boot splash is compiled into `oos`; it is not deployed as a
+The resource package contains `oos`, shared application fonts, and licenses.
+The LVGL SystemUI and boot splash are compiled into `oos`; they are not deployed as
 separate file. The package does not contain a browser engine or Web helper
 processes.
 See [docs/deployment.md](docs/deployment.md) for the mount and upgrade contract,

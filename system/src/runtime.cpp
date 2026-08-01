@@ -18,6 +18,7 @@
 #include "oos/input/key_input.h"
 #include "oos/resources/boot_splash.h"
 #include "oos/runtime/native_app_manager.h"
+#include "oos/ui/system_ui.h"
 
 namespace oos::platform {
 namespace {
@@ -30,12 +31,6 @@ using oos::input::KeyInputSource;
 using oos::runtime::NativeAppLaunchOptions;
 using oos::runtime::NativeAppManager;
 
-#ifndef OOS_DEFAULT_LAUNCHER_PACKAGE
-#define OOS_DEFAULT_LAUNCHER_PACKAGE                                           \
-  "/opt/oos/packages/org.orangeos.launcher/application.zip"
-#endif
-constexpr const char *kDefaultLauncherPackage = OOS_DEFAULT_LAUNCHER_PACKAGE;
-constexpr const char *kDefaultLauncherId = "org.orangeos.launcher";
 constexpr int kFrameIntervalMs = 33;
 
 volatile std::sig_atomic_t g_stop_requested = 0;
@@ -63,15 +58,10 @@ bool importBundledApp(oos::apps::AppRepository &repository,
   if (!validAppId(app_id))
     return false;
   std::string package_path;
-  if (std::strcmp(app_id, kDefaultLauncherId) == 0) {
-    package_path =
-        environmentOr("OOS_LAUNCHER_PACKAGE", kDefaultLauncherPackage);
-  } else {
-    package_path = environmentOr("OOS_PACKAGE_ROOT", "/opt/oos/packages");
-    package_path += "/";
-    package_path += app_id;
-    package_path += "/application.zip";
-  }
+  package_path = environmentOr("OOS_PACKAGE_ROOT", "/opt/oos/packages");
+  package_path += "/";
+  package_path += app_id;
+  package_path += "/application.zip";
   oos::apps::AppInstallOptions options;
   options.app_id = app_id;
   return repository.install(package_path.c_str(), options);
@@ -122,18 +112,29 @@ bool loadBootSplash(uint32_t expected_width, uint32_t expected_height,
   return true;
 }
 
-struct InputContext {
+struct NativeInputContext {
   NativeAppManager *apps;
   bool success = true;
 };
 
-void dispatchKey(void *data, const KeyEvent &event) {
-  auto *context = static_cast<InputContext *>(data);
+void dispatchNativeKey(void *data, const KeyEvent &event) {
+  auto *context = static_cast<NativeInputContext *>(data);
   if (!context->apps->dispatchKey(event, monotonicMicros())) {
     std::fprintf(stderr, "WASM key dispatch failed: %s\n",
                  context->apps->lastError());
     context->success = false;
   }
+}
+
+struct SystemUiInputContext {
+  oos::ui::SystemUi *system_ui;
+  bool success = true;
+};
+
+void dispatchSystemUiKey(void *data, const KeyEvent &event) {
+  auto *context = static_cast<SystemUiInputContext *>(data);
+  if (!context->system_ui->dispatchKey(event))
+    context->success = false;
 }
 
 void printUsage(const char *program) {
@@ -195,8 +196,9 @@ int run(int argc, char **argv) {
   if (repository_result >= 0)
     return repository_result;
 
+  const bool run_system_ui = argc == 1;
   const char *raw_module = nullptr;
-  const char *app_id = environmentOr("OOS_LAUNCHER_APP", kDefaultLauncherId);
+  const char *app_id = nullptr;
   if (argc == 2) {
     // Keep the original positional module form for existing device diagnostics.
     raw_module = argv[1];
@@ -211,9 +213,9 @@ int run(int argc, char **argv) {
 
   oos::apps::AppLaunch app_launch;
   NativeAppLaunchOptions native_launch;
-  if (raw_module) {
+  if (!run_system_ui && raw_module) {
     native_launch.module_path = raw_module;
-  } else {
+  } else if (!run_system_ui) {
     if (!repository.resolve(app_id, app_launch.app)) {
       if (!importBundledApp(repository, app_id)) {
         std::fprintf(stderr, "import bundled application %s failed: %s\n",
@@ -262,6 +264,37 @@ int run(int argc, char **argv) {
   Compositor compositor(display);
   std::signal(SIGINT, stopRuntime);
   std::signal(SIGTERM, stopRuntime);
+
+  if (run_system_ui) {
+    oos::ui::SystemUi system_ui(compositor, repository);
+    if (!system_ui.initialize()) {
+      std::fprintf(stderr, "failed to start SystemUI: %s\n",
+                   system_ui.lastError().c_str());
+      platform_device->shutdown();
+      return 1;
+    }
+    std::fprintf(stderr, "OOS LVGL SystemUI started on %s\n", descriptor.id);
+    std::fflush(stderr);
+    SystemUiInputContext input_context{&system_ui};
+    uint32_t next_delay_ms = 1;
+    while (!g_stop_requested && !input.stopRequested()) {
+      if (!system_ui.frame(monotonicMicros(), next_delay_ms)) {
+        std::fprintf(stderr, "SystemUI frame failed: %s\n",
+                     system_ui.lastError().c_str());
+        break;
+      }
+      const int poll_result =
+          input.poll(static_cast<int>(next_delay_ms), dispatchSystemUiKey,
+                     &input_context);
+      if (poll_result < 0 || !input_context.success)
+        break;
+    }
+    const bool stopped = g_stop_requested || input.stopRequested();
+    system_ui.shutdown();
+    platform_device->shutdown();
+    return stopped ? 0 : 1;
+  }
+
   NativeAppManager apps(compositor, *platform_device);
   const char *runtime_id = raw_module ? "diagnostic" : app_id;
   if (!apps.load(runtime_id, native_launch) || !apps.activate(runtime_id)) {
@@ -274,10 +307,10 @@ int run(int argc, char **argv) {
                native_launch.module_path);
   std::fflush(stderr);
 
-  InputContext input_context{&apps};
+  NativeInputContext input_context{&apps};
   auto next_frame = std::chrono::steady_clock::now();
   while (!g_stop_requested && !input.stopRequested()) {
-    if (input.poll(0, dispatchKey, &input_context) < 0 ||
+    if (input.poll(0, dispatchNativeKey, &input_context) < 0 ||
         !input_context.success) {
       break;
     }

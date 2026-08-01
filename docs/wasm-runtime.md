@@ -9,14 +9,15 @@ The host owns display lifecycle, EGL/GLES, HWC, key devices, clocks, and phone
 services. A guest can only reach interfaces in the versioned
 `oos:platform@0.1.0` WIT package.
 
-The production Launcher is the first native app. It uses egui 0.35 through the
-reusable `oos-egui` adapter and compiles to `wasm32-unknown-unknown`. It does
-not use JavaScript, a DOM, WebView, or WASI.
+The production SystemUI is a trusted, process-local LVGL component and does
+not allocate a WAMR instance. The egui 0.35 Launcher remains the first SDK
+integration app: it uses the reusable `oos-egui` adapter and compiles to
+`wasm32-unknown-unknown` without JavaScript, a DOM, WebView, or WASI.
 
 ```text
 evdev -> OOS key normalization -> oos:platform/lifecycle#event
                                   |
-                              egui Launcher
+                              Wasm application
                                   |
         textures + indexed meshes or GLES2 command batch
                                   |
@@ -155,7 +156,7 @@ that permission layer.
 
 ## Framework Compatibility
 
-egui is implemented first and validates the complete route from framework UI
+egui is the first guest framework and validates the complete route from framework UI
 to phone GPU. `oos-egui::Renderer` retains its frame buffers and handles
 texture deltas, tessellation, index rebasing, clip rectangles, and WIT
 submissions, leaving Launcher with application UI logic only. Its
@@ -169,11 +170,14 @@ iced is next: its custom renderer/backend can target the same WIT texture and
 mesh interface. The adapter must live in the SDK and avoid depending on wgpu
 because the device graphics stack is GLES-oriented.
 
-LVGL can use C guest bindings generated from the same WIT. Its display and
-input ports can target OOS without exposing Linux devices. It can upload
-RGB565 dirty rectangles directly; a draw-unit adapter can instead emit the
-portable indexed-mesh path. imgui maps its vertices, indices, texture IDs, and
-clip rectangles to the same records. Engines that need custom shaders use the
+The built-in LVGL display and keypad ports target `GraphicsHost` without
+exposing Linux devices. LVGL renders into two 32-row RGB565 buffers, uploads
+only invalidated rectangles, and presents one GPU-composited quad. The
+process-local Dear ImGui backend translates textures, vertices, `u16` indices,
+texture IDs, and clip rectangles directly into the same host records. Both
+backends are device-independent and therefore run unchanged on the 2780,
+8110, and local target. A future guest LVGL or ImGui adapter can lower those
+same records through WIT. Engines that need custom shaders use the
 batched GLES2 interface while the host continues to own composition.
 
 ## Build And Test
@@ -210,7 +214,7 @@ about 6.2% of one CPU with 62,212 KiB RSS. AOT therefore reduced sampled CPU
 by roughly 92%.
 
 After setting the default heap to 4 MiB and using file-backed module mappings,
-one production Launcher measured 42,000 KiB RSS, 36,573 KiB PSS, and 17,024
+one egui test Launcher measured 42,000 KiB RSS, 36,573 KiB PSS, and 17,024
 KiB anonymous memory. Three simultaneously resident egui instances measured
 81,148 KiB RSS, 60,295 KiB PSS, and 40,916 KiB anonymous memory while switching
 perfectly among three independent UI states once per second. `MemAvailable`

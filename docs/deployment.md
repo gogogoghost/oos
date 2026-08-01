@@ -2,7 +2,7 @@
 
 Deployment is split into a stable bootstrap scaffold and an atomic versioned
 runtime resource (`res`). The resource contains the native `oos` executable,
-the WAMR Launcher package, fonts, and licenses. The boot splash is embedded in
+shared application fonts, and licenses. The LVGL SystemUI and boot splash are embedded in
 the `oos` executable. The resource contains no browser engine, JavaScript
 runtime, or Web helper process.
 
@@ -24,7 +24,8 @@ oos/
 ├── res -> res-1.0.0
 ├── res-1.0.0/
 │   ├── bin/oos
-│   ├── packages/org.orangeos.launcher/application.zip
+│   ├── share/fonts/ui-proportional.otf
+│   ├── share/licenses/oos/
 │   ├── manifest.env
 │   ├── SHA256SUMS
 │   └── COMPLETE
@@ -44,10 +45,9 @@ activated by a mismatched scaffold.
 
 ## Build Packages
 
-Build OOS and the ARMv7 Launcher before packaging:
+Build OOS before packaging:
 
 ```sh
-make native-app-aot
 make system DEVICE=nokia-2780-flip
 ./scripts/package-oos-scaffold.sh \
   --device nokia-2780-flip --res-version 1.0.0 --tgz

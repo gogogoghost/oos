@@ -44,5 +44,5 @@ cmake --build build/android-nokia-8110-4g -j24 \
   --target oos_test_nokia_8110_key_input
 ```
 
-On both devices, the production Launcher is the end-to-end validation for
+On both devices, the built-in LVGL SystemUI is the end-to-end validation for
 evdev discovery, normalized WIT delivery, and UI focus handling.

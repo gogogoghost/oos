@@ -8,6 +8,16 @@ The executable application runtime is:
 - `wasm-micro-runtime`: pinned WAMR 2.4.4, fetched and revision-checked by
   `scripts/fetch-wamr.sh`.
 
+The native system UI and development-tool UI backends are:
+
+- `lvgl`: pinned LVGL 9.5.0, used by the trusted process-local SystemUI.
+- `imgui`: pinned Dear ImGui 1.92.9b, exposed through the same OOS graphics
+  host for diagnostics and native tools.
+
+Fetch and revision-check both UI frameworks with
+`scripts/fetch-ui-frameworks.sh`. Neither checkout is copied into the main
+repository.
+
 The Nokia 2780 Flip build also uses Android 10-era AOSP headers and hardware
 interfaces from these local trees:
 

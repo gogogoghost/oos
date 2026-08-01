@@ -37,6 +37,14 @@ An egui `PaintCallback` is rejected explicitly because callback objects are
 backend-specific; custom GPU work must be implemented against the OOS GLES2
 interface and scheduled by an adapter rather than silently discarded.
 
+Trusted native UI uses the same contract without a Wasm boundary.
+`LvglBackend` keeps two 32-row RGB565 draw buffers, uploads LVGL invalidated
+regions into one retained host texture, then submits one full-screen quad.
+`ImguiBackend` processes the Dear ImGui 1.92 texture lifecycle and converts
+`ImDrawData` directly into OOS vertices, indices, texture handles, and clip
+commands. LVGL is the default SystemUI framework; Dear ImGui is intended for
+diagnostics and engineering tools rather than the phone shell.
+
 ## GLES2 Path
 
 The `gles` WIT interface is a programmable GLES 2.0 rendering path for engine
@@ -98,7 +106,7 @@ surface format separately and supports these upload formats:
 
 | Format | Bytes/pixel | Intended use |
 | --- | ---: | --- |
-| `a8` | 1 | font and mask atlases; sampled RGB is supplied as white |
+| `a8` | 1 | font and mask atlases; alpha coverage premultiplies the sampled color |
 | `rgb565` | 2 | opaque canvas, LVGL/J2ME framebuffers, opaque sprites |
 | `rgba4444` | 2 | lower-memory sprites and UI assets that need alpha |
 | `rgba8888` | 4 | egui color atlases and assets needing full alpha/color precision |

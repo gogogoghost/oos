@@ -312,8 +312,7 @@ public:
         "varying vec4 vColor;\n"
         "void main() {\n"
         "  vec4 sampled = texture2D(uTexture, vTexcoord);\n"
-        "  if (uTextureFormat == 0) sampled = vec4(1.0, 1.0, 1.0, "
-        "sampled.a);\n"
+        "  if (uTextureFormat == 0) sampled = vec4(sampled.a);\n"
         "  gl_FragColor = vColor * sampled;\n"
         "}\n";
     const GLuint vertex = compileShader(GL_VERTEX_SHADER, kVertexShader);

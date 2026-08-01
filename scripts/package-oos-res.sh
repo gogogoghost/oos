@@ -65,9 +65,10 @@ DEVICE_RUNTIME_LIBRARY=
 if [[ "$DEVICE" == nokia-8110-4g ]]; then
   DEVICE_RUNTIME_LIBRARY="$ROOT_DIR/build/android-$DEVICE/devices/$DEVICE/liboos-android23-buffer.so"
 fi
-NATIVE_APPS="$ROOT_DIR/build/native-apps"
 LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
+LVGL_LICENSE="$ROOT_DIR/third_party/lvgl/LICENCE.txt"
+IMGUI_LICENSE="$ROOT_DIR/third_party/imgui/LICENSE.txt"
 SYSTEM_FONT="$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
 SYSTEM_FONT_LICENSE="$ROOT_DIR/system/assets/fonts/LICENSE.txt"
 
@@ -75,11 +76,10 @@ package_require_file "$OOS_BINARY"
 if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
   package_require_file "$DEVICE_RUNTIME_LIBRARY"
 fi
-"$ROOT_DIR/scripts/build-native-app-aot.sh"
-package_require_file "$NATIVE_APPS/launcher.wasm"
-package_require_file "$NATIVE_APPS/launcher.aot"
 package_require_file "$LUCIDE_LICENSE"
 package_require_file "$WAMR_LICENSE"
+package_require_file "$LVGL_LICENSE"
+package_require_file "$IMGUI_LICENSE"
 package_require_file "$SYSTEM_FONT"
 package_require_file "$SYSTEM_FONT_LICENSE"
 
@@ -93,7 +93,6 @@ cleanup() {
 trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
-  "$STAGING/packages/org.orangeos.launcher" \
   "$STAGING/share/fonts" \
   "$STAGING/share/licenses/oos"
 
@@ -101,15 +100,14 @@ install -m 0755 "$OOS_BINARY" "$STAGING/bin/oos"
 if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
   install -m 0755 "$DEVICE_RUNTIME_LIBRARY" "$STAGING/lib/"
 fi
-"$ROOT_DIR/scripts/package-oos-wasm-app.sh" \
-  --manifest "$ROOT_DIR/apps/launcher/oos-manifest.json" \
-  --wasm "$NATIVE_APPS/launcher.wasm" \
-  --aot "$NATIVE_APPS/launcher.aot" \
-  --output "$STAGING/packages/org.orangeos.launcher/application.zip"
 install -m 0644 "$LUCIDE_LICENSE" \
   "$STAGING/share/licenses/oos/Lucide.txt"
 install -m 0644 "$WAMR_LICENSE" \
   "$STAGING/share/licenses/oos/WAMR.txt"
+install -m 0644 "$LVGL_LICENSE" \
+  "$STAGING/share/licenses/oos/LVGL.txt"
+install -m 0644 "$IMGUI_LICENSE" \
+  "$STAGING/share/licenses/oos/DearImGui.txt"
 install -m 0644 "$SYSTEM_FONT" \
   "$STAGING/share/fonts/ui-proportional.otf"
 install -m 0644 "$SYSTEM_FONT_LICENSE" \
@@ -144,7 +142,8 @@ printf '%s\n' \
   "native_app_execution=interpreter,aot" \
   "native_app_interface=oos-wit-0.1.0-core" \
   "system_font=ui-proportional.otf" \
-  "launcher_framework=egui-0.35" \
+  "system_ui=lvgl-${LVGL_VERSION#v}" \
+  "debug_ui_backend=dear-imgui-${IMGUI_VERSION#v}" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   >"$STAGING/manifest.env"

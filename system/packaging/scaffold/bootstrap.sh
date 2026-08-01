@@ -83,8 +83,6 @@ resolve_res() {
   require_file "$OOS_RES_DIR/COMPLETE" || return 1
   require_file "$OOS_RES_DIR/SHA256SUMS" || return 1
   require_file "$OOS_RES_DIR/bin/oos" || return 1
-  require_file \
-    "$OOS_RES_DIR/packages/org.orangeos.launcher/application.zip" || return 1
   if ! grep -q '^format=2$' "$OOS_RES_DIR/manifest.env" ||
       ! grep -q '^type=oos-res$' "$OOS_RES_DIR/manifest.env"; then
     echo "res package has an unsupported manifest format" >&2

@@ -18,7 +18,7 @@ help:
 		'make test-wasm         Run the WAMR host integration suite' \
 		'make local             Build OOS for the local device' \
 		'make local-rootfs      Prepare the local /opt/oos rootfs' \
-		'make run-local         Run the WIT launcher in a user namespace' \
+		'make run-local         Run the LVGL SystemUI in a user namespace' \
 		'make configure         Configure system build for DEVICE' \
 		'make system            Build the configured system target' \
 		'make package-scaffold  Package scaffold using VERSION and DEVICE' \
@@ -36,7 +36,7 @@ verify-wit: native-apps
 test-wasm:
 	CCACHE_DISABLE=1 ./scripts/test-wasm-runtime.sh
 
-configure-local: native-apps
+configure-local:
 	cmake -S system -B build/local \
 		-DBUILD_NOKIA_2780_FLIP=OFF \
 		-DBUILD_NOKIA_8110_4G=OFF \

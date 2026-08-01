@@ -57,6 +57,39 @@ if(BUILD_NOKIA_2780_FLIP)
   endif()
 endif()
 
+set(OOS_LVGL_DIR "${THIRD_PARTY_DIR}/lvgl")
+set(OOS_IMGUI_DIR "${THIRD_PARTY_DIR}/imgui")
+if(NOT EXISTS "${OOS_LVGL_DIR}/src/lv_init.c" OR
+   NOT EXISTS "${OOS_IMGUI_DIR}/imgui.cpp")
+  message(FATAL_ERROR
+    "LVGL or Dear ImGui is missing. Run scripts/fetch-ui-frameworks.sh first.")
+endif()
+
+set(LV_BUILD_CONF_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/lvgl/lv_conf.h" CACHE FILEPATH "" FORCE)
+set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
+set(LV_BUILD_LVGL_H_SIMPLE_INCLUDE ON CACHE BOOL "" FORCE)
+add_subdirectory("${OOS_LVGL_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/third_party/lvgl"
+                 EXCLUDE_FROM_ALL)
+target_compile_options(lvgl PRIVATE -Wno-unused-function -Wno-unused-variable)
+
+add_library(oos_imgui_core STATIC
+  "${OOS_IMGUI_DIR}/imgui.cpp"
+  "${OOS_IMGUI_DIR}/imgui_draw.cpp"
+  "${OOS_IMGUI_DIR}/imgui_tables.cpp"
+  "${OOS_IMGUI_DIR}/imgui_widgets.cpp")
+target_include_directories(oos_imgui_core SYSTEM PUBLIC "${OOS_IMGUI_DIR}")
+target_compile_definitions(oos_imgui_core PUBLIC
+  IMGUI_DISABLE_DEBUG_TOOLS
+  IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
+  IMGUI_DISABLE_OBSOLETE_FUNCTIONS
+  IMGUI_DISABLE_TIME_FUNCTIONS
+  IMGUI_DISABLE_TTY_FUNCTIONS)
+target_compile_options(oos_imgui_core PRIVATE
+  -fno-exceptions -fno-rtti -Wno-unused-function)
+
 add_subdirectory(runtime/wamr)
 
 add_library(oos_input STATIC src/oos/input/key_input.cpp)
@@ -107,6 +140,17 @@ target_include_directories(oos_system_services PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_system_services PUBLIC oos_app_model)
 
+add_library(oos_ui STATIC
+  src/oos/ui/imgui_backend.cpp
+  src/oos/ui/lvgl_backend.cpp
+  src/oos/ui/system_ui.cpp)
+target_include_directories(oos_ui PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_options(oos_ui PRIVATE -fno-exceptions -fno-rtti)
+target_link_libraries(oos_ui PUBLIC
+  lvgl oos_imgui_core oos_app_model)
+add_library(oos::ui ALIAS oos_ui)
+
 add_library(oos_wasm_runtime STATIC
   src/oos/runtime/native_app_manager.cpp
   src/oos/runtime/wasm_app.cpp)
@@ -144,7 +188,7 @@ if(NOT BUILD_LOCAL)
   target_link_options(oos PRIVATE -nostdlib++)
 endif()
 target_link_libraries(oos PRIVATE
-  oos_device_api oos_compositor oos_app_model oos_device_storage)
+  oos_device_api oos_compositor oos_app_model oos_device_storage oos_ui)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

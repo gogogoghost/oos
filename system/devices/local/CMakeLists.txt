@@ -41,4 +41,10 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_link_libraries(oos_test_local_keymap PRIVATE SDL3::SDL3)
   add_test(NAME local-keymap COMMAND oos_test_local_keymap
     "${OOS_LOCAL_KEYMAP_BUILD}")
+
+  add_executable(oos_test_ui_backends
+    "${CMAKE_SOURCE_DIR}/tests/host/ui_backend_test.cpp")
+  target_compile_options(oos_test_ui_backends PRIVATE -UNDEBUG)
+  target_link_libraries(oos_test_ui_backends PRIVATE oos_ui)
+  add_test(NAME ui-backends COMMAND oos_test_ui_backends)
 endif()
