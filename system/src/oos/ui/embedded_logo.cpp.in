@@ -1,0 +1,27 @@
+#include "oos/ui/logo.h"
+
+#include <cstdint>
+
+namespace oos::ui {
+namespace {
+
+alignas(4) const uint8_t kLogoPixels[] = {
+@OOS_LOGO_BYTES@
+};
+
+} // namespace
+
+const lv_image_dsc_t kLogoImage = [] {
+  lv_image_dsc_t image{};
+  image.header.magic = LV_IMAGE_HEADER_MAGIC;
+  image.header.cf = LV_COLOR_FORMAT_ARGB8888;
+  image.header.flags = 0;
+  image.header.w = 32;
+  image.header.h = 32;
+  image.header.stride = 32 * 4;
+  image.data_size = sizeof(kLogoPixels);
+  image.data = kLogoPixels;
+  return image;
+}();
+
+} // namespace oos::ui

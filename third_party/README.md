@@ -14,6 +14,11 @@ The native system UI and development-tool UI backends are:
 - `imgui`: pinned Dear ImGui 1.92.9b, exposed through the same OOS graphics
   host for diagnostics and native tools.
 
+OOS system icons use the Font Awesome 5 Free font bundled in the pinned LVGL
+checkout. Packaging copies its complete upstream license alongside the LVGL
+license. Do not introduce icons from another library into SystemUI; see
+`docs/ui-icons.md`.
+
 Fetch and revision-check both UI frameworks with
 `scripts/fetch-ui-frameworks.sh`. Neither checkout is copied into the main
 repository.

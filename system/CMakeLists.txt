@@ -142,10 +142,36 @@ target_include_directories(oos_system_services PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_system_services PUBLIC oos_app_model)
 
+set(OOS_LOGO_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/branding/oos-logo-32-bgra.bin")
+if(NOT EXISTS "${OOS_LOGO_SOURCE}")
+  message(FATAL_ERROR
+    "Missing embedded OOS logo. Run scripts/generate-brand-assets.sh first.")
+endif()
+file(SIZE "${OOS_LOGO_SOURCE}" OOS_LOGO_SIZE)
+if(NOT OOS_LOGO_SIZE EQUAL 4096)
+  message(FATAL_ERROR "Embedded OOS logo must be a 32x32 BGRA image.")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${OOS_LOGO_SOURCE}")
+file(READ "${OOS_LOGO_SOURCE}" OOS_LOGO_HEX HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1,"
+  OOS_LOGO_BYTES "${OOS_LOGO_HEX}")
+set(OOS_GENERATED_UI_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/ui")
+file(MAKE_DIRECTORY "${OOS_GENERATED_UI_DIR}")
+configure_file(
+  src/oos/ui/embedded_logo.cpp.in
+  "${OOS_GENERATED_UI_DIR}/embedded_logo.cpp"
+  @ONLY)
+unset(OOS_LOGO_HEX)
+unset(OOS_LOGO_BYTES)
+unset(OOS_LOGO_SIZE)
+
 add_library(oos_ui STATIC
   src/oos/ui/imgui_backend.cpp
   src/oos/ui/lvgl_backend.cpp
-  src/oos/ui/system_ui.cpp)
+  src/oos/ui/system_ui.cpp
+  "${OOS_GENERATED_UI_DIR}/embedded_logo.cpp")
 target_include_directories(oos_ui PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_options(oos_ui PRIVATE -fno-exceptions -fno-rtti)

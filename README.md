@@ -96,8 +96,9 @@ The hardware test runners remain device-specific:
 ```
 
 See [docs/device-platform.md](docs/device-platform.md),
-[docs/graphics.md](docs/graphics.md), [docs/input.md](docs/input.md), and the
-device READMEs for the common hardware API and verified platform behavior.
+[docs/graphics.md](docs/graphics.md), [docs/input.md](docs/input.md),
+[docs/ui-icons.md](docs/ui-icons.md), and the device READMEs for the common
+hardware API, system icon policy, and verified platform behavior.
 
 ## Packaging
 
@@ -112,9 +113,9 @@ resource directory:
 ```
 
 The resource package contains `oos`, shared application fonts, and licenses.
-The LVGL SystemUI and boot splash are compiled into `oos`; they are not deployed as
-separate file. The package does not contain a browser engine or Web helper
-processes.
+The LVGL SystemUI and boot splash are compiled into `oos`; they are not
+deployed as separate files. The package does not contain a browser engine or
+Web helper processes.
 See [docs/deployment.md](docs/deployment.md) for the mount and upgrade contract,
 [docs/applications.md](docs/applications.md) for the ZIP/registry format, and
 [docs/wasm-runtime.md](docs/wasm-runtime.md) for the WIT/WAMR architecture.

@@ -13,6 +13,7 @@ required=(
   "$ROOT_DIR/system/assets/fonts/LICENSE.txt"
   "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
   "$ROOT_DIR/third_party/lvgl/LICENCE.txt"
+  "$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt"
   "$ROOT_DIR/third_party/imgui/LICENSE.txt")
 for path in "${required[@]}"; do
   [[ -f "$path" ]] || {
@@ -45,6 +46,9 @@ install -m 0644 "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE" \
   "$OOS_PREFIX/share/licenses/oos/WAMR.txt"
 install -m 0644 "$ROOT_DIR/third_party/lvgl/LICENCE.txt" \
   "$OOS_PREFIX/share/licenses/oos/LVGL.txt"
+install -m 0644 \
+  "$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt" \
+  "$OOS_PREFIX/share/licenses/oos/FontAwesome5.txt"
 install -m 0644 "$ROOT_DIR/third_party/imgui/LICENSE.txt" \
   "$OOS_PREFIX/share/licenses/oos/DearImGui.txt"
 
@@ -54,6 +58,7 @@ printf '%s\n' \
   "prefix=/opt/oos" \
   "native_app_runtime=wamr" \
   "system_ui=lvgl" \
+  "system_icons=font-awesome-5-free" \
   "debug_ui_backend=dear-imgui" \
   "system_font=ui-proportional.otf" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
