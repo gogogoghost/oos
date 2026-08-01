@@ -12,6 +12,8 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <limits>
 #include <utility>
 
 namespace oos::input {
@@ -21,6 +23,12 @@ constexpr size_t kBitsPerWord = sizeof(unsigned long) * 8;
 constexpr size_t kEventTypeWords = (EV_MAX / kBitsPerWord) + 1;
 constexpr size_t kReadyEventCount = 16;
 constexpr size_t kReadEventCount = 32;
+
+int64_t monotonicMicros() {
+  timespec time = {};
+  clock_gettime(CLOCK_MONOTONIC, &time);
+  return static_cast<int64_t>(time.tv_sec) * 1000000 + time.tv_nsec / 1000;
+}
 
 bool bitIsSet(const unsigned long *bits, size_t bit) {
   return (bits[bit / kBitsPerWord] & (1UL << (bit % kBitsPerWord))) != 0;
@@ -50,9 +58,11 @@ struct KeyInput::Implementation {
   };
 
   explicit Implementation(KeyInputOptions requested_options)
-      : options(requested_options) {}
+      : options(requested_options),
+        debouncer(requested_options.debounce_interval_us) {}
 
   KeyInputOptions options;
+  KeyDebouncer debouncer;
   int epoll_fd = -1;
   std::vector<Device> devices;
   std::vector<KeyDeviceInfo> public_devices;
@@ -162,6 +172,7 @@ void KeyInput::shutdown() {
   }
   implementation_->devices.clear();
   implementation_->public_devices.clear();
+  implementation_->debouncer.reset();
   if (implementation_->epoll_fd >= 0) {
     close(implementation_->epoll_fd);
     implementation_->epoll_fd = -1;
@@ -174,12 +185,25 @@ int KeyInput::poll(int timeout_ms, KeyEventCallback callback, void *context) {
     return -1;
   }
 
+  int wait_timeout_ms = timeout_ms;
+  const int64_t debounce_deadline = implementation_->debouncer.nextDeadlineUs();
+  if (debounce_deadline >= 0) {
+    const int64_t remaining_us =
+        std::max<int64_t>(0, debounce_deadline - monotonicMicros());
+    const int64_t remaining_ms = (remaining_us + 999) / 1000;
+    const int bounded_ms = static_cast<int>(
+        std::min<int64_t>(remaining_ms, std::numeric_limits<int>::max()));
+    if (wait_timeout_ms < 0 || bounded_ms < wait_timeout_ms)
+      wait_timeout_ms = bounded_ms;
+  }
+
   std::array<epoll_event, kReadyEventCount> ready{};
   const int ready_count = epoll_wait(implementation_->epoll_fd, ready.data(),
-                                     ready.size(), timeout_ms);
+                                     ready.size(), wait_timeout_ms);
   if (ready_count < 0) {
     if (errno == EINTR)
-      return 0;
+      return implementation_->debouncer.flush(monotonicMicros(), callback,
+                                              context);
     std::fprintf(stderr, "key input epoll_wait failed: %s\n",
                  std::strerror(errno));
     return -1;
@@ -224,13 +248,13 @@ int KeyInput::poll(int timeout_ms, KeyEventCallback callback, void *context) {
         event.action = static_cast<KeyAction>(raw.value);
         event.device_path = device.info.path;
         event.device_name = device.info.name;
-        if (callback)
-          callback(context, event);
-        ++dispatched;
+        dispatched +=
+            implementation_->debouncer.process(event, callback, context);
       }
     }
   }
-  return dispatched;
+  return dispatched +
+         implementation_->debouncer.flush(monotonicMicros(), callback, context);
 }
 
 bool KeyInput::initialized() const {

@@ -42,6 +42,12 @@ if(OOS_BUILD_DEVICE_TESTS)
   add_test(NAME local-keymap COMMAND oos_test_local_keymap
     "${OOS_LOCAL_KEYMAP_BUILD}")
 
+  add_executable(oos_test_key_debouncer
+    "${CMAKE_SOURCE_DIR}/tests/host/key_debouncer_test.cpp")
+  target_compile_options(oos_test_key_debouncer PRIVATE -UNDEBUG)
+  target_link_libraries(oos_test_key_debouncer PRIVATE oos_input)
+  add_test(NAME input-debounce COMMAND oos_test_key_debouncer)
+
   add_executable(oos_test_ui_backends
     "${CMAKE_SOURCE_DIR}/tests/host/ui_backend_test.cpp")
   target_compile_options(oos_test_ui_backends PRIVATE -UNDEBUG)

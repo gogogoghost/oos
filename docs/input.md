@@ -21,6 +21,14 @@ Include `oos/input/key_input.h` and link `oos_input`:
 `KeyInputOptions::grab_devices` requests `EVIOCGRAB`. Production OOS enables
 exclusive ownership after B2G stops; diagnostics should leave it disabled.
 
+`KeyInputOptions::debounce_interval_us` defaults to 30 ms. Presses are
+delivered immediately. Releases are held until that interval expires, and a
+same-device/same-key press during the window cancels the pending release. This
+merges electrical contact rebound without adding UI press latency. Confirmed
+releases use the end of the debounce window as their timestamp so callbacks
+remain monotonically ordered across different keys. Set the interval to zero
+only when collecting raw hardware diagnostics.
+
 ## Device Topology
 
 The Nokia 2780 currently exposes a matrix keypad, `qpnp_pon`, GPIO keys, a flip
@@ -42,6 +50,14 @@ cmake --build build/android-nokia-2780-flip -j24 \
   --target oos_test_nokia_2780_key_input
 cmake --build build/android-nokia-8110-4g -j24 \
   --target oos_test_nokia_8110_key_input
+```
+
+The diagnostic accepts a duration and mode. Run `raw` and `debounced` instances
+in parallel when validating a device so both observe the same physical input:
+
+```sh
+oos_test_nokia_8110_key_input 30 raw
+oos_test_nokia_8110_key_input 30 debounced
 ```
 
 On both devices, the built-in LVGL SystemUI is the end-to-end validation for

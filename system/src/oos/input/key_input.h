@@ -34,9 +34,31 @@ struct KeyInputOptions {
   // Production OOS can enable it after taking over from B2G; diagnostics
   // should normally leave it disabled.
   bool grab_devices = false;
+  // A press is delivered immediately. A release remains pending for this
+  // interval so a same-key contact rebound can be merged without adding press
+  // latency. Set to zero for raw hardware diagnostics.
+  int64_t debounce_interval_us = 30000;
 };
 
 using KeyEventCallback = void (*)(void *context, const KeyEvent &event);
+
+class KeyDebouncer {
+public:
+  explicit KeyDebouncer(int64_t interval_us = 30000);
+  ~KeyDebouncer();
+
+  KeyDebouncer(const KeyDebouncer &) = delete;
+  KeyDebouncer &operator=(const KeyDebouncer &) = delete;
+
+  int process(const KeyEvent &event, KeyEventCallback callback, void *context);
+  int flush(int64_t timestamp_us, KeyEventCallback callback, void *context);
+  int64_t nextDeadlineUs() const;
+  void reset();
+
+private:
+  struct Implementation;
+  std::unique_ptr<Implementation> implementation_;
+};
 
 // Device input sources expose one allocation-free polling contract. Concrete
 // backends are selected by the device build and remain statically owned there.

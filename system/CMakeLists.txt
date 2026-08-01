@@ -92,7 +92,9 @@ target_compile_options(oos_imgui_core PRIVATE
 
 add_subdirectory(runtime/wamr)
 
-add_library(oos_input STATIC src/oos/input/key_input.cpp)
+add_library(oos_input STATIC
+  src/oos/input/key_debouncer.cpp
+  src/oos/input/key_input.cpp)
 target_include_directories(oos_input PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
