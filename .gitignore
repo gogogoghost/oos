@@ -11,7 +11,6 @@
 **/target/
 /system/build/
 /system/third_party/
-/oom
 
 # Device dumps, images, traces, and extracted system artifacts
 /artifacts/
