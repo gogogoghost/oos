@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="320" viewBox="0 0 240 320">
   <rect width="240" height="320" fill="#000000"/>
-  <image href="../../branding/oos-logo.svg" x="72" y="72" width="96" height="96"/>
+  <image href="../../../../apps/launcher/assets/oos-logo.svg" x="72" y="72" width="96" height="96"/>
   <text x="120" y="218" fill="#ffffff" font-family="DejaVu Sans, sans-serif"
         font-size="25" font-weight="600" text-anchor="middle">Orange OS</text>
 </svg>

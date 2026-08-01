@@ -1,21 +1,33 @@
 #include "oos/apps/app_repository.h"
+#include "oos/apps/launcher/launcher.h"
+#include "oos/apps/systemui/system_ui.h"
+#include "oos/compositor/compositor.h"
+#include "oos/device/display.h"
 #include "oos/runtime/graphics_host.h"
-#include "oos/ui/imgui_backend.h"
-#include "oos/ui/lvgl_backend.h"
+#include "oos/sdk/ui/imgui_backend.h"
+#include "oos/sdk/ui/lvgl_backend.h"
 #include "oos/ui/system_status.h"
-#include "oos/ui/system_ui.h"
 
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
+#include <string>
+#include <unistd.h>
 #include <unordered_set>
 
 namespace {
 
-class FakeGraphicsHost final : public oos::runtime::GraphicsHost {
+class FakeGraphicsHost final : public oos::device::Display {
 public:
+  bool initialize() override { return true; }
+  bool showBootFrame(const uint16_t *) override { return true; }
+  bool presentSurface(const oos::compositor::SurfaceFrame &) override {
+    return false;
+  }
+  void refresh() override {}
+  void shutdown() override {}
+
   uint32_t width() const override { return 240; }
   uint32_t height() const override { return 320; }
   uint32_t surfaceFormat() const override { return OOS_TEXTURE_RGB565; }
@@ -106,7 +118,7 @@ public:
 
 void testLvglBackend() {
   FakeGraphicsHost graphics;
-  oos::ui::LvglBackend backend(graphics);
+  oos::sdk::ui::LvglBackend backend(graphics);
   assert(backend.initialize());
   lv_obj_t *label = lv_label_create(backend.root());
   lv_label_set_text(label, "LVGL backend");
@@ -123,7 +135,7 @@ void testLvglBackend() {
 
 void testImguiBackend() {
   FakeGraphicsHost graphics;
-  oos::ui::ImguiBackend backend(graphics);
+  oos::sdk::ui::ImguiBackend backend(graphics);
   assert(backend.initialize());
   assert(backend.beginFrame(1000));
   ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -143,11 +155,11 @@ void testImguiBackend() {
 }
 
 void testSystemUi() {
-  char path[] = "/tmp/oos-system-ui.XXXXXX";
-  assert(mkdtemp(path));
-  oos::apps::AppRepository repository(path);
-  assert(repository.initialize());
   FakeGraphicsHost graphics;
+  oos::compositor::Compositor compositor(graphics);
+  auto status = compositor.createLayer({"status", 0, 0, 240, 22, 200});
+  auto overlay = compositor.createLayer({"overlay", 0, 22, 240, 298, 100});
+  assert(status && overlay);
   FakeStatusSource statuses;
   statuses.value.revision = 1;
   statuses.value.battery_available = true;
@@ -159,27 +171,64 @@ void testSystemUi() {
   statuses.value.cellular_registered = true;
   statuses.value.signal_bars = 3;
   statuses.value.radio_technology = "4G";
-  oos::ui::SystemUi system_ui(graphics, repository, &statuses);
+  oos::apps::systemui::SystemUi system_ui(*status, *overlay, &statuses);
   assert(system_ui.initialize());
   uint32_t next_delay_ms = 0;
   assert(system_ui.frame(1000, next_delay_ms));
+  assert(compositor.compose());
   assert(next_delay_ms > 0 && next_delay_ms <= 1000);
   const size_t home_frames = graphics.frame_submissions;
 
   statuses.value.revision = 2;
   statuses.value.battery_percent = 64;
   assert(system_ui.frame(1500, next_delay_ms));
+  assert(compositor.compose());
   assert(graphics.frame_submissions > home_frames);
-  const size_t status_frames = graphics.frame_submissions;
+
+  system_ui.showNotification("Incoming message", 2000, 3000);
+  assert(system_ui.frame(2000, next_delay_ms));
+  assert(compositor.compose());
+  assert(overlay->visible());
+
+  system_ui.setLocked(true);
+  assert(system_ui.frame(2500, next_delay_ms));
+  assert(compositor.compose());
+  bool consumed = false;
+  const oos::input::KeyEvent unlock = {
+      3000, 352, oos::input::KeyAction::Pressed, {}, {}};
+  assert(system_ui.routeKey(unlock, consumed));
+  assert(consumed && !system_ui.locked());
+  system_ui.shutdown();
+  assert(graphics.textures.empty());
+}
+
+void testLauncher() {
+  FakeGraphicsHost graphics;
+  oos::compositor::Compositor compositor(graphics);
+  auto app = compositor.createLayer({"application", 0, 22, 240, 298, 0});
+  assert(app);
+  const std::string data_root =
+      "/tmp/oos-launcher-test-" + std::to_string(getpid());
+  std::filesystem::remove_all(data_root);
+  oos::apps::AppRepository repository(data_root.c_str());
+  assert(repository.initialize());
+  oos::apps::launcher::Launcher launcher(*app, repository);
+  assert(launcher.initialize());
+  uint32_t next_delay_ms = 0;
+  assert(launcher.frame(1000, next_delay_ms));
+  assert(compositor.compose());
+  const size_t home_frames = graphics.frame_submissions;
 
   const oos::input::KeyEvent open_apps = {
       2000, 352, oos::input::KeyAction::Pressed, {}, {}};
-  assert(system_ui.dispatchKey(open_apps));
-  assert(system_ui.frame(2000, next_delay_ms));
-  assert(graphics.frame_submissions > status_frames);
-  system_ui.shutdown();
+  assert(launcher.dispatchKey(open_apps, 2000));
+  assert(launcher.frame(2000, next_delay_ms));
+  assert(compositor.compose());
+  assert(graphics.frame_submissions > home_frames);
+
+  launcher.shutdown();
   assert(graphics.textures.empty());
-  std::filesystem::remove_all(path);
+  std::filesystem::remove_all(data_root);
 }
 
 } // namespace
@@ -188,5 +237,6 @@ int main() {
   testLvglBackend();
   testImguiBackend();
   testSystemUi();
+  testLauncher();
   return 0;
 }

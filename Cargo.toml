@@ -1,9 +1,9 @@
 [workspace]
 members = [
-  "launcher",
+  "apps/tests/egui-demo",
+  "apps/tests/wit-smoke",
   "sdk/rust/oos-app",
   "sdk/rust/oos-egui",
-  "tests/wit-smoke",
 ]
 resolver = "2"
 

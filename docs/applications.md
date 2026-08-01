@@ -52,9 +52,9 @@ Create a deterministic package with:
 
 ```sh
 ./scripts/package-oos-wasm-app.sh \
-  --manifest apps/launcher/manifest.json \
-  --wasm build/native-apps/launcher.wasm \
-  --aot build/native-apps/launcher.aot \
+  --manifest apps/tests/egui-demo/manifest.json \
+  --wasm build/native-apps/egui-demo.wasm \
+  --aot build/native-apps/egui-demo.aot \
   --output application.zip
 ```
 

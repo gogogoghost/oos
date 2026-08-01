@@ -210,7 +210,7 @@ private:
 int main(int argc, char **argv) {
   if (argc != 4) {
     std::fprintf(stderr,
-                 "usage: %s launcher.wasm wit-smoke.wasm font-directory\n",
+                 "usage: %s egui-demo.wasm wit-smoke.wasm font-directory\n",
                  argv[0]);
     return 2;
   }

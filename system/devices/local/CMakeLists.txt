@@ -51,6 +51,7 @@ if(OOS_BUILD_DEVICE_TESTS)
   add_executable(oos_test_ui_backends
     "${CMAKE_SOURCE_DIR}/tests/host/ui_backend_test.cpp")
   target_compile_options(oos_test_ui_backends PRIVATE -UNDEBUG)
-  target_link_libraries(oos_test_ui_backends PRIVATE oos_ui)
+  target_link_libraries(oos_test_ui_backends PRIVATE
+    oos_sdk_ui oos_launcher_app oos_systemui_app)
   add_test(NAME ui-backends COMMAND oos_test_ui_backends)
 endif()

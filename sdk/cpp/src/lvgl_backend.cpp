@@ -1,4 +1,4 @@
-#include "oos/ui/lvgl_backend.h"
+#include "oos/sdk/ui/lvgl_backend.h"
 
 #include "oos/runtime/graphics_host.h"
 
@@ -8,12 +8,14 @@
 #include <limits>
 #include <vector>
 
-namespace oos::ui {
+namespace oos::sdk::ui {
 namespace {
 
 constexpr uint32_t kTextureHandle = 0x7fff0001u;
 constexpr uint32_t kDrawRows = 32;
 constexpr uint32_t kMaximumTickAdvanceMs = 250;
+size_t g_lvgl_users = 0;
+int64_t g_last_tick_us = 0;
 
 uint32_t mapKey(uint16_t code) {
   switch (code) {
@@ -115,7 +117,9 @@ public:
       error = "LVGL surface dimensions are invalid";
       return false;
     }
-    lv_init();
+    if (g_lvgl_users == 0)
+      lv_init();
+    ++g_lvgl_users;
     lv_started = true;
 
     const size_t row_pixels = static_cast<size_t>(graphics.width()) * kDrawRows;
@@ -174,18 +178,28 @@ public:
       graphics.freeTexture(kTextureHandle);
       texture_live = false;
     }
-    if (lv_started) {
-      lv_deinit();
-      lv_started = false;
-    }
+    if (input)
+      lv_indev_delete(input);
+    if (group)
+      lv_group_delete(group);
+    if (display)
+      lv_display_delete(display);
     display = nullptr;
     input = nullptr;
     group = nullptr;
+    if (lv_started) {
+      if (g_lvgl_users > 0)
+        --g_lvgl_users;
+      if (g_lvgl_users == 0)
+        lv_deinit();
+      if (g_lvgl_users == 0)
+        g_last_tick_us = 0;
+      lv_started = false;
+    }
     draw_buffer_a.clear();
     draw_buffer_b.clear();
     initialized = false;
     healthy = false;
-    last_tick_us = 0;
   }
 
   bool present() {
@@ -212,7 +226,6 @@ public:
   std::vector<uint16_t> draw_buffer_b;
   std::deque<QueuedKey> keys;
   std::string error;
-  int64_t last_tick_us = 0;
   bool lv_started = false;
   bool texture_live = false;
   bool initialized = false;
@@ -246,13 +259,14 @@ bool LvglBackend::dispatchKey(const input::KeyEvent &event) {
 uint32_t LvglBackend::frame(int64_t monotonic_us) {
   if (!impl_->initialized || !impl_->healthy)
     return 0;
-  if (impl_->last_tick_us != 0 && monotonic_us > impl_->last_tick_us) {
+  if (g_last_tick_us != 0 && monotonic_us > g_last_tick_us) {
     const uint64_t elapsed =
-        static_cast<uint64_t>(monotonic_us - impl_->last_tick_us) / 1000;
+        static_cast<uint64_t>(monotonic_us - g_last_tick_us) / 1000;
     lv_tick_inc(static_cast<uint32_t>(
         std::min<uint64_t>(elapsed, kMaximumTickAdvanceMs)));
   }
-  impl_->last_tick_us = monotonic_us;
+  if (monotonic_us > g_last_tick_us)
+    g_last_tick_us = monotonic_us;
   const uint32_t next = lv_timer_handler();
   return impl_->healthy ? next : 0;
 }
@@ -269,11 +283,12 @@ bool LvglBackend::healthy() const {
 }
 
 lv_obj_t *LvglBackend::root() const {
-  return impl_->initialized ? lv_screen_active() : nullptr;
+  return impl_->initialized ? lv_display_get_screen_active(impl_->display)
+                            : nullptr;
 }
 
 lv_group_t *LvglBackend::group() const { return impl_->group; }
 
 const std::string &LvglBackend::lastError() const { return impl_->error; }
 
-} // namespace oos::ui
+} // namespace oos::sdk::ui

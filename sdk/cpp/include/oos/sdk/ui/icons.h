@@ -2,7 +2,7 @@
 
 #include <lvgl.h>
 
-namespace oos::ui::icons {
+namespace oos::sdk::ui::icons {
 
 // OOS system icons use only LVGL's bundled Font Awesome 5 Free subset. Keep
 // every mapping here so the visual source and licensing remain auditable.
@@ -21,4 +21,4 @@ inline constexpr char kBatteryHalf[] = LV_SYMBOL_BATTERY_2;
 inline constexpr char kBatteryQuarter[] = LV_SYMBOL_BATTERY_1;
 inline constexpr char kBatteryEmpty[] = LV_SYMBOL_BATTERY_EMPTY;
 
-} // namespace oos::ui::icons
+} // namespace oos::sdk::ui::icons

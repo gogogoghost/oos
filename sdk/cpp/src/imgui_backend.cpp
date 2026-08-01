@@ -1,4 +1,4 @@
-#include "oos/ui/imgui_backend.h"
+#include "oos/sdk/ui/imgui_backend.h"
 
 #include "oos/runtime/graphics_host.h"
 
@@ -7,7 +7,7 @@
 #include <limits>
 #include <vector>
 
-namespace oos::ui {
+namespace oos::sdk::ui {
 namespace {
 
 constexpr uint32_t kFirstTextureHandle = 0x7ffe0001u;
@@ -441,4 +441,4 @@ ImGuiContext *ImguiBackend::context() const { return impl_->context; }
 
 const std::string &ImguiBackend::lastError() const { return impl_->error; }
 
-} // namespace oos::ui
+} // namespace oos::sdk::ui

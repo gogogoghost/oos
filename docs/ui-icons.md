@@ -2,7 +2,7 @@
 
 All OOS-owned functional UI icons come from **Font Awesome 5 Free**, using the
 font bundled with the pinned LVGL source tree. The central mapping is
-`system/src/oos/ui/icons.h`; production UI code must use that mapping rather
+`sdk/cpp/include/oos/sdk/ui/icons.h`; production UI code must use that mapping rather
 than embedding Unicode values, ad hoc letters, SVG paths, or symbols from a
 second icon library.
 
@@ -13,7 +13,7 @@ icon set, and OOS does not recolor them on selection.
 
 The Orange OS brand logo is project-owned brand artwork rather than a
 functional UI icon. Its only vector source is
-`system/assets/branding/oos-logo.svg`; both the boot splash and the compiled
+`apps/launcher/assets/oos-logo.svg`; the boot splash source references it and the compiled
 SystemUI BGRA image are generated from that file. Run
 `scripts/generate-brand-assets.sh` after changing the source SVG.
 

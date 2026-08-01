@@ -12,7 +12,7 @@ namespace oos::runtime {
 class GraphicsHost;
 }
 
-namespace oos::ui {
+namespace oos::sdk::ui {
 
 class LvglBackend {
 public:
@@ -38,4 +38,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace oos::ui
+} // namespace oos::sdk::ui

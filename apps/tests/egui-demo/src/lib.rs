@@ -154,25 +154,6 @@ impl Launcher {
 }
 
 fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Option<&str>) {
-    egui::Panel::top("status")
-        .exact_size(20.0)
-        .frame(
-            egui::Frame::new()
-                .fill(Color32::from_rgb(13, 16, 16))
-                .inner_margin(egui::Margin::symmetric(7, 2)),
-        )
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format_time()).size(10.0).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new("BAT  SIG  WIFI")
-                            .size(8.0)
-                            .color(Color32::LIGHT_GRAY),
-                    );
-                });
-            });
-        });
     egui::Panel::bottom("softkeys")
         .exact_size(28.0)
         .frame(
@@ -223,7 +204,11 @@ fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Optio
                 View::Apps => render_apps(ui, selected),
             }
             if let Some(message) = notice {
-                let rect = Rect::from_min_max(Pos2::new(8.0, 257.0), Pos2::new(232.0, 284.0));
+                let bounds = ui.max_rect();
+                let rect = Rect::from_min_max(
+                    Pos2::new(bounds.left() + 8.0, bounds.bottom() - 35.0),
+                    Pos2::new(bounds.right() - 8.0, bounds.bottom() - 8.0),
+                );
                 ui.painter()
                     .rect_filled(rect, 0.0, Color32::from_black_alpha(235));
                 ui.painter().rect_filled(
@@ -355,7 +340,7 @@ impl oos_app::App for App {
             oos_app::ErrorCode::Unavailable
         })?;
         LAUNCHER.with(|slot| *slot.borrow_mut() = Some(launcher));
-        oos_app::log(1, "egui launcher initialized");
+        oos_app::log(1, "egui demo initialized");
         Ok(())
     }
 

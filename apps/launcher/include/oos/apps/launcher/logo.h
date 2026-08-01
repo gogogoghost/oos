@@ -2,8 +2,8 @@
 
 #include <lvgl.h>
 
-namespace oos::ui {
+namespace oos::apps::launcher {
 
 extern const lv_image_dsc_t kLogoImage;
 
-} // namespace oos::ui
+} // namespace oos::apps::launcher

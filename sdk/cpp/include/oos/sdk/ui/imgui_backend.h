@@ -12,7 +12,7 @@ namespace oos::runtime {
 class GraphicsHost;
 }
 
-namespace oos::ui {
+namespace oos::sdk::ui {
 
 // Dear ImGui renderer/platform backend for the OOS compositor contract. UI
 // code builds an ImGui frame between beginFrame() and submit().
@@ -38,4 +38,4 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-} // namespace oos::ui
+} // namespace oos::sdk::ui

@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-SOURCE="$ROOT_DIR/system/assets/branding/oos-logo.svg"
-OUTPUT="$ROOT_DIR/system/assets/branding/oos-logo-32-bgra.bin"
+SOURCE="$ROOT_DIR/apps/launcher/assets/oos-logo.svg"
+OUTPUT="$ROOT_DIR/apps/launcher/assets/oos-logo-32-bgra.bin"
 CHROME_BIN=${CHROME_BIN:-google-chrome}
 
 if ! command -v magick >/dev/null 2>&1; then

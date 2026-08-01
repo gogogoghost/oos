@@ -8,17 +8,21 @@ fallback.
 
 This branch is deliberately browser-free. It contains no WPE WebKit runtime,
 JavaScript engine, HTML launcher, or KaiOS Web application compatibility layer.
-The production SystemUI is process-local C++/LVGL. Dear ImGui has a native
-GPU-mesh backend for diagnostics and system tools. Rust/egui remains the first
-WIT framework adapter and regression application for third-party Wasm apps.
+The production Launcher is a process-local C++/LVGL application. SystemUI is a
+separate process-local application that owns the status and overlay surfaces.
+Dear ImGui has a native GPU-mesh backend for diagnostics and system tools.
+Rust/egui remains the first WIT framework adapter and regression application
+for third-party Wasm apps.
 The phone shell uses `#E65100` as its single interaction accent and obtains
 battery, charging, Wi-Fi, signal-strength, roaming, and radio-technology state
 from a non-blocking device status monitor.
 
 ## Repository Layout
 
-- `apps/launcher`: the egui/WIT framework integration application.
-- `apps/sdk`: versioned WIT interfaces and Rust framework adapters.
+- `apps/launcher`: the production LVGL Launcher application and its assets.
+- `apps/systemui`: status bar, notifications, lock screen, and global overlays.
+- `apps/tests`: framework integration and WIT regression applications.
+- `sdk`: versioned WIT interfaces and reusable egui/LVGL/ImGui backends.
 - `system/src/oos`: native runtime, compositor, application registry, storage,
   services, and device-independent hardware contracts.
 - `system/devices/nokia-2780-flip`: Android 10/HWC2 device implementation.
@@ -57,8 +61,8 @@ make system DEVICE=nokia-8110-4g
 
 Useful outputs are:
 
-- `build/native-apps/launcher.wasm`: portable egui module and `wamrc` input.
-- `build/native-apps/launcher.aot`: optimized ARMv7 WAMR AOT module.
+- `build/native-apps/egui-demo.wasm`: portable egui SDK test module.
+- `build/native-apps/egui-demo.aot`: optimized ARMv7 WAMR AOT test module.
 - `build/android-<device>/bin/oos`: device-specific system process.
 - `build/android-<device>/bin/tests/<device>/`: device tests, when enabled.
 
@@ -97,7 +101,8 @@ The hardware test runners remain device-specific:
 
 See [docs/device-platform.md](docs/device-platform.md),
 [docs/graphics.md](docs/graphics.md), [docs/input.md](docs/input.md),
-[docs/ui-icons.md](docs/ui-icons.md), and the device READMEs for the common
+[docs/system-ui.md](docs/system-ui.md), [docs/ui-icons.md](docs/ui-icons.md),
+and the device READMEs for the common
 hardware API, system icon policy, and verified platform behavior.
 
 ## Packaging

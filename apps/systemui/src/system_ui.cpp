@@ -1,0 +1,417 @@
+#include "oos/apps/systemui/system_ui.h"
+
+#include "oos/compositor/compositor.h"
+#include "oos/sdk/ui/icons.h"
+#include "oos/sdk/ui/imgui_backend.h"
+#include "oos/sdk/ui/lvgl_backend.h"
+#include "oos/ui/system_status.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <ctime>
+#include <utility>
+
+namespace oos::apps::systemui {
+namespace {
+
+namespace sdk_ui = oos::sdk::ui;
+
+constexpr uint16_t kKeyBack = 158;
+constexpr uint16_t kKeyOk = 352;
+constexpr uint32_t kOrange = 0xe65100;
+constexpr uint32_t kStatusBackground = 0x0d1010;
+constexpr uint32_t kText = 0xf0ede9;
+constexpr uint32_t kStatusInactive = 0x5f5a55;
+
+lv_color_t color(uint32_t rgb) { return lv_color_hex(rgb); }
+
+void stripObject(lv_obj_t *object) {
+  lv_obj_set_style_border_width(object, 0, 0);
+  lv_obj_set_style_radius(object, 0, 0);
+  lv_obj_set_style_pad_all(object, 0, 0);
+  lv_obj_remove_flag(object, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+lv_obj_t *makeLabel(lv_obj_t *parent, const char *text, const lv_font_t *font,
+                    uint32_t text_color) {
+  lv_obj_t *label = lv_label_create(parent);
+  lv_label_set_text(label, text);
+  lv_obj_set_style_text_font(label, font, 0);
+  lv_obj_set_style_text_color(label, color(text_color), 0);
+  return label;
+}
+
+std::string currentTime() {
+  const std::time_t now = std::time(nullptr);
+  std::tm local = {};
+  localtime_r(&now, &local);
+  char value[6] = {};
+  std::strftime(value, sizeof(value), "%H:%M", &local);
+  return value;
+}
+
+} // namespace
+
+class SystemUi::Impl {
+public:
+  enum class OverlayMode { Hidden, Notification, Locked };
+
+  Impl(compositor::LayerSurface &status_surface,
+       compositor::LayerSurface &overlay_surface,
+       ui::SystemStatusSource *status_source)
+      : status_backend(status_surface), overlay_backend(overlay_surface),
+        status_surface(status_surface), overlay_surface(overlay_surface),
+        status_source(status_source) {}
+
+  bool initialize() {
+    if (initialized)
+      return true;
+    if (!status_backend.initialize() || !overlay_backend.initialize()) {
+      error = !status_backend.lastError().empty() ? status_backend.lastError()
+                                                  : overlay_backend.lastError();
+      shutdown();
+      return false;
+    }
+    lv_obj_t *root = status_backend.root();
+    if (!root) {
+      error = "SystemUI status surface has no LVGL root";
+      shutdown();
+      return false;
+    }
+    stripObject(root);
+    lv_obj_set_style_bg_color(root, color(kStatusBackground), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+
+    status_time = makeLabel(root, "00:00", &lv_font_montserrat_10, kText);
+    lv_obj_align(status_time, LV_ALIGN_LEFT_MID, 7, 0);
+
+    indicators = lv_obj_create(root);
+    stripObject(indicators);
+    lv_obj_set_size(indicators, 188, 22);
+    lv_obj_align(indicators, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_set_style_bg_opa(indicators, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_column(indicators, 5, 0);
+    lv_obj_set_flex_flow(indicators, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(indicators, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    signal_container = lv_obj_create(indicators);
+    stripObject(signal_container);
+    lv_obj_set_size(signal_container, 13, 11);
+    lv_obj_set_style_bg_opa(signal_container, LV_OPA_TRANSP, 0);
+    for (size_t index = 0; index < signal.size(); ++index) {
+      lv_obj_t *bar = lv_obj_create(signal_container);
+      stripObject(bar);
+      const int height = 3 + static_cast<int>(index) * 2;
+      lv_obj_set_size(bar, 2, height);
+      lv_obj_set_pos(bar, static_cast<int>(index) * 3, 11 - height);
+      lv_obj_set_style_bg_color(bar, color(kStatusInactive), 0);
+      lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+      signal[index] = bar;
+    }
+    radio = makeLabel(indicators, "", &lv_font_montserrat_10, kText);
+    wifi = makeLabel(indicators, sdk_ui::icons::kWifi, &lv_font_montserrat_10,
+                     kText);
+    charge = makeLabel(indicators, sdk_ui::icons::kCharge,
+                       &lv_font_montserrat_10, kOrange);
+    battery = makeLabel(indicators, sdk_ui::icons::kBatteryEmpty,
+                        &lv_font_montserrat_10, kStatusInactive);
+    lv_obj_add_flag(radio, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(wifi, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(charge, LV_OBJ_FLAG_HIDDEN);
+
+    overlay_surface.setVisible(false);
+    updateClock();
+    updateStatus();
+    status_needs_refresh = true;
+    initialized = true;
+    error.clear();
+    return true;
+  }
+
+  void shutdown() {
+    overlay_surface.setVisible(false);
+    overlay_surface.clearFrame();
+    overlay_backend.shutdown();
+    status_backend.shutdown();
+    status_time = nullptr;
+    indicators = nullptr;
+    signal_container = nullptr;
+    signal.fill(nullptr);
+    radio = nullptr;
+    wifi = nullptr;
+    charge = nullptr;
+    battery = nullptr;
+    mode = OverlayMode::Hidden;
+    initialized = false;
+    status_needs_refresh = false;
+  }
+
+  void updateClock() {
+    const int64_t minute = static_cast<int64_t>(std::time(nullptr) / 60);
+    if (minute == last_minute)
+      return;
+    last_minute = minute;
+    if (status_time)
+      lv_label_set_text(status_time, currentTime().c_str());
+    status_needs_refresh = true;
+  }
+
+  void applyStatus() {
+    const bool cellular =
+        system_status.cellular_available && system_status.cellular_registered;
+    if (system_status.cellular_available)
+      lv_obj_remove_flag(signal_container, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(signal_container, LV_OBJ_FLAG_HIDDEN);
+    for (size_t index = 0; index < signal.size(); ++index) {
+      const bool active =
+          cellular && static_cast<int>(index) < system_status.signal_bars;
+      lv_obj_set_style_bg_color(signal[index],
+                                color(active ? kText : kStatusInactive), 0);
+    }
+    if (cellular && !system_status.radio_technology.empty()) {
+      lv_label_set_text(radio, system_status.radio_technology.c_str());
+      lv_obj_remove_flag(radio, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(radio, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (system_status.wifi_connected)
+      lv_obj_remove_flag(wifi, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(wifi, LV_OBJ_FLAG_HIDDEN);
+    if (system_status.charging)
+      lv_obj_remove_flag(charge, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(charge, LV_OBJ_FLAG_HIDDEN);
+
+    const char *symbol = sdk_ui::icons::kBatteryEmpty;
+    if (system_status.battery_percent >= 90)
+      symbol = sdk_ui::icons::kBatteryFull;
+    else if (system_status.battery_percent >= 65)
+      symbol = sdk_ui::icons::kBatteryThreeQuarters;
+    else if (system_status.battery_percent >= 35)
+      symbol = sdk_ui::icons::kBatteryHalf;
+    else if (system_status.battery_percent >= 10)
+      symbol = sdk_ui::icons::kBatteryQuarter;
+    char text[24] = {};
+    if (system_status.battery_available)
+      std::snprintf(text, sizeof(text), "%d%% %s",
+                    system_status.battery_percent, symbol);
+    else
+      std::snprintf(text, sizeof(text), "%s", symbol);
+    lv_label_set_text(battery, text);
+    lv_obj_set_style_text_color(
+        battery,
+        color(system_status.battery_available ? kText : kStatusInactive), 0);
+    status_needs_refresh = true;
+  }
+
+  void updateStatus() {
+    if (!status_source)
+      return;
+    ui::SystemStatusSnapshot next = status_source->snapshot();
+    if (next.revision == last_status_revision)
+      return;
+    last_status_revision = next.revision;
+    system_status = std::move(next);
+    applyStatus();
+  }
+
+  bool renderOverlay(int64_t monotonic_us) {
+    if (mode == OverlayMode::Hidden)
+      return true;
+    if (!overlay_backend.beginFrame(monotonic_us)) {
+      error = overlay_backend.lastError();
+      return false;
+    }
+    ImGui::SetCurrentContext(overlay_backend.context());
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.WindowBorderSize = 0.0f;
+    style.WindowPadding = ImVec2(10, 8);
+    if (mode == OverlayMode::Locked) {
+      ImGui::SetNextWindowPos(ImVec2(0, 0));
+      ImGui::SetNextWindowSize(
+          ImVec2(static_cast<float>(overlay_surface.width()),
+                 static_cast<float>(overlay_surface.height())));
+      ImGui::SetNextWindowBgAlpha(1.0f);
+      ImGui::Begin("Lock screen", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoInputs);
+      ImGui::SetCursorPosY(72.0f);
+      const std::string time = currentTime();
+      const float time_width = ImGui::CalcTextSize(time.c_str()).x;
+      ImGui::SetCursorPosX((overlay_surface.width() - time_width) * 0.5f);
+      ImGui::TextUnformatted(time.c_str());
+      ImGui::SetCursorPosY(145.0f);
+      constexpr const char *hint = "Press OK to unlock";
+      const float hint_width = ImGui::CalcTextSize(hint).x;
+      ImGui::SetCursorPosX((overlay_surface.width() - hint_width) * 0.5f);
+      ImGui::TextColored(ImVec4(0.90f, 0.32f, 0.0f, 1.0f), "%s", hint);
+      ImGui::End();
+    } else {
+      ImGui::SetNextWindowPos(ImVec2(8, 8));
+      ImGui::SetNextWindowSize(
+          ImVec2(static_cast<float>(overlay_surface.width() - 16), 42));
+      ImGui::SetNextWindowBgAlpha(0.96f);
+      ImGui::Begin("Notification", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoInputs);
+      ImGui::TextColored(ImVec4(0.90f, 0.32f, 0.0f, 1.0f), "Notification");
+      ImGui::SameLine();
+      ImGui::TextUnformatted(notification.c_str());
+      ImGui::End();
+    }
+    if (!overlay_backend.submit(0x00000000u)) {
+      error = overlay_backend.lastError();
+      return false;
+    }
+    overlay_needs_refresh = false;
+    return true;
+  }
+
+  bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) {
+    if (!initialized)
+      return false;
+    updateClock();
+    updateStatus();
+    if (mode == OverlayMode::Notification &&
+        monotonic_us >= notification_until_us) {
+      mode = OverlayMode::Hidden;
+      overlay_surface.setVisible(false);
+      overlay_surface.clearFrame();
+    }
+    status_backend.frame(monotonic_us);
+    if (!status_backend.healthy()) {
+      error = status_backend.lastError();
+      return false;
+    }
+    if (status_needs_refresh) {
+      if (!status_backend.refresh()) {
+        error = status_backend.lastError();
+        return false;
+      }
+      status_needs_refresh = false;
+    }
+    if (mode != OverlayMode::Hidden && overlay_needs_refresh &&
+        !renderOverlay(monotonic_us))
+      return false;
+
+    const uint32_t seconds = static_cast<uint32_t>(std::time(nullptr) % 60);
+    next_delay_ms = std::max(1u, (60u - seconds) * 1000u);
+    if (status_source)
+      next_delay_ms = std::min(next_delay_ms, 1000u);
+    if (mode == OverlayMode::Notification) {
+      const int64_t remaining = notification_until_us - monotonic_us;
+      if (remaining > 0)
+        next_delay_ms = std::min(
+            next_delay_ms, static_cast<uint32_t>((remaining + 999) / 1000));
+    }
+    return true;
+  }
+
+  bool routeKey(const input::KeyEvent &event, bool &consumed) {
+    consumed = false;
+    if (!initialized)
+      return false;
+    if (mode == OverlayMode::Locked) {
+      consumed = true;
+      overlay_backend.dispatchKey(event);
+      if (event.action != input::KeyAction::Released && event.code == kKeyOk)
+        setLocked(false);
+      return true;
+    }
+    if (mode == OverlayMode::Notification &&
+        event.action != input::KeyAction::Released && event.code == kKeyBack) {
+      mode = OverlayMode::Hidden;
+      overlay_surface.setVisible(false);
+      overlay_surface.clearFrame();
+      consumed = true;
+    }
+    return true;
+  }
+
+  void showNotification(const std::string &message, int64_t monotonic_us,
+                        uint32_t duration_ms) {
+    notification = message.empty() ? "New notification" : message;
+    notification_until_us =
+        monotonic_us + static_cast<int64_t>(duration_ms) * 1000;
+    mode = OverlayMode::Notification;
+    overlay_surface.setVisible(true);
+    overlay_needs_refresh = true;
+  }
+
+  void setLocked(bool locked) {
+    mode = locked ? OverlayMode::Locked : OverlayMode::Hidden;
+    overlay_surface.setVisible(locked);
+    if (!locked)
+      overlay_surface.clearFrame();
+    overlay_needs_refresh = locked;
+  }
+
+  sdk_ui::LvglBackend status_backend;
+  sdk_ui::ImguiBackend overlay_backend;
+  compositor::LayerSurface &status_surface;
+  compositor::LayerSurface &overlay_surface;
+  ui::SystemStatusSource *status_source = nullptr;
+  lv_obj_t *status_time = nullptr;
+  lv_obj_t *indicators = nullptr;
+  lv_obj_t *signal_container = nullptr;
+  std::array<lv_obj_t *, 4> signal = {};
+  lv_obj_t *radio = nullptr;
+  lv_obj_t *wifi = nullptr;
+  lv_obj_t *charge = nullptr;
+  lv_obj_t *battery = nullptr;
+  ui::SystemStatusSnapshot system_status;
+  std::string notification;
+  std::string error;
+  OverlayMode mode = OverlayMode::Hidden;
+  int64_t notification_until_us = 0;
+  int64_t last_minute = -1;
+  uint64_t last_status_revision = 0;
+  bool initialized = false;
+  bool status_needs_refresh = false;
+  bool overlay_needs_refresh = false;
+};
+
+SystemUi::SystemUi(compositor::LayerSurface &status_surface,
+                   compositor::LayerSurface &overlay_surface,
+                   ui::SystemStatusSource *status_source)
+    : impl_(std::make_unique<Impl>(status_surface, overlay_surface,
+                                   status_source)) {}
+
+SystemUi::~SystemUi() { shutdown(); }
+
+bool SystemUi::initialize() { return impl_->initialize(); }
+
+void SystemUi::shutdown() {
+  if (impl_)
+    impl_->shutdown();
+}
+
+bool SystemUi::routeKey(const input::KeyEvent &event, bool &consumed) {
+  return impl_->routeKey(event, consumed);
+}
+
+bool SystemUi::frame(int64_t monotonic_us, uint32_t &next_delay_ms) {
+  return impl_->frame(monotonic_us, next_delay_ms);
+}
+
+void SystemUi::showNotification(const std::string &message,
+                                int64_t monotonic_us, uint32_t duration_ms) {
+  impl_->showNotification(message, monotonic_us, duration_ms);
+}
+
+void SystemUi::setLocked(bool locked) { impl_->setLocked(locked); }
+
+bool SystemUi::locked() const {
+  return impl_->mode == Impl::OverlayMode::Locked;
+}
+
+const std::string &SystemUi::lastError() const { return impl_->error; }
+
+} // namespace oos::apps::systemui

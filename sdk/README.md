@@ -1,6 +1,6 @@
 # OOS Native-App SDK
 
-OOS application interfaces are defined in `apps/sdk/wit/oos.wit`. That versioned WIT
+OOS application interfaces are defined in `sdk/wit/oos.wit`. That versioned WIT
 package is the public contract; applications must not declare WAMR imports or
 export lifecycle symbols by hand.
 
@@ -39,7 +39,7 @@ impl oos_app::App for App {
 oos_app::bindings::export!(App with_types_in oos_app::bindings);
 ```
 
-Other languages should generate guest bindings from `apps/sdk/wit/oos.wit` and target
+Other languages should generate guest bindings from `sdk/wit/oos.wit` and target
 the `app` world. The runtime contract contains no Rust-specific types, WASI,
 EGL, framebuffer, Binder, evdev, file descriptor, or HAL object.
 
@@ -48,9 +48,12 @@ or ARMv7 AOT file. `build-native-apps.sh` also wraps the same module as a real
 Component Model artifact for runtimes that support components. WAMR 2.4.4 does
 not itself load component binaries.
 
-Framework adapters belong under `apps/sdk/`, not in an individual application.
-egui, imgui, iced, and GPU-backed LVGL adapters can emit the same texture/mesh
-records. Software LVGL/J2ME ports can upload strided RGB565 dirty rectangles.
+Framework adapters belong under `sdk/`, not in an individual application.
+The Rust egui adapter lives in `rust/oos-egui`; the process-local LVGL and Dear
+ImGui backends live in `cpp`. Applications under `apps/` link only the adapter
+they use. Future iced and GPU-backed LVGL adapters can emit the same
+texture/mesh records. Software LVGL/J2ME ports can upload strided RGB565 dirty
+rectangles.
 2D/3D engine backends can translate a render queue into one validated GLES2
 command batch per frame rather than introducing another device ABI. See
 [graphics documentation](../../docs/graphics.md) for the format and

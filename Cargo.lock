@@ -371,7 +371,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "oos-launcher"
+name = "oos-egui-demo"
 version = "0.1.0"
 dependencies = [
  "egui",

@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "oos/apps/app_repository.h"
+#include "oos/apps/launcher/launcher.h"
 #include "oos/apps/permissions.h"
+#include "oos/apps/systemui/system_ui.h"
 #include "oos/compositor/compositor.h"
 #include "oos/device/device.h"
 #include "oos/device/display.h"
@@ -19,7 +21,7 @@
 #include "oos/resources/boot_splash.h"
 #include "oos/runtime/native_app_manager.h"
 #include "oos/ui/system_status.h"
-#include "oos/ui/system_ui.h"
+#include "oos/window/input_router.h"
 
 namespace oos::platform {
 namespace {
@@ -33,6 +35,19 @@ using oos::runtime::NativeAppLaunchOptions;
 using oos::runtime::NativeAppManager;
 
 constexpr int kFrameIntervalMs = 33;
+
+class NativeAppInputTarget final : public oos::window::ApplicationInputTarget {
+public:
+  explicit NativeAppInputTarget(NativeAppManager &apps) : apps_(apps) {}
+
+  bool dispatchKey(const KeyEvent &event, int64_t monotonic_us) override {
+    return apps_.dispatchKey(event, monotonic_us);
+  }
+  const char *lastError() const override { return apps_.lastError(); }
+
+private:
+  NativeAppManager &apps_;
+};
 
 volatile std::sig_atomic_t g_stop_requested = 0;
 
@@ -113,29 +128,18 @@ bool loadBootSplash(uint32_t expected_width, uint32_t expected_height,
   return true;
 }
 
-struct NativeInputContext {
-  NativeAppManager *apps;
+struct ShellInputContext {
+  oos::window::InputRouter *router;
   bool success = true;
 };
 
-void dispatchNativeKey(void *data, const KeyEvent &event) {
-  auto *context = static_cast<NativeInputContext *>(data);
-  if (!context->apps->dispatchKey(event, monotonicMicros())) {
-    std::fprintf(stderr, "WASM key dispatch failed: %s\n",
-                 context->apps->lastError());
+void dispatchShellKey(void *data, const KeyEvent &event) {
+  auto *context = static_cast<ShellInputContext *>(data);
+  if (!context->router->dispatch(event, monotonicMicros())) {
+    std::fprintf(stderr, "input routing failed: %s\n",
+                 context->router->lastError().c_str());
     context->success = false;
   }
-}
-
-struct SystemUiInputContext {
-  oos::ui::SystemUi *system_ui;
-  bool success = true;
-};
-
-void dispatchSystemUiKey(void *data, const KeyEvent &event) {
-  auto *context = static_cast<SystemUiInputContext *>(data);
-  if (!context->system_ui->dispatchKey(event))
-    context->success = false;
 }
 
 void printUsage(const char *program) {
@@ -195,9 +199,9 @@ int run(int argc, char **argv) {
   if (repository_result >= 0)
     return repository_result;
 
-  const bool run_system_ui = argc == 1;
   const char *raw_module = nullptr;
   const char *app_id = nullptr;
+  const bool run_launcher = argc == 1;
   if (argc == 2) {
     // Keep the original positional module form for existing device diagnostics.
     raw_module = argv[1];
@@ -212,9 +216,12 @@ int run(int argc, char **argv) {
 
   oos::apps::AppLaunch app_launch;
   NativeAppLaunchOptions native_launch;
-  if (!run_system_ui && raw_module) {
+  if (run_launcher) {
+    // The built-in LVGL Launcher is a separate application target, not part
+    // of SystemUI and not dispatched through WAMR.
+  } else if (raw_module) {
     native_launch.module_path = raw_module;
-  } else if (!run_system_ui) {
+  } else {
     if (!repository.resolve(app_id, app_launch.app)) {
       if (!importBundledApp(repository, app_id)) {
         std::fprintf(stderr, "import bundled application %s failed: %s\n",
@@ -262,60 +269,100 @@ int run(int argc, char **argv) {
   std::signal(SIGINT, stopRuntime);
   std::signal(SIGTERM, stopRuntime);
 
-  if (run_system_ui) {
-    oos::ui::DeviceStatusMonitor status_monitor(*platform_device);
-    status_monitor.start();
-    oos::ui::SystemUi system_ui(compositor, repository, &status_monitor);
-    if (!system_ui.initialize()) {
-      std::fprintf(stderr, "failed to start SystemUI: %s\n",
-                   system_ui.lastError().c_str());
+  constexpr uint32_t kStatusHeight = 22;
+  const uint32_t content_height = descriptor.primary_height - kStatusHeight;
+  auto app_surface = compositor.createLayer(
+      {"application", 0, static_cast<int32_t>(kStatusHeight),
+       descriptor.primary_width, content_height, 0});
+  auto overlay_surface = compositor.createLayer(
+      {"system-overlay", 0, static_cast<int32_t>(kStatusHeight),
+       descriptor.primary_width, content_height, 100});
+  auto status_surface = compositor.createLayer(
+      {"status-bar", 0, 0, descriptor.primary_width, kStatusHeight, 200});
+  if (!app_surface || !overlay_surface || !status_surface) {
+    std::fprintf(stderr, "failed to create OOS compositor layers\n");
+    platform_device->shutdown();
+    return 1;
+  }
+
+  oos::ui::DeviceStatusMonitor status_monitor(*platform_device);
+  status_monitor.start();
+  oos::apps::systemui::SystemUi system_ui(*status_surface, *overlay_surface,
+                                          &status_monitor);
+  if (!system_ui.initialize()) {
+    std::fprintf(stderr, "failed to start SystemUI: %s\n",
+                 system_ui.lastError().c_str());
+    status_monitor.stop();
+    platform_device->shutdown();
+    return 1;
+  }
+
+  std::unique_ptr<oos::apps::launcher::Launcher> launcher;
+  std::unique_ptr<NativeAppManager> apps;
+  std::unique_ptr<NativeAppInputTarget> native_input;
+  oos::window::ApplicationInputTarget *foreground_input = nullptr;
+  const char *runtime_id = run_launcher ? "cc.jaxy.oos.launcher"
+                           : raw_module ? "diagnostic"
+                                        : app_id;
+  if (run_launcher) {
+    launcher = std::make_unique<oos::apps::launcher::Launcher>(*app_surface,
+                                                               repository);
+    if (!launcher->initialize()) {
+      std::fprintf(stderr, "failed to start Launcher: %s\n",
+                   launcher->lastError());
+      system_ui.shutdown();
       status_monitor.stop();
       platform_device->shutdown();
       return 1;
     }
-    std::fprintf(stderr, "OOS LVGL SystemUI started on %s\n", descriptor.id);
-    std::fflush(stderr);
-    SystemUiInputContext input_context{&system_ui};
-    uint32_t next_delay_ms = 1;
-    while (!g_stop_requested && !input.stopRequested()) {
-      if (!system_ui.frame(monotonicMicros(), next_delay_ms)) {
-        std::fprintf(stderr, "SystemUI frame failed: %s\n",
-                     system_ui.lastError().c_str());
-        break;
-      }
-      const int poll_result = input.poll(static_cast<int>(next_delay_ms),
-                                         dispatchSystemUiKey, &input_context);
-      if (poll_result < 0 || !input_context.success)
-        break;
+    foreground_input = launcher.get();
+  } else {
+    apps = std::make_unique<NativeAppManager>(*app_surface, *platform_device);
+    if (!apps->load(runtime_id, native_launch) || !apps->activate(runtime_id)) {
+      std::fprintf(stderr, "failed to start native app %s: %s\n",
+                   native_launch.module_path, apps->lastError());
+      system_ui.shutdown();
+      status_monitor.stop();
+      platform_device->shutdown();
+      return 1;
     }
-    const bool stopped = g_stop_requested || input.stopRequested();
-    system_ui.shutdown();
-    status_monitor.stop();
-    platform_device->shutdown();
-    return stopped ? 0 : 1;
+    native_input = std::make_unique<NativeAppInputTarget>(*apps);
+    foreground_input = native_input.get();
   }
-
-  NativeAppManager apps(compositor, *platform_device);
-  const char *runtime_id = raw_module ? "diagnostic" : app_id;
-  if (!apps.load(runtime_id, native_launch) || !apps.activate(runtime_id)) {
-    std::fprintf(stderr, "failed to start native app %s: %s\n",
-                 native_launch.module_path, apps.lastError());
-    platform_device->shutdown();
-    return 1;
-  }
-  std::fprintf(stderr, "OOS native app started on %s: %s\n", descriptor.id,
-               native_launch.module_path);
+  std::fprintf(stderr, "OOS shell started on %s: app=%s\n", descriptor.id,
+               runtime_id);
   std::fflush(stderr);
 
-  NativeInputContext input_context{&apps};
+  oos::window::InputRouter input_router(system_ui, *foreground_input);
+  ShellInputContext input_context{&input_router};
   auto next_frame = std::chrono::steady_clock::now();
   while (!g_stop_requested && !input.stopRequested()) {
-    if (input.poll(0, dispatchNativeKey, &input_context) < 0 ||
+    if (input.poll(0, dispatchShellKey, &input_context) < 0 ||
         !input_context.success) {
       break;
     }
-    if (!apps.render(monotonicMicros())) {
-      std::fprintf(stderr, "WASM frame failed: %s\n", apps.lastError());
+    const int64_t frame_time = monotonicMicros();
+    uint32_t system_ui_delay_ms = 1000;
+    if (!system_ui.frame(frame_time, system_ui_delay_ms)) {
+      std::fprintf(stderr, "SystemUI frame failed: %s\n",
+                   system_ui.lastError().c_str());
+      break;
+    }
+    if (!system_ui.locked()) {
+      if (launcher) {
+        uint32_t launcher_delay_ms = 1000;
+        if (!launcher->frame(frame_time, launcher_delay_ms)) {
+          std::fprintf(stderr, "Launcher frame failed: %s\n",
+                       launcher->lastError());
+          break;
+        }
+      } else if (!apps->render(frame_time)) {
+        std::fprintf(stderr, "WASM frame failed: %s\n", apps->lastError());
+        break;
+      }
+    }
+    if (compositor.dirty() && !compositor.compose()) {
+      std::fprintf(stderr, "compositor frame failed\n");
       break;
     }
     next_frame += std::chrono::milliseconds(kFrameIntervalMs);
@@ -327,7 +374,12 @@ int run(int argc, char **argv) {
   }
 
   const bool stopped = g_stop_requested || input.stopRequested();
-  apps.shutdown();
+  if (apps)
+    apps->shutdown();
+  if (launcher)
+    launcher->shutdown();
+  system_ui.shutdown();
+  status_monitor.stop();
   platform_device->shutdown();
   return stopped ? 0 : 1;
 }

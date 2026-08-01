@@ -8,4 +8,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-oos-app = { path = "../../sdk/rust/oos-app" }
+oos-app = { path = "../../../sdk/rust/oos-app" }

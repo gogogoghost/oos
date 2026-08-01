@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// Internal mirror of the canonical layouts defined by apps/sdk/wit/oos.wit.
+// Internal mirror of the canonical layouts defined by sdk/wit/oos.wit.
 // Guest applications use generated WIT bindings and never include this header.
 #define OOS_WASM_ABI_VERSION 3u
 #define OOS_GFX_MAX_TEXTURE_SIZE 2048u

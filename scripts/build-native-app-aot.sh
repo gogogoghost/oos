@@ -13,8 +13,8 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
 fi
 
 WAMRC="$ROOT_DIR/build/host-wamrc/wamrc"
-INPUT="$ROOT_DIR/build/native-apps/launcher.wasm"
-OUTPUT="$ROOT_DIR/build/native-apps/launcher.aot"
+INPUT="$ROOT_DIR/build/native-apps/egui-demo.wasm"
+OUTPUT="$ROOT_DIR/build/native-apps/egui-demo.aot"
 BUILD_CONTAINER=${OOS_WAMR_DISTROBOX:-}
 
 if [[ -f "$OUTPUT" && "$OUTPUT" -nt "$INPUT" \

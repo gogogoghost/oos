@@ -8,7 +8,7 @@ BUILD_DIR="$ROOT_DIR/build/host-wamr-runtime"
 "$ROOT_DIR/scripts/fetch-wamr.sh"
 "$ROOT_DIR/scripts/build-native-apps.sh"
 if command -v wasm-tools >/dev/null 2>&1 &&
-    [[ -f "$ROOT_DIR/build/native-apps/launcher.component.wasm" ]]; then
+    [[ -f "$ROOT_DIR/build/native-apps/egui-demo.component.wasm" ]]; then
   "$ROOT_DIR/scripts/verify-wit-interfaces.sh"
 else
   echo "Skipping Component Model verification: wasm-tools/component output unavailable"
@@ -17,7 +17,7 @@ cmake -S "$ROOT_DIR/system/tests/host" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD_DIR"
 "$BUILD_DIR/oos_wasm_runtime_test" \
-  "$ROOT_DIR/build/native-apps/launcher.wasm" \
+  "$ROOT_DIR/build/native-apps/egui-demo.wasm" \
   "$ROOT_DIR/build/native-apps/wit-smoke.wasm" \
   "$ROOT_DIR/system/assets/fonts"
 

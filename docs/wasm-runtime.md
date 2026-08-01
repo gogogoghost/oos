@@ -51,7 +51,7 @@ under OOS control instead of being requested by application manifests.
 
 ## WIT Interface Package
 
-`apps/sdk/wit/oos.wit` is the single source of truth. It describes runtime/logging,
+`sdk/wit/oos.wit` is the single source of truth. It describes runtime/logging,
 graphics, read-only system fonts, device identity and capabilities, device
 services, application-private storage, user-visible device storage, and
 lifecycle interfaces with WIT records, enums, flags, lists, strings, and
@@ -123,7 +123,7 @@ imports and exports. WAMR runs that core module directly and `wamrc` compiles
 the same module to ARMv7 AOT.
 
 The build also runs `wasm-tools component new` and emits
-`launcher.component.wasm`. That file is a real component for compatible
+`egui-demo.component.wasm`. That file is a real component for compatible
 runtimes, composition tools, and host-binding generators; it is not passed to
 WAMR. This preserves the phone's tested AOT path without inventing another
 interface model.
@@ -134,7 +134,7 @@ Each native application ZIP contains `entry.wasm`, `entry.aot`, or both. AOT is
 preferred when present, and AOT-only production packages avoid carrying a
 redundant core Wasm module.
 
-The optional `launcher.component.wasm` remains a build/tooling artifact until
+The optional `egui-demo.component.wasm` remains a build/tooling artifact until
 the runtime has a Component Model loader; it is not required in the device
 package.
 
@@ -192,7 +192,7 @@ make test-wasm
 make verify-wit
 ```
 
-The host integration test loads three Launcher instances through
+The host integration test loads three egui demo instances through
 `NativeAppManager`, verifies the resident limit, switches input/rendering to
 the active instance, and checks texture cleanup. It then loads a generated WIT
 smoke guest that imports every device-service interface and validates
