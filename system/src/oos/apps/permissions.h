@@ -17,11 +17,6 @@ enum class DeviceServicePermission : uint32_t {
   System = 1U << 7,
 };
 
-struct DataStoreGrant {
-  std::string name;
-  bool writable = false;
-};
-
 constexpr uint32_t permissionBit(DeviceServicePermission permission) {
   return static_cast<uint32_t>(permission);
 }
@@ -53,31 +48,9 @@ deviceServicePermissionMask(const std::vector<std::string> &permissions) {
   return mask;
 }
 
-constexpr bool hasDeviceServicePermission(
-    uint32_t mask, DeviceServicePermission permission) {
+constexpr bool hasDeviceServicePermission(uint32_t mask,
+                                          DeviceServicePermission permission) {
   return (mask & permissionBit(permission)) != 0;
-}
-
-inline std::vector<DataStoreGrant>
-ownedDataStoreGrants(const std::vector<std::string> &permissions) {
-  constexpr const char read_only[] = "datastore-owned:readonly:";
-  constexpr const char read_write[] = "datastore-owned:readwrite:";
-  std::vector<DataStoreGrant> grants;
-  for (const std::string &permission : permissions) {
-    const char *prefix = nullptr;
-    size_t prefix_size = 0;
-    if (permission.compare(0, sizeof(read_only) - 1, read_only) == 0) {
-      prefix = read_only;
-      prefix_size = sizeof(read_only) - 1;
-    } else if (permission.compare(0, sizeof(read_write) - 1,
-                                  read_write) == 0) {
-      prefix = read_write;
-      prefix_size = sizeof(read_write) - 1;
-    }
-    if (prefix && permission.size() > prefix_size)
-      grants.push_back({permission.substr(prefix_size), true});
-  }
-  return grants;
 }
 
 } // namespace oos::apps

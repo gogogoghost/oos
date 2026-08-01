@@ -78,8 +78,7 @@ mkdir -p "$OOS_PERSIST_DIR"
 chmod 0700 "$OOS_PERSIST_DIR"
 mkdir -p "$OOS_PERSIST_DIR/system" "$OOS_PERSIST_DIR/runtime" \
   "$OOS_PERSIST_DIR/packages" "$OOS_PERSIST_DIR/users/0/wasm" \
-  "$OOS_PERSIST_DIR/users/0/web" "$OOS_PERSIST_DIR/cache/aot" \
-  "$OOS_PERSIST_DIR/cache/web" "$OOS_PERSIST_DIR/staging" \
+  "$OOS_PERSIST_DIR/cache/aot" "$OOS_PERSIST_DIR/staging" \
   "$OOS_PERSIST_DIR/tmp" "$OOS_PERSIST_DIR/media/internal" \
   "$OOS_PERSIST_DIR/media/removable"
 

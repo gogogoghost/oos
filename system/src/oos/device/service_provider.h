@@ -16,9 +16,9 @@
 
 namespace oos::device {
 
-// One lazy service facade is shared by WPE adapters and WAMR imports. Device
-// targets connect to their existing HAL managers; local supplies deterministic
-// data through the same contract.
+// One lazy service facade is shared by WAMR imports and trusted system code.
+// Device targets connect to their existing HAL managers; local supplies
+// deterministic data through the same contract.
 class ServiceProvider {
 public:
   explicit ServiceProvider(const Device &device);

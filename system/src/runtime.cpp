@@ -16,10 +16,8 @@
 #include "oos/device/device.h"
 #include "oos/device/display.h"
 #include "oos/input/key_input.h"
+#include "oos/resources/boot_splash.h"
 #include "oos/runtime/native_app_manager.h"
-#if defined(OOS_EXTERNAL_WPE_RUNTIME)
-#include "oos/web/wpe_app_host.h"
-#endif
 
 namespace oos::platform {
 namespace {
@@ -32,14 +30,10 @@ using oos::input::KeyInputSource;
 using oos::runtime::NativeAppLaunchOptions;
 using oos::runtime::NativeAppManager;
 
-#ifndef OOS_DEFAULT_BOOT_SPLASH
-#define OOS_DEFAULT_BOOT_SPLASH "/opt/oos/share/oos/boot-splash.png"
-#endif
 #ifndef OOS_DEFAULT_LAUNCHER_PACKAGE
 #define OOS_DEFAULT_LAUNCHER_PACKAGE                                           \
   "/opt/oos/packages/org.orangeos.launcher/application.zip"
 #endif
-constexpr const char *kDefaultBootSplash = OOS_DEFAULT_BOOT_SPLASH;
 constexpr const char *kDefaultLauncherPackage = OOS_DEFAULT_LAUNCHER_PACKAGE;
 constexpr const char *kDefaultLauncherId = "org.orangeos.launcher";
 constexpr int kFrameIntervalMs = 33;
@@ -91,12 +85,14 @@ int64_t monotonicMicros() {
 
 void stopRuntime(int) { g_stop_requested = 1; }
 
-bool loadBootSplash(const char *path, uint32_t expected_width,
-                    uint32_t expected_height, std::vector<uint16_t> &rgb565) {
+bool loadBootSplash(uint32_t expected_width, uint32_t expected_height,
+                    std::vector<uint16_t> &rgb565) {
   png_image image = {};
   image.version = PNG_IMAGE_VERSION;
-  if (!png_image_begin_read_from_file(&image, path)) {
-    std::fprintf(stderr, "failed to open boot splash %s: %s\n", path,
+  if (!png_image_begin_read_from_memory(
+          &image, oos::resources::embeddedBootSplashPng(),
+          oos::resources::embeddedBootSplashPngSize())) {
+    std::fprintf(stderr, "failed to decode embedded boot splash: %s\n",
                  image.message);
     return false;
   }
@@ -109,7 +105,7 @@ bool loadBootSplash(const char *path, uint32_t expected_width,
   image.format = PNG_FORMAT_RGB;
   std::vector<uint8_t> rgb(PNG_IMAGE_SIZE(image));
   if (!png_image_finish_read(&image, nullptr, rgb.data(), 0, nullptr)) {
-    std::fprintf(stderr, "failed to decode boot splash %s: %s\n", path,
+    std::fprintf(stderr, "failed to decode embedded boot splash: %s\n",
                  image.message);
     png_image_free(&image);
     return false;
@@ -143,24 +139,16 @@ void dispatchKey(void *data, const KeyEvent &event) {
 void printUsage(const char *program) {
   std::fprintf(stderr,
                "usage: %s [--app APP_ID | --module APP.wasm|APP.aot]\n"
-               "       %s --install APPLICATION.zip [--id APP_ID]\n"
+               "       %s --install APPLICATION.zip\n"
                "       %s --list-apps\n",
                program, program, program);
 }
 
 int runRepositoryCommand(int argc, char **argv,
                          oos::apps::AppRepository &repository) {
-  if ((argc == 3 || argc == 5) && std::strcmp(argv[1], "--install") == 0) {
-    oos::apps::AppInstallOptions options;
-    if (argc == 5) {
-      if (std::strcmp(argv[3], "--id") != 0) {
-        printUsage(argv[0]);
-        return 2;
-      }
-      options.app_id = argv[4];
-    }
+  if (argc == 3 && std::strcmp(argv[1], "--install") == 0) {
     oos::apps::AppRecord installed;
-    if (!repository.install(argv[2], options, &installed)) {
+    if (!repository.install(argv[2], &installed)) {
       std::fprintf(stderr, "install failed: %s\n",
                    repository.lastError().c_str());
       return 1;
@@ -191,7 +179,7 @@ int runRepositoryCommand(int argc, char **argv,
 } // namespace
 
 int run(int argc, char **argv) {
-  if (argc > 5) {
+  if (argc > 3) {
     printUsage(argv[0]);
     return 2;
   }
@@ -223,7 +211,6 @@ int run(int argc, char **argv) {
 
   oos::apps::AppLaunch app_launch;
   NativeAppLaunchOptions native_launch;
-  oos::apps::RuntimeKind runtime_kind = oos::apps::RuntimeKind::Wamr;
   if (raw_module) {
     native_launch.module_path = raw_module;
   } else {
@@ -239,19 +226,16 @@ int run(int argc, char **argv) {
                    repository.lastError().c_str());
       return 1;
     }
-    runtime_kind = app_launch.app.manifest.runtime_kind;
-    if (runtime_kind == oos::apps::RuntimeKind::Wamr) {
-      native_launch.module_path = app_launch.executable_path.c_str();
-      native_launch.data_directory = app_launch.data_directory.c_str();
-      native_launch.system_data_root = data_root;
-      native_launch.app_repository = &repository;
-      native_launch.stack_size = app_launch.app.manifest.stack_bytes;
-      native_launch.heap_size = app_launch.app.manifest.heap_bytes;
-      native_launch.service_permission_mask =
-          oos::apps::deviceServicePermissionMask(
-              app_launch.app.manifest.requested_permissions);
-      native_launch.enforce_service_permissions = true;
-    }
+    native_launch.module_path = app_launch.executable_path.c_str();
+    native_launch.data_directory = app_launch.data_directory.c_str();
+    native_launch.system_data_root = data_root;
+    native_launch.app_repository = &repository;
+    native_launch.stack_size = app_launch.app.manifest.stack_bytes;
+    native_launch.heap_size = app_launch.app.manifest.heap_bytes;
+    native_launch.service_permission_mask =
+        oos::apps::deviceServicePermissionMask(
+            app_launch.app.manifest.requested_permissions);
+    native_launch.enforce_service_permissions = true;
   }
 
   std::unique_ptr<Device> platform_device = device::createDevice();
@@ -267,9 +251,8 @@ int run(int argc, char **argv) {
   const device::DeviceDescriptor &descriptor = platform_device->descriptor();
 
   std::vector<uint16_t> boot_frame;
-  const char *boot_path = environmentOr("OOS_BOOT_SPLASH", kDefaultBootSplash);
-  if (!loadBootSplash(boot_path, descriptor.primary_width,
-                      descriptor.primary_height, boot_frame) ||
+  if (!loadBootSplash(descriptor.primary_width, descriptor.primary_height,
+                      boot_frame) ||
       !display.showBootFrame(boot_frame.data())) {
     std::fprintf(stderr, "failed to present OOS boot splash\n");
     platform_device->shutdown();
@@ -279,27 +262,6 @@ int run(int argc, char **argv) {
   Compositor compositor(display);
   std::signal(SIGINT, stopRuntime);
   std::signal(SIGTERM, stopRuntime);
-  if (runtime_kind == oos::apps::RuntimeKind::Wpe) {
-#if defined(OOS_EXTERNAL_WPE_RUNTIME)
-    oos::web::WpeAppHost web_app(compositor, input, *platform_device,
-                                 repository);
-    std::fprintf(stderr, "OOS WPE app starting on %s: %s\n", descriptor.id,
-                 app_launch.app.manifest.id.c_str());
-    std::fflush(stderr);
-    const bool success = web_app.run(app_launch, &g_stop_requested);
-    if (!success)
-      std::fprintf(stderr, "WPE foreground app failed: %s\n",
-                   web_app.lastError().c_str());
-    platform_device->shutdown();
-    return success ? 0 : 1;
-#else
-    std::fprintf(stderr,
-                 "WPE foreground applications are unavailable on this build\n");
-    platform_device->shutdown();
-    return 1;
-#endif
-  }
-
   NativeAppManager apps(compositor, *platform_device);
   const char *runtime_id = raw_module ? "diagnostic" : app_id;
   if (!apps.load(runtime_id, native_launch) || !apps.activate(runtime_id)) {

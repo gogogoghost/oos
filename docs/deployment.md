@@ -1,18 +1,15 @@
 # OOS Runtime Deployment
 
-The deployable OOS system is split into a stable bootstrap scaffold and a
-versioned `res` runtime. In this context, `res` is the complete OOS runtime,
-not web application content. It contains the `oos` executable, WPE WebKit,
-shared libraries, WebKit helper processes, runtime data, and certificates.
-It also contains WAMR native applications and the device boot splash; all are
-upgraded atomically with the native runtime. Shared native-app fonts are
-installed under `share/fonts` with their licenses under `share/licenses/oos`.
+Deployment is split into a stable bootstrap scaffold and an atomic versioned
+runtime resource (`res`). The resource contains the native `oos` executable,
+the WAMR Launcher package, fonts, and licenses. The boot splash is embedded in
+the `oos` executable. The resource contains no browser engine, JavaScript
+runtime, or Web helper process.
 
 ## Installed Layout
 
-Production firmware stores the directory at `/system/oos`. Development and
-trial installations use the identical layout at `/data/local/tmp/oos`.
-Bootstrap scripts derive the installation path from their own location.
+Production firmware uses `/system/oos`; development uses the same layout under
+`/data/local/tmp/oos`:
 
 ```text
 oos/
@@ -26,180 +23,93 @@ oos/
 ├── rootfs/
 ├── res -> res-1.0.0
 ├── res-1.0.0/
-│   ├── packages/org.orangeos.launcher/application.zip
 │   ├── bin/oos
-│   ├── bin/oos-wpe
-│   └── ...
+│   ├── packages/org.orangeos.launcher/application.zip
+│   ├── manifest.env
+│   ├── SHA256SUMS
+│   └── COMPLETE
 └── res-1.0.1/
 ```
 
-`/data/oos` is created with mode `0700` and bind-mounted at `rootfs/data` for
-persistent state. It contains the application registry, canonical package
-ZIPs, per-app WAMR/WebKit data, runtime caches, staging, temporary data, and
-internal/removable media views. The selected version is bind-mounted at
-`rootfs/opt/oos`.
-The rootfs also receives `/system`, `/dev`, `/proc`, and `/sys`, plus `/vendor`
-and Runtime APEX when those trees exist on the selected Android release.
+`/data/oos` is the persistent root. `init.sh` bind-mounts it at
+`rootfs/data`, mounts the active resource at `rootfs/opt/oos`, and mounts the
+stock `/system`, `/dev`, `/proc`, `/sys`, optional `/vendor`, and Runtime APEX.
+Internal storage and the first mounted TF-card candidate are exposed under
+`/data/media`; application databases and packages stay on `/data/oos`.
 
-All lifecycle scripts share one lock, so activation, initialization, start,
-deinitialization, and res garbage collection cannot race. `start.sh` always
-invokes `init.sh` itself so mount setup and chroot execution
-occur in the same mount namespace. It runs as a foreground supervisor,
-forwards termination signals, records the child PID, removes the PID file on
-normal exit, and returns the real `oos` exit status. `deinit.sh` terminates a
-running instance and unmounts in reverse order. Lazy unmount is disabled by
-default; set `OOS_FORCE_LAZY_UNMOUNT=1` only for recovery.
+The scaffold is device-specific because HWC service names, audio readiness,
+and removable-storage mount points differ between the Nokia 2780 Flip and
+8110 4G. A resource package also records its target device and cannot be
+activated by a mismatched scaffold.
 
 ## Build Packages
 
-Build Android `oos` and the WPE sysroot first, then generate the scaffold:
+Build OOS and the ARMv7 Launcher before packaging:
 
 ```sh
-./scripts/package-oos-scaffold.sh --res-version 1.0.0 --tgz
+make native-app-aot
+make system DEVICE=nokia-2780-flip
+./scripts/package-oos-scaffold.sh \
+  --device nokia-2780-flip --res-version 1.0.0 --tgz
+./scripts/package-oos-res.sh 1.0.0 \
+  --device nokia-2780-flip --activate --tgz
 ```
 
-The default directory is `dist/nokia-2780-flip/oos`. The optional archive is
-`dist/nokia-2780-flip/oos-scaffold-nokia-2780-flip.tgz` and contains a single
-top-level `oos` directory.
+Outputs are written below `dist/<device>/`. The scaffold and resource scripts
+can also emit directories only. Packaging rejects unresolved ELF dependencies
+against the selected stock system and strips the production executable.
 
-Generate and optionally activate a runtime version in that directory:
-
-```sh
-./scripts/package-oos-res.sh 1.0.0 --activate --tgz
-```
-
-The res archive contains a single top-level `res-1.0.0` directory. The
-generator copies target shared objects and runtime data while excluding the
-WPE sysroot's headers, static libraries, pkg-config metadata, and host tools.
-Each package contains a manifest, `SHA256SUMS`, and a `COMPLETE` marker.
-Packaging also checks the dynamic dependency closure against the packaged
-libraries and `NOKIA_2780_SYSTEM_DIR` from `.env`; unresolved SONAMEs stop the
-build.
-
-Both scripts accept `--device` and `--output`. Nokia 2780 and Nokia 8110
-packages use separate scaffold directories, WPE sysroots, Android API metadata,
-compiled-prefix links, and system-library dependency checks. For example:
-
-```sh
-./scripts/package-oos-scaffold.sh --device nokia-8110-4g \
-  --res-version 1.0.0 --tgz
-./scripts/package-oos-res.sh 1.0.0 --device nokia-8110-4g \
-  --activate --tgz
-```
+For the 8110 use `--device nokia-8110-4g` and build that system target first.
+Android 6 and Android 10 always use separate CMake directories and resource
+packages.
 
 ## Trial Installation
 
-Push and extract the two independent archives:
+For a tgz-based development installation:
 
 ```sh
 adb push dist/nokia-2780-flip/oos-scaffold-nokia-2780-flip.tgz \
   /data/local/tmp/
-adb shell "su -c 'tar -xzf /data/local/tmp/oos-scaffold-nokia-2780-flip.tgz \
-  -C /data/local/tmp'"
-
 adb push dist/nokia-2780-flip/oos-res-nokia-2780-flip-1.0.0.tgz \
   /data/local/tmp/
-adb shell "su -c 'tar -xzf \
-  /data/local/tmp/oos-res-nokia-2780-flip-1.0.0.tgz \
-  -C /data/local/tmp/oos'"
+adb shell
+su
+mkdir -p /data/local/tmp/oos-install
+cd /data/local/tmp/oos-install
+tar -xzf ../oos-scaffold-nokia-2780-flip.tgz
+tar -xzf ../oos-res-nokia-2780-flip-1.0.0.tgz
+cd oos
+./activate-res.sh 1.0.0
+./init.sh
+./start.sh
 ```
 
-The Nokia 8110 image has `gzip` but no `gunzip` applet, so its `tar -xzf`
-path is not usable. With root adbd, extract the same archives through BusyBox:
+On a device where `adb shell` is already root, omit `su`. Archive extraction
+must preserve the `res` symbolic link. `start.sh` calls `init.sh` itself, so the
+explicit initialization above is useful for diagnosis but not mandatory.
+
+`start.sh` validates checksums and the device ID, stops B2G, initializes the
+selected display service, and enters the rootfs with `chroot`. Stock system
+libraries take precedence in `LD_LIBRARY_PATH`; OOS does not carry a parallel
+browser C++ runtime.
+
+## Upgrade And Cleanup
+
+Install a new `res-X.Y.Z` beside the old one, stop OOS, unmount the old runtime,
+then activate and start the new version:
 
 ```sh
-adb shell 'cd /data/local/tmp && busybox gzip -dc \
-  oos-scaffold-nokia-8110-4g.tgz | tar -xf -'
-adb shell 'cd /data/local/tmp/oos && busybox gzip -dc \
-  ../oos-res-nokia-8110-4g-1.0.0.tgz | tar -xf -'
+./deinit.sh
+./activate-res.sh 1.0.1
+./start.sh
 ```
 
-Activate, initialize, and start:
+Activation verifies `manifest.env`, `SHA256SUMS`, and `COMPLETE` before
+switching the symlink. The previous resource is retained for rollback.
+`./gc-res.sh` previews obsolete versions; `./gc-res.sh --apply` deletes only
+versions that are neither active nor the recorded previous version.
 
-```sh
-adb shell "su -c '/data/local/tmp/oos/activate-res.sh 1.0.0'"
-adb shell "su -c '/data/local/tmp/oos/init.sh'"  # optional diagnostic step
-adb shell "su -c '/data/local/tmp/oos/start.sh'"
-```
-
-`start.sh` performs idempotent initialization, so invoking `init.sh` manually
-is not required. The production entry presents the 240x320 boot splash,
-imports `/opt/oos/packages/org.orangeos.launcher/application.zip` into the
-application registry on first boot, selects its AOT entry for WAMR, and
-forwards physical navigation keys to it. The portable Wasm fallback stays in
-the same ZIP. Selecting a registered KaiOS application starts the packaged
-`/opt/oos/bin/oos-wpe` producer while the main OOS process retains display and
-input ownership. Each Web app receives separate persistent WebKit data and
-content-versioned cache directories.
-
-On Nokia 8110, `start.sh` waits for both a responsive AudioFlinger Binder
-service and an initialized Qualcomm ACDB calibration handle before stopping
-`b2g`. Registering `media.audio_flinger` alone is not sufficient: Android 6
-registers it before mediaserver starts its Binder pool. Starting OOS in that
-window can leave OpenSL accepting buffers while the PCM device never opens.
-Do not restart mediaserver repeatedly after an ACDB allocation failure; the
-driver can retain calibration blocks until the next device reboot.
-
-## WPE Inspector
-
-Remote inspector support is built into WPE but remains disabled at runtime.
-Enable it only for a diagnostic launch; the HTTP frontend listens on device
-loopback and is exposed to the host through ADB:
-
-```sh
-adb shell 'cd /data/local/tmp/oos && \
-  OOS_ENABLE_INSPECTOR=1 OOS_TRACE_WEB_CONSOLE=1 \
-  OOS_TRACE_DEVICE_API=1 ./start.sh --app omnij2me'
-./scripts/forward-wpe-inspector.sh
-```
-
-Open `http://127.0.0.1:9222/` in a desktop browser and select the advertised
-page. Set `OOS_INSPECTOR_ADDRESS=127.0.0.1:<port>` and pass the same port to
-the forwarding script when 9222 is already occupied.
-
-For a persistent runtime switch, copy `runtime.conf.example` to
-`/data/oos/system/runtime.conf`, set `OOS_ENABLE_INSPECTOR=1`, and restart the
-current WPE application. Remote inspector support stays compiled into every
-WPE device profile; changing this file never requires a rebuild.
-
-WebAudio diagnostics use the same file. `OOS_TRACE_WEBAUDIO=1` logs WebCore PCM
-burst boundaries, and `OOS_WEB_AUDIO_NICE` controls the nice value applied only
-to WPE audio feeder threads (`-10` by default, `0` to disable adjustment).
-Leave tracing disabled outside a diagnostic run.
-
-WPE compositor diagnostics are also runtime switches.
-`OOS_PROFILE_WPE_FRAMES=1` reports five-second latency distributions and drop
-counts with low log volume. `OOS_TRACE_WPE_FRAMES=1` logs each frame and HWC
-fence and should be enabled only for a short capture.
-
-## Upgrade
-
-Extract the new res archive beside the existing version, stop the supervising
-service, and unmount the old runtime before switching:
-
-```sh
-/system/oos/deinit.sh
-/system/oos/activate-res.sh 1.0.1
-/system/oos/start.sh
-```
-
-`activate-res.sh` rejects an active process or mounted res, verifies all file
-hashes, checks the target device, and then replaces the `res` symlink. On a
-Nokia 2780, reading and hashing the current 221 MB runtime takes roughly 20-30
-seconds. When production `/system` is read-only, adding a res directory and
-updating the link
-must be performed by the firmware/OTA installation environment or after an
-explicit writable remount; the runtime scripts do not remount `/system`.
-
-`gc-res.sh` is dry-run by default and retains the active and previously active
-versions. Run `gc-res.sh --apply` only after reviewing its list.
-
-The local WPE build uses `/opt/oos` as its native install prefix and stages it
-with `DESTDIR`, so user-namespace tests exercise the final paths directly.
-Local packaging records the host GStreamer version and generates the plugin
-registry consumed from `/opt/oos/share/gstreamer-1.0`; the namespace disables
-runtime registry updates to keep WebProcess startup deterministic.
-The current Android Cerbero outputs still embed their isolated build prefixes;
-Android scaffold generation supplies the corresponding chroot-only
-compatibility link until those profiles also move to a staged `/opt/oos`
-install.
+All lifecycle operations use one lock. `deinit.sh` first terminates the tracked
+OOS process, then unmounts paths in reverse order. Lazy unmount is disabled by
+default and can be explicitly enabled with `OOS_FORCE_LAZY_UNMOUNT=1` for
+recovery.

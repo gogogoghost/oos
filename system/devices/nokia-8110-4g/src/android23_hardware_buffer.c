@@ -24,9 +24,9 @@
 void AHardwareBuffer_acquire(AHardwareBuffer *buffer);
 void AHardwareBuffer_release(AHardwareBuffer *buffer);
 
-// WPE 2.52 uses the API 26 NDK shared-memory surface. Android 6 provides the
-// same kernel facility through /dev/ashmem, so expose the missing ABI symbols
-// without requiring a newer platform libc.
+// The native compositor uses API 26-style shared-memory surfaces. Android 6
+// provides the same kernel facility through /dev/ashmem, so expose the missing
+// ABI symbols without requiring a newer platform libc.
 int ASharedMemory_create(const char *name, size_t size) {
   if (size == 0) {
     errno = EINVAL;

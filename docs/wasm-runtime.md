@@ -141,7 +141,7 @@ AOT retains WebAssembly bounds checks and WAMR validation but removes the
 continuous interpreter cost on the Nokia 2780. JIT is deliberately not part
 of the native-app runtime: AOT is deterministic, needs no writable-executable
 memory on the phone, and is available for this ARMv7 target. This decision is
-independent from JavaScriptCore JIT retained for WPE/KaiOS applications.
+independent from any browser engine or JavaScript runtime.
 
 Module files are loaded with writable private `mmap` rather than copied into
 anonymous malloc memory. Unmodified AOT pages stay file-backed and reclaimable;
@@ -199,7 +199,7 @@ independent Launcher states on the physical display for suspend/resume and
 memory validation.
 
 WAMR uses local LLVM by default. Set `OOS_WAMR_DISTROBOX` only when its LLVM
-toolchain lives in a Distrobox; this is separate from `WPE_DISTROBOX`.
+toolchain can live in a dedicated Distrobox without affecting device builds.
 
 ## Nokia 2780 Validation
 

@@ -72,19 +72,9 @@ bool parseRecord(storage::SqliteStatement &statement, AppRecord &record) {
   parsed.manifest.id = id;
   parsed.manifest.name = name;
   parsed.manifest.version = version;
-  if (std::strcmp(package_kind, "oos-wasm-v1") == 0)
-    parsed.manifest.package_kind = PackageKind::OosWasmV1;
-  else if (std::strcmp(package_kind, "kaios-v2") == 0)
-    parsed.manifest.package_kind = PackageKind::KaiOs2;
-  else if (std::strcmp(package_kind, "kaios-v3") == 0)
-    parsed.manifest.package_kind = PackageKind::KaiOs3;
-  else
+  if (std::strcmp(package_kind, "oos-wasm-v1") != 0)
     return false;
-  if (std::strcmp(runtime_kind, "wamr") == 0)
-    parsed.manifest.runtime_kind = RuntimeKind::Wamr;
-  else if (std::strcmp(runtime_kind, "wpe") == 0)
-    parsed.manifest.runtime_kind = RuntimeKind::Wpe;
-  else
+  if (std::strcmp(runtime_kind, "wamr") != 0)
     return false;
   parsed.manifest.api_profile = api_profile;
   parsed.manifest.entrypoint = entrypoint;
@@ -102,11 +92,10 @@ bool parseRecord(storage::SqliteStatement &statement, AppRecord &record) {
 bool loadGrantedPermissions(storage::SqliteDatabase &database,
                             AppRecord &record) {
   storage::SqliteStatement permissions;
-  if (!database.prepare(
-          "SELECT permission FROM app_permissions"
-          " WHERE app_id=? AND requested=1 AND granted=1"
-          " ORDER BY permission;",
-          permissions) ||
+  if (!database.prepare("SELECT permission FROM app_permissions"
+                        " WHERE app_id=? AND requested=1 AND granted=1"
+                        " ORDER BY permission;",
+                        permissions) ||
       !permissions.bindText(1, record.manifest.id))
     return false;
   record.manifest.requested_permissions.clear();
@@ -123,10 +112,10 @@ bool loadGrantedPermissions(storage::SqliteDatabase &database,
 
 bool loadHandlers(storage::SqliteDatabase &database, AppRecord &record) {
   storage::SqliteStatement handlers;
-  if (!database.prepare(
-          "SELECT handler_kind,handler_value FROM app_handlers"
-          " WHERE app_id=? ORDER BY handler_kind,handler_value;",
-          handlers) || !handlers.bindText(1, record.manifest.id))
+  if (!database.prepare("SELECT handler_kind,handler_value FROM app_handlers"
+                        " WHERE app_id=? ORDER BY handler_kind,handler_value;",
+                        handlers) ||
+      !handlers.bindText(1, record.manifest.id))
     return false;
   record.manifest.handlers.clear();
   while (true) {
@@ -156,9 +145,8 @@ AppRepository::~AppRepository() = default;
 bool AppRepository::initialize() {
   error_.clear();
   const char *directories[] = {
-      "system",      "runtime",        "packages",        "users/0/wasm",
-      "users/0/web", "cache/aot",      "cache/web",       "staging",
-      "tmp",         "media/internal", "media/removable",
+      "system",  "runtime", "packages",       "users/0/wasm",    "cache/aot",
+      "staging", "tmp",     "media/internal", "media/removable",
   };
   for (const char *directory : directories) {
     if (!storage::ensureDirectory(join(data_root_, directory), 0700, error_))
@@ -177,7 +165,7 @@ bool AppRepository::initialize() {
     return false;
   }
   const int64_t version = schema_version.columnInt64(0);
-  if (version > 1) {
+  if (version > 2) {
     error_ = "application registry schema is newer than this OOS runtime";
     return false;
   }
@@ -214,7 +202,28 @@ bool AppRepository::initialize() {
     error_ = impl_->database.lastError();
     return false;
   }
-  if (version == 0 && !impl_->database.exec("PRAGMA user_version=1;")) {
+  if (version < 2 && !impl_->database.exec(
+                         "BEGIN IMMEDIATE;"
+                         "DELETE FROM app_permissions WHERE app_id IN (SELECT "
+                         "app_id FROM applications WHERE "
+                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr');"
+                         "DELETE FROM app_roles WHERE app_id IN (SELECT app_id "
+                         "FROM applications WHERE package_kind<>'oos-wasm-v1' "
+                         "OR runtime_kind<>'wamr');"
+                         "DELETE FROM app_handlers WHERE app_id IN (SELECT "
+                         "app_id FROM applications WHERE "
+                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr');"
+                         "DELETE FROM app_state WHERE app_id IN (SELECT app_id "
+                         "FROM applications WHERE package_kind<>'oos-wasm-v1' "
+                         "OR runtime_kind<>'wamr');"
+                         "DELETE FROM app_versions WHERE app_id IN (SELECT "
+                         "app_id FROM applications WHERE "
+                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr');"
+                         "DELETE FROM applications WHERE "
+                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr';"
+                         "PRAGMA user_version=2;"
+                         "COMMIT;")) {
+    impl_->database.exec("ROLLBACK;");
     error_ = impl_->database.lastError();
     return false;
   }
@@ -239,18 +248,9 @@ bool AppRepository::install(const char *package_path,
     return false;
   }
   AppManifest manifest;
-  const char *manifest_name = nullptr;
-  PackageKind detected_kind = PackageKind::OosWasmV1;
-  if (archive.find("oos-manifest.json")) {
-    manifest_name = "oos-manifest.json";
-  } else if (archive.find("manifest.webapp")) {
-    manifest_name = "manifest.webapp";
-    detected_kind = PackageKind::KaiOs2;
-  } else if (archive.find("manifest.webmanifest")) {
-    manifest_name = "manifest.webmanifest";
-    detected_kind = PackageKind::KaiOs3;
-  } else {
-    error_ = "application ZIP has no supported manifest";
+  constexpr const char *manifest_name = "oos-manifest.json";
+  if (!archive.find(manifest_name)) {
+    error_ = "application ZIP has no oos-manifest.json";
     return false;
   }
   std::vector<uint8_t> manifest_bytes;
@@ -259,18 +259,10 @@ bool AppRepository::install(const char *package_path,
     return false;
   }
   const std::string manifest_json(manifest_bytes.begin(), manifest_bytes.end());
-  if (std::strcmp(manifest_name, "oos-manifest.json") == 0) {
-    if (!parseAppManifest(manifest_json, manifest, error_))
-      return false;
-    if (!options.app_id.empty() && options.app_id != manifest.id) {
-      error_ = "explicit application id does not match oos-manifest.json";
-      return false;
-    }
-  } else if (options.app_id.empty()) {
-    error_ = "KaiOS application ZIP requires an explicit application id";
+  if (!parseAppManifest(manifest_json, manifest, error_))
     return false;
-  } else if (!parseKaiOsManifest(manifest_json, detected_kind, options.app_id,
-                                 manifest, error_)) {
+  if (!options.app_id.empty() && options.app_id != manifest.id) {
+    error_ = "explicit application id does not match oos-manifest.json";
     return false;
   }
   if (!archive.find(manifest.entrypoint.c_str()) &&
@@ -377,7 +369,8 @@ bool AppRepository::install(const char *package_path,
       if (!impl_->database.prepare(
               "INSERT INTO app_handlers(app_id,handler_kind,handler_value)"
               " VALUES(?,?,?);",
-              insert_handler) || !insert_handler.bindText(1, manifest.id) ||
+              insert_handler) ||
+          !insert_handler.bindText(1, manifest.id) ||
           !insert_handler.bindText(2, handler.kind) ||
           !insert_handler.bindText(3, handler.value) ||
           insert_handler.step() != storage::SqliteStatement::Step::Done) {
@@ -502,24 +495,9 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
     return false;
   }
   const std::string cache_directory =
-      record.manifest.runtime_kind == RuntimeKind::Wamr
-          ? join(join(data_root_, "cache/aot"), record.package_digest)
-          : join(join(join(data_root_, "cache/web"), record.manifest.id),
-                 record.package_digest);
+      join(join(data_root_, "cache/aot"), record.package_digest);
   if (!storage::ensureDirectory(cache_directory, 0700, error_))
     return false;
-  if (record.manifest.runtime_kind == RuntimeKind::Wpe) {
-    const std::string data_directory = join(
-        join(join(join(data_root_, "users"), "0"), "web"), record.manifest.id);
-    if (!storage::ensureDirectory(data_directory, 0700, error_))
-      return false;
-    launch.app = std::move(record);
-    launch.executable_path = launch.app.package_path;
-    launch.entrypoint = entrypoint;
-    launch.data_directory = data_directory;
-    launch.cache_directory = cache_directory;
-    return true;
-  }
   const std::string extension =
       entrypoint.size() >= 4 &&
               entrypoint.substr(entrypoint.size() - 4) == ".aot"
@@ -541,10 +519,8 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
       return false;
   }
 
-  const std::string runtime =
-      record.manifest.runtime_kind == RuntimeKind::Wamr ? "wasm" : "web";
   const std::string data_directory = join(
-      join(join(join(data_root_, "users"), "0"), runtime), record.manifest.id);
+      join(join(join(data_root_, "users"), "0"), "wasm"), record.manifest.id);
   if (!storage::ensureDirectory(data_directory, 0700, error_))
     return false;
   launch.app = std::move(record);

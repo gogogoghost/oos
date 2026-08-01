@@ -71,9 +71,6 @@ install -m 0755 "$TEMPLATE_DIR/init.sh" "$STAGING/init.sh"
 install -m 0755 "$TEMPLATE_DIR/deinit.sh" "$STAGING/deinit.sh"
 install -m 0755 "$TEMPLATE_DIR/start.sh" "$STAGING/start.sh"
 install -m 0755 "$TEMPLATE_DIR/gc-res.sh" "$STAGING/gc-res.sh"
-install -m 0644 "$TEMPLATE_DIR/runtime.conf.example" \
-  "$STAGING/runtime.conf.example"
-
 mkdir -p "$STAGING/rootfs/system" \
   "$STAGING/rootfs/vendor" \
   "$STAGING/rootfs/apex/com.android.runtime" \
@@ -81,14 +78,7 @@ mkdir -p "$STAGING/rootfs/system" \
   "$STAGING/rootfs/proc" \
   "$STAGING/rootfs/sys" \
   "$STAGING/rootfs/data" \
-  "$STAGING/rootfs/opt/oos" \
-  "$STAGING/rootfs/home/jax/project/oos/build/wpe-sysroot"
-
-# WPE 2.52.5 currently embeds this build prefix for injected-bundle lookup.
-# Keep the compatibility entirely inside the chroot until WPE is rebuilt with
-# /opt/oos as its install prefix.
-ln -s /opt/oos \
-  "$STAGING/rootfs/home/jax/project/oos/build/wpe-sysroot/$DEVICE"
+  "$STAGING/rootfs/opt/oos"
 
 case "$DEVICE" in
   nokia-2780-flip)

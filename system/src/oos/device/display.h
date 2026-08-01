@@ -16,8 +16,8 @@ public:
   virtual bool initialize() = 0;
   virtual bool showBootFrame(const uint16_t *rgb565_pixels) = 0;
   virtual bool presentSurface(const compositor::SurfaceFrame &frame) = 0;
-  // EGL contexts are thread-affine. Android backends transfer ownership to
-  // OOS's WPE presentation thread for the lifetime of a Web application.
+  // EGL contexts are thread-affine. Backends expose explicit ownership
+  // transfer for compositor-worker transitions.
   virtual bool detachRenderContext() { return false; }
   virtual bool attachRenderContext() { return false; }
   virtual void refresh() = 0;

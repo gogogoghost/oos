@@ -1,0 +1,14 @@
+#include "oos/resources/boot_splash.h"
+
+namespace oos::resources {
+namespace {
+
+constexpr uint8_t kBootSplashPng[] = {@OOS_BOOT_SPLASH_BYTES@};
+
+} // namespace
+
+const uint8_t *embeddedBootSplashPng() { return kBootSplashPng; }
+
+size_t embeddedBootSplashPngSize() { return sizeof(kBootSplashPng); }
+
+} // namespace oos::resources

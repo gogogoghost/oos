@@ -1,33 +1,46 @@
 # OOS Application Packages And State
 
-OOS stores every installable application as one ZIP file. The ZIP in
-`/data/packages/<app-id>/<version>/<content-key>/application.zip` is the
-canonical package. Runtime files are only materialized into content-addressed
-caches when a VM needs an ordinary file for `mmap`. Application type and
-launch policy live in SQLite rather than being inferred from an arbitrary
-directory at boot.
+OOS supports one application type: an `oos-wasm-v1` ZIP executed by WAMR.
+There is no browser runtime and KaiOS Web packages are not accepted.
 
-## Supported Package Types
+## Package Format
 
-| Package | Manifest | Runtime | API profile |
-| --- | --- | --- | --- |
-| OOS native app | `oos-manifest.json` | WAMR core Wasm or ARMv7 AOT | `oos-wit-0.1` |
-| KaiOS 2.5 app | `manifest.webapp` | WPE WebKit | `kaios-v2` |
-| KaiOS 3 app | `manifest.webmanifest` | WPE WebKit | `kaios-v3` |
+An application ZIP has this layout:
 
-An OOS package declares its stable ID. KaiOS packages currently require the
-installer to supply an ID because the manifest formats do not provide one
-reliable package identity across firmware variants:
-
-```sh
-/opt/oos/bin/oos --install /data/tmp/example.zip
-/opt/oos/bin/oos --install /data/tmp/kaios.zip --id org.example.kaios
-/opt/oos/bin/oos --list-apps
-/opt/oos/bin/oos --app org.orangeos.launcher
-/opt/oos/bin/oos --app org.example.kaios
+```text
+application.zip
+├── oos-manifest.json
+├── aot/armv7/wamr-2.4.4/app.aot
+└── module/app.wasm
 ```
 
-The Launcher package is built deterministically with:
+The AOT entry is preferred on the ARMv7 phones. `module/app.wasm` is the
+portable fallback and is also useful for host testing. A minimal manifest is:
+
+```json
+{
+  "format": 1,
+  "id": "org.example.app",
+  "name": "Example",
+  "version": "1.0.0",
+  "package_kind": "oos-wasm-v1",
+  "runtime_kind": "wamr",
+  "api_profile": "oos-wit-0.1",
+  "entrypoint": "aot/armv7/wamr-2.4.4/app.aot",
+  "fallback_entrypoint": "module/app.wasm",
+  "memory": {
+    "stack_bytes": 131072,
+    "heap_bytes": 4194304
+  }
+}
+```
+
+`package_kind` and `runtime_kind` must have exactly the values above. An
+unknown runtime is rejected rather than silently dispatched. Package IDs,
+versions, entry paths, memory bounds, and requested permissions are validated
+before installation.
+
+Create a deterministic package with:
 
 ```sh
 ./scripts/package-oos-wasm-app.sh \
@@ -37,90 +50,43 @@ The Launcher package is built deterministically with:
   --output application.zip
 ```
 
-The package reader uses the ZIP central directory, supports stored and
-deflated entries, validates CRCs, bounds entry count and expanded size, and
-rejects encrypted, ZIP64, absolute, and parent-traversal paths. Signing is
-intentionally deferred; the current content key is for cache invalidation,
-not authenticity.
+The ZIP reader validates central-directory records and CRCs, bounds expanded
+size and entry count, and rejects encryption, ZIP64, absolute paths, and parent
+traversal.
 
-## Registry And Launch Dispatch
+## Registry And Launch
 
-`/data/system/app-registry.sqlite3` records applications, versions,
-permissions, roles, handlers, lifecycle state, package kind, runtime kind, and
-API profile. The active version points at the canonical ZIP. A launch first
-resolves this record, then prepares one of two contexts:
+The canonical package is stored at:
 
-- WAMR extracts only the selected AOT/Wasm entry to
-  `/data/cache/aot/<content-key>/app.*` and maps it from there.
-- WPE keeps the package zipped and resolves requested HTML, CSS, JavaScript,
-  image, font, and Wasm entries directly. KaiOS 2 uses
-  `app://<app-id>/...`; KaiOS 3 uses
-  `http://<normalized-app-id>.localhost/...` without opening a listener.
+```text
+/data/packages/<app-id>/<version>/<content-key>/application.zip
+```
 
-WPE API shims must be selected from `api_profile`; a KaiOS 2.5 application
-must not receive the KaiOS 3 bridge by accident. On Android, `oos` starts one
-foreground `oos-wpe` producer, imports its GPU buffers through the surface
-transport, and forwards normalized key events over the same connection. The
-producer cannot access HWC, panel power, backlights, or evdev directly.
+`/data/system/app-registry.sqlite3` records the active version, runtime,
+entrypoints, WIT profile, memory limits, permissions, roles, handlers, and
+lifecycle state. Launch preparation extracts only the selected AOT/Wasm entry
+to `/data/cache/aot/<content-key>/app.aot` or `app.wasm`; the ZIP remains the
+installed source of truth.
 
-The injected bridge exposes immutable `__oosRuntime` identity, lifecycle,
-key-name compatibility, and the selected KaiOS API profile. Implemented
-calls travel from the KaiOS 2.5 `navigator.moz*` surface, the KaiOS 3
-`navigator.b2g` surface, or a supported 3.0 daemon-service adapter through a
-WebKit message handler and a private OOS control socket. DeviceCapability and
-managed KaiOS 3 services use their documented `lib_session` daemon factories.
-The OOS host performs the operation; the package resource handler remains
-unaware of it. Battery and
-vibration remain baseline Web capabilities. Granted manifest permissions are
-loaded from the registry, passed as individual runner arguments, checked again
-by the host, and used to select every sensitive injected surface. Unsupported
-hardware APIs keep their documented surface and fail explicitly with
-`NotSupportedError`; they never return success-shaped empty data.
+The schema version is 2. When a schema-1 registry is opened, records whose
+package/runtime are not `oos-wasm-v1`/`wamr` are removed transactionally. Old
+Web profile/cache files are not reused and may be removed separately after an
+upgrade rollback is no longer required.
 
-DeviceStorage, power/battery, vibration, camera discovery/torch, and device
-capabilities use the shared host provider. WPE Wi-Fi/IP, Bluetooth, and modem
-calls are rejected before a provider is reached. DeviceStorage enumeration
-returns metadata from
-`/data/media/internal` and `/data/media/removable`; file bytes are fetched only
-when `FileReader` reads the selected file. Creation, replacement, append,
-deletion, and volume space queries use the same service. WIT `device-storage`
-exposes that service to WAMR, so WPE and WAMR do not grow separate filesystem
-implementations. The remaining compatibility matrix is tracked in
-[kaios-api-coverage.md](kaios-api-coverage.md).
+The command-line operations are:
 
-Settings, alarms, notifications, contacts, activities, system messages, audio
-policy, input method, time policy, and application metadata use the shared
-[system service broker](system-services.md). The same broker is exposed to a
-trusted future SystemUI package through WIT.
+```sh
+/opt/oos/bin/oos --install /data/tmp/example.zip
+/opt/oos/bin/oos --list-apps
+/opt/oos/bin/oos --app org.example.app
+```
 
-For KaiOS 2.5, `datastores-owned` declarations are normalized into launch
-grants and `navigator.getDataStores()` is injected only when at least one owned
-store is granted. Records, revisions, and bounded sync history persist through
-the existing application-private `storage` WIT backend under the Web app's
-OOS data directory. The host validates the store name and read/write mode on
-every request. An owner remains writable even when its declaration says
-`readonly`; that field limits future consumers, not the owning app. Access-only
-stores are not exposed yet because cross-application ownership and change
-broadcasting require a system DataStore registry.
-
-The WPE message callback and OOS device service run blocking control work on
-dedicated ordered workers. Hardware discovery therefore does not block WebKit
-input dispatch or the host compositor. Frame transport is unchanged and never
-crosses this JSON control channel.
-
-WPE intercepts only the active KaiOS 3 application's `http://*.localhost`
-origin; ordinary HTTP requests continue through the network process. KaiOS 2
-packages use the `app:` scheme. Both paths read validated ZIP entries in the
-UIProcess. A shared GLib worker performs `pread` and decompression so resource
-loading cannot block input dispatch; completion transfers ownership of the
-same decompressed buffer directly to a GLib input stream. The KaiOS bridge is
-injected at document start without rewriting application HTML. Responses are
-immutable because the WebKit cache directory is keyed by package content;
-`HEAD` reads only ZIP metadata and does not inflate the resource.
+The package identity always comes from `oos-manifest.json`; installers cannot
+override it with a second application ID.
 
 ## Persistent Storage
 
-The first user has separate runtime roots:
+The first user uses this layout:
 
 ```text
 /data/
@@ -128,33 +94,19 @@ The first user has separate runtime roots:
 ├── packages/<app-id>/<version>/<content-key>/application.zip
 ├── users/0/wasm/<app-id>/kv.sqlite3
 ├── users/0/wasm/<app-id>/db/<name>.sqlite3
-├── users/0/web/<app-id>/data/
-├── users/0/web/<app-id>/oos-platform/kv.sqlite3
 ├── cache/aot/<content-key>/
-├── cache/web/<app-id>/<content-key>/
+├── staging/
+├── tmp/
 ├── media/internal/
 └── media/removable/
 ```
 
-WAMR guests use the versioned WIT storage interface for byte-valued KV and
-prepared SQLite statements. It supports null, integer, float, text, and blob
-parameters/results while keeping native database handles outside guest
-memory. WPE creates a persistent `WebKitNetworkSession` per app with separate
-data and cache directories, covering cookies, local storage, IndexedDB,
-service-worker state, HTTP cache, and credentials according to WebKit policy.
-The separate WIT `device-storage` interface covers user-visible internal and
-removable media; application-private `storage` never accepts filesystem paths.
+Guests access byte-valued KV and prepared SQLite operations through WIT. Native
+database handles never enter guest memory. User-visible internal storage and
+the first mounted TF card are exposed only through the `device-storage` WIT
+service; application-private storage never accepts arbitrary host paths.
 
-Internal storage and the first mounted TF-card candidate are bind-mounted as
-media views. Database, profile, and registry files remain on `/data/oos`, so
-removing a card cannot corrupt application state.
-
-## Deferred Security
-
-For the current bring-up phase, requested permissions are recorded with
-`granted=1` and packages are marked `unverified`. WPE and WAMR both enforce
-those grants at their host API boundary, but no signature, separate process
-permission boundary, or SELinux policy is enforced yet. These columns and API
-profiles are retained so stronger install policy can be added without changing
-package identity or storage layout. This mode is suitable only for the
-explicitly rooted development deployment.
+Signing, process isolation, and SELinux policy remain deferred during hardware
+bring-up. Requested permissions are still stored and enforced at the WIT host
+boundary so stronger install policy can be added without changing the package
+or database format.

@@ -31,3 +31,4 @@ fi
 mv "$temporary" "$OUTPUT"
 trap - EXIT
 echo "Generated $OUTPUT"
+echo "Rebuild OOS to embed the updated boot splash"

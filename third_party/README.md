@@ -1,8 +1,15 @@
 # Third-Party Sources
 
-This directory contains local checkout dependencies and is intentionally not
-tracked by the main repository. The current Nokia 2780 Flip build needs these
-Android 10-era checkouts:
+Large source checkouts in this directory are intentionally ignored by the main
+repository. Their reproducible revisions are recorded in `versions.env`.
+
+The executable application runtime is:
+
+- `wasm-micro-runtime`: pinned WAMR 2.4.4, fetched and revision-checked by
+  `scripts/fetch-wamr.sh`.
+
+The Nokia 2780 Flip build also uses Android 10-era AOSP headers and hardware
+interfaces from these local trees:
 
 - `aosp-frameworks-native`
 - `aosp-hardware-interfaces`
@@ -12,14 +19,8 @@ Android 10-era checkouts:
 - `aosp-system-libhidl`
 - `gecko-b2g`
 - `kaios-hidl-gen`
-- `wasm-micro-runtime` (WAMR 2.4.4; fetched and revision-checked by
-  `scripts/fetch-wamr.sh`)
-- `libwpe`, `wpebackend-fdo`, and `wpewebkit` (verified release archives for
-  the local runtime)
-- `wpe-android-cerbero` (fixed Android dependency build checkout)
 
-The Nokia 8110 4G build additionally uses matching Android 6.0.1 r3 ABI
-headers:
+The Nokia 8110 4G build uses matching Android 6.0.1 r3 ABI headers:
 
 - `aosp-frameworks-native-android6`
 - `aosp-system-core-android6`
@@ -29,18 +30,11 @@ headers:
 - `aosp-bionic-android6`
 - `aosp-hardware-ril-android6`
 
-The sparse `kaios-gecko-b2g48` checkout is reference source for the Nokia
-8110's legacy bluetoothd protocol. It is not compiled into OOS, but its pinned
-revision makes the protocol analysis reproducible. Obsolete experimental
-`frameworks/av` AudioTrack code is not a build dependency; the production 8110
-audio backend uses OpenSL ES.
+The sparse `kaios-gecko-b2g48` tree is reference source for the 8110's legacy
+Bluetooth daemon protocol. It is not linked into OOS. Likewise, the Android 10
+Gecko checkout supplies reproducible HWC/HIDL reference definitions and a
+small compatibility header patch; it is not a browser shipped by OOS.
 
-`scripts/apply-third-party-patches.sh` applies the small compatibility patch
-recorded in `patches/` after a clean Gecko checkout is placed here.
-
-Pinned URLs, checksums, tags, and commits are recorded in
-`third_party/versions.env`. Run `make fetch-wpe` to fetch and verify every WPE
-source, or `scripts/fetch-wpe.sh local|android` for one platform. The WAMR and
-WPE source trees are ignored like the larger Android checkouts.
-
-The WPE sysroot is generated under `build/wpe-sysroot/` and is not committed.
+OOS has no WPE WebKit, libwpe, WPE backend, Cerbero, or JavaScript-engine build
+dependency. Stale local checkouts of those projects are ignored and can be
+removed without changing an OOS build.

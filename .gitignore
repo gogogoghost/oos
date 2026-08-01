@@ -6,9 +6,6 @@
 /build-*/
 /generated/
 /dist/
-/apps/web-launcher/dist/
-/apps/web-launcher/node_modules/
-/apps/web-launcher/*.tsbuildinfo
 /apps/target/
 /target/
 /system/build/

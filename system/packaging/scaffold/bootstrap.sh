@@ -83,17 +83,12 @@ resolve_res() {
   require_file "$OOS_RES_DIR/COMPLETE" || return 1
   require_file "$OOS_RES_DIR/SHA256SUMS" || return 1
   require_file "$OOS_RES_DIR/bin/oos" || return 1
-  require_file "$OOS_RES_DIR/lib/libc++_shared.so" || return 1
   require_file \
     "$OOS_RES_DIR/packages/org.orangeos.launcher/application.zip" || return 1
   if ! grep -q '^format=2$' "$OOS_RES_DIR/manifest.env" ||
       ! grep -q '^type=oos-res$' "$OOS_RES_DIR/manifest.env"; then
     echo "res package has an unsupported manifest format" >&2
     return 1
-  fi
-  if grep -q '^web_app_host=external-single-foreground$' \
-      "$OOS_RES_DIR/manifest.env"; then
-    require_file "$OOS_RES_DIR/bin/oos-wpe" || return 1
   fi
   expected_complete=$(cat "$OOS_RES_DIR/COMPLETE")
   actual_complete=$(sha256sum "$OOS_RES_DIR/SHA256SUMS" | awk '{print $1}')

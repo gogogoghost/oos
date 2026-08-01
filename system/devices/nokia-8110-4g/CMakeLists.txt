@@ -9,22 +9,10 @@ set(NOKIA_8110_LIBPNG_DIR "${THIRD_PARTY_DIR}/aosp-libpng-android6")
 set(NOKIA_8110_SYSTEM_MEDIA_DIR
     "${THIRD_PARTY_DIR}/aosp-system-media-android6")
 set(NOKIA_8110_BIONIC_DIR "${THIRD_PARTY_DIR}/aosp-bionic-android6")
-set(NOKIA_8110_WPE_SYSROOT
-    "${OOS_REPO_ROOT}/build/wpe-sysroot/nokia-8110-4g")
 set(NOKIA_8110_ANDROID_INCLUDES
   "${NOKIA_8110_FRAMEWORKS_NATIVE_DIR}/include"
   "${NOKIA_8110_SYSTEM_CORE_DIR}/include"
   "${NOKIA_8110_LIBHARDWARE_DIR}/include")
-
-set(NOKIA_8110_WPE_INCLUDES
-  "${NOKIA_8110_WPE_SYSROOT}/include/wpe-webkit-2.0"
-  "${NOKIA_8110_WPE_SYSROOT}/include/wpe-webkit-2.0/wpe-platform"
-  "${NOKIA_8110_WPE_SYSROOT}/include/wpe-1.0"
-  "${NOKIA_8110_WPE_SYSROOT}/include"
-  "${NOKIA_8110_WPE_SYSROOT}/include/glib-2.0"
-  "${NOKIA_8110_WPE_SYSROOT}/include/gio-unix-2.0"
-  "${NOKIA_8110_WPE_SYSROOT}/include/libsoup-3.0"
-  "${NOKIA_8110_WPE_SYSROOT}/lib/glib-2.0/include")
 
 if(NOT EXISTS "${NOKIA_8110_SYSTEM_LIB_DIR}/hw/hwcomposer.msm8909.so")
   message(FATAL_ERROR
@@ -66,8 +54,8 @@ function(oos_nokia_8110_android_target target)
     "-Wl,-rpath-link,${NOKIA_8110_SYSTEM_LIB_DIR}")
 endfunction()
 
-# WPE's Android port requires AHardwareBuffer (API 26). Android 6 uses the
-# equivalent gralloc0 native-handle path through this device-only ABI shim.
+# Android 6 lacks AHardwareBuffer (API 26). OOS exposes the equivalent
+# gralloc0 native-handle path through this device-only ABI shim.
 add_library(oos_android23_hardware_buffer SHARED
   src/android23_hardware_buffer.c)
 oos_nokia_8110_android_target(oos_android23_hardware_buffer)
@@ -96,45 +84,6 @@ target_link_libraries(oos_nokia_8110_gles_display PUBLIC
   oos_android23_hardware_buffer
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 
-if(EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so")
-  add_library(oos_wpe_surface_host STATIC
-    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_surface_host.cpp")
-  target_include_directories(oos_wpe_surface_host PUBLIC
-    "${CMAKE_SOURCE_DIR}/src")
-  target_include_directories(oos_wpe_surface_host PRIVATE
-    ${NOKIA_8110_WPE_INCLUDES})
-  target_link_libraries(oos_wpe_surface_host PUBLIC
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEBackend-android.so"
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libwpe-1.0.so")
-  add_library(oos::web ALIAS oos_wpe_surface_host)
-
-  add_executable(oos-wpe
-    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_runner.cpp"
-    "${CMAKE_SOURCE_DIR}/src/oos/web/transport_surface_sink.cpp"
-    "${CMAKE_SOURCE_DIR}/src/oos/web/kaios_api_bridge.cpp"
-    "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp"
-    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
-    "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_key_input.cpp")
-  target_include_directories(oos-wpe PRIVATE ${NOKIA_8110_WPE_INCLUDES})
-  target_link_libraries(oos-wpe PRIVATE
-    oos_wpe_surface_host
-    oos_surface_transport
-    oos_app_model
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libwpe-1.0.so"
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libgio-2.0.so"
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libglib-2.0.so"
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libgobject-2.0.so"
-    "${NOKIA_8110_WPE_SYSROOT}/lib/libsoup-3.0.so"
-    oos_android23_hardware_buffer
-    "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
-  target_link_options(oos-wpe PRIVATE
-    -Wl,--allow-shlib-undefined
-    "-Wl,-rpath-link,${NOKIA_8110_SYSTEM_LIB_DIR}")
-  set_target_properties(oos-wpe PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-endif()
-
 add_library(oos_nokia_8110_device STATIC
   src/device.cpp
   "${CMAKE_SOURCE_DIR}/src/oos/device/android_service_provider.cpp")
@@ -156,7 +105,6 @@ target_include_directories(oos PRIVATE
 target_link_libraries(oos PRIVATE
   oos::platform
   oos_wasm_runtime
-  oos_surface_transport
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libpng.so"
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 
@@ -215,51 +163,6 @@ target_link_libraries(oos_nokia_8110_device PUBLIC
   oos::hardware oos::network oos::modem)
 
 if(OOS_BUILD_DEVICE_TESTS)
-  add_executable(oos_test_nokia_8110_surface_transport_key
-    "${CMAKE_SOURCE_DIR}/tests/web/surface_transport_key_test.cpp")
-  oos_nokia_8110_android_target(oos_test_nokia_8110_surface_transport_key)
-  target_link_libraries(oos_test_nokia_8110_surface_transport_key PRIVATE
-    oos_surface_transport oos_android23_hardware_buffer
-    "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
-
-  if(TARGET oos_wpe_surface_host AND
-     EXISTS "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so")
-    add_executable(oos_test_nokia_8110_4g_wpe_producer
-      "${CMAKE_SOURCE_DIR}/tests/web/wpe_hello_producer.cpp"
-      "${CMAKE_SOURCE_DIR}/src/oos/web/transport_surface_sink.cpp"
-      "${CMAKE_SOURCE_DIR}/src/oos/web/wpe_app_profile.cpp"
-      "${CMAKE_SOURCE_DIR}/src/oos/web/zip_app_source.cpp")
-    oos_nokia_8110_android_target(oos_test_nokia_8110_4g_wpe_producer)
-    target_include_directories(oos_test_nokia_8110_4g_wpe_producer PRIVATE
-      ${NOKIA_8110_WPE_INCLUDES})
-    target_link_libraries(oos_test_nokia_8110_4g_wpe_producer PRIVATE
-      oos_wpe_surface_host
-      oos_surface_transport
-      oos_app_model
-      "${NOKIA_8110_WPE_SYSROOT}/lib/libWPEWebKit-2.0.so"
-      "${NOKIA_8110_WPE_SYSROOT}/lib/libglib-2.0.so"
-      "${NOKIA_8110_WPE_SYSROOT}/lib/libgobject-2.0.so"
-      "${NOKIA_8110_WPE_SYSROOT}/lib/libsoup-3.0.so"
-      oos_android23_hardware_buffer
-      "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
-
-    add_executable(oos_test_nokia_8110_4g_wpe_host
-      "${CMAKE_SOURCE_DIR}/tests/web/wpe_surface_host_test.cpp")
-    oos_nokia_8110_android_target(oos_test_nokia_8110_4g_wpe_host)
-    target_link_libraries(oos_test_nokia_8110_4g_wpe_host PRIVATE
-      oos::platform
-      oos_compositor
-      oos_surface_transport
-      oos_android23_hardware_buffer
-      "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
-
-    set_target_properties(
-      oos_test_nokia_8110_4g_wpe_producer
-      oos_test_nokia_8110_4g_wpe_host
-      PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-      "${CMAKE_BINARY_DIR}/bin/tests/nokia-8110-4g")
-  endif()
-
   add_executable(oos_test_nokia_8110_device_contract
     "${CMAKE_SOURCE_DIR}/tests/device/device_contract_test.cpp")
   oos_nokia_8110_android_target(oos_test_nokia_8110_device_contract)
@@ -302,7 +205,7 @@ if(OOS_BUILD_DEVICE_TESTS)
     oos_nokia_8110_basic_hardware)
 
   add_executable(oos_test_nokia_8110_key_input
-    tests/key_input_headless_test.cpp)
+    "${CMAKE_SOURCE_DIR}/tests/device/key_input_headless_test.cpp")
   oos_nokia_8110_android_target(oos_test_nokia_8110_key_input)
   target_link_libraries(oos_test_nokia_8110_key_input PRIVATE
     oos_input

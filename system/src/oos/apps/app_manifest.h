@@ -6,8 +6,8 @@
 
 namespace oos::apps {
 
-enum class PackageKind { OosWasmV1, KaiOs2, KaiOs3 };
-enum class RuntimeKind { Wamr, Wpe };
+enum class PackageKind { OosWasmV1 };
+enum class RuntimeKind { Wamr };
 
 struct AppHandler {
   std::string kind;
@@ -35,8 +35,4 @@ const char *packageKindName(PackageKind kind);
 const char *runtimeKindName(RuntimeKind kind);
 bool parseAppManifest(const std::string &json, AppManifest &manifest,
                       std::string &error);
-bool parseKaiOsManifest(const std::string &json, PackageKind kind,
-                        const std::string &app_id, AppManifest &manifest,
-                        std::string &error);
-
 } // namespace oos::apps

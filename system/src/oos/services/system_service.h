@@ -23,8 +23,8 @@ public:
 
   bool initialize();
 
-  // Payload and response are JSON because the WPE boundary already speaks
-  // JSON. The WIT adapter exposes the same operation without another model.
+  // Payload and response use a stable JSON envelope so WIT bindings can grow
+  // without duplicating the policy implementation for every guest language.
   int request(const std::string &app_id,
               const std::vector<std::string> &permissions,
               const std::string &service, const std::string &operation,

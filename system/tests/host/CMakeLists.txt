@@ -33,12 +33,6 @@ target_include_directories(oos_wamr_host PUBLIC
   "${WAMR_ROOT_DIR}/core/iwasm/include")
 target_link_libraries(oos_wamr_host PUBLIC dl m pthread)
 
-add_executable(oos_wamr_c_api_lifetime_test wamr_c_api_lifetime_test.cpp)
-target_include_directories(oos_wamr_c_api_lifetime_test PRIVATE
-  "${WAMR_ROOT_DIR}/core/iwasm/common")
-target_compile_options(oos_wamr_c_api_lifetime_test PRIVATE -UNDEBUG)
-target_link_libraries(oos_wamr_c_api_lifetime_test PRIVATE oos_wamr_host)
-
 add_executable(oos_wasm_runtime_test
   wasm_runtime_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
@@ -72,26 +66,14 @@ target_include_directories(oos_app_repository_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
 target_link_libraries(oos_app_repository_test PRIVATE ${CMAKE_DL_LIBS} z)
 
-find_package(Threads REQUIRED)
 add_executable(oos_device_storage_test
   device_storage_test.cpp
-  "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/device/device.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/device_storage.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/services/system_service.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/web/device_api_service.cpp"
-  "${OOS_SYSTEM_ROOT}/devices/local/src/service_provider.cpp"
-  "${OOS_SYSTEM_ROOT}/src/oos/web/device_api_transport.c")
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp")
 target_include_directories(oos_device_storage_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src")
 target_compile_options(oos_device_storage_test PRIVATE -UNDEBUG)
-target_link_libraries(oos_device_storage_test PRIVATE Threads::Threads z)
+target_link_libraries(oos_device_storage_test PRIVATE z)
 
 add_executable(oos_font_assets_test
   font_assets_test.cpp

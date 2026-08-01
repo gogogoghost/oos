@@ -10,7 +10,7 @@ set(SYSTEM_DIR "$ENV{SYSTEM_DIR}" CACHE PATH
     "Absolute path to the extracted Android /system directory")
 get_filename_component(OOS_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(THIRD_PARTY_DIR "${OOS_REPO_ROOT}/third_party" CACHE PATH
-    "Directory containing external AOSP, Gecko, and KaiOS checkouts")
+    "Directory containing external AOSP and device reference checkouts")
 set(HIDL_GENERATED_DIR "${OOS_REPO_ROOT}/build/generated/hidl-android10"
     CACHE PATH "Generated Android 10 HIDL headers")
 
@@ -107,22 +107,6 @@ target_include_directories(oos_system_services PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_system_services PUBLIC oos_app_model)
 
-add_library(oos_web_device_api STATIC
-  src/oos/web/device_api_service.cpp
-  src/oos/web/device_api_transport.c)
-target_include_directories(oos_web_device_api PUBLIC
-  "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(oos_web_device_api PUBLIC
-  oos_device_api oos_device_storage oos_system_services)
-
-if(NOT BUILD_LOCAL)
-  add_library(oos_surface_transport STATIC
-    src/oos/compositor/surface_transport.c)
-  target_include_directories(oos_surface_transport PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src")
-  target_link_libraries(oos_surface_transport PUBLIC oos_web_device_api)
-endif()
-
 add_library(oos_wasm_runtime STATIC
   src/oos/runtime/native_app_manager.cpp
   src/oos/runtime/wasm_app.cpp)
@@ -132,11 +116,31 @@ target_link_libraries(oos_wasm_runtime PUBLIC
   oos_wamr oos_input oos_app_model oos_device_storage oos_font_assets
   oos_system_services)
 
-add_executable(oos src/main.cpp src/runtime.cpp)
+set(OOS_BOOT_SPLASH_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/boot/nokia-2780-flip/boot-splash.png")
+if(NOT EXISTS "${OOS_BOOT_SPLASH_SOURCE}")
+  message(FATAL_ERROR "Missing embedded boot splash: ${OOS_BOOT_SPLASH_SOURCE}")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${OOS_BOOT_SPLASH_SOURCE}")
+file(READ "${OOS_BOOT_SPLASH_SOURCE}" OOS_BOOT_SPLASH_HEX HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1,"
+  OOS_BOOT_SPLASH_BYTES "${OOS_BOOT_SPLASH_HEX}")
+set(OOS_GENERATED_RESOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/resources")
+file(MAKE_DIRECTORY "${OOS_GENERATED_RESOURCE_DIR}")
+configure_file(
+  src/oos/resources/embedded_boot_splash.cpp.in
+  "${OOS_GENERATED_RESOURCE_DIR}/embedded_boot_splash.cpp"
+  @ONLY)
+unset(OOS_BOOT_SPLASH_HEX)
+unset(OOS_BOOT_SPLASH_BYTES)
+
+add_executable(oos
+  src/main.cpp
+  src/runtime.cpp
+  "${OOS_GENERATED_RESOURCE_DIR}/embedded_boot_splash.cpp")
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
 if(NOT BUILD_LOCAL)
-  target_sources(oos PRIVATE src/oos/web/wpe_app_host.cpp)
-  target_compile_definitions(oos PRIVATE OOS_EXTERNAL_WPE_RUNTIME=1)
   target_link_options(oos PRIVATE -nostdlib++)
 endif()
 target_link_libraries(oos PRIVATE

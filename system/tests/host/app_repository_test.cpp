@@ -1,7 +1,7 @@
 #include "oos/apps/app_manifest.h"
 #include "oos/apps/app_repository.h"
-#include "oos/apps/permissions.h"
 #include "oos/storage/app_storage.h"
+#include "oos/storage/sqlite.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -20,8 +20,7 @@ bool check(bool condition, const char *message) {
   return condition;
 }
 
-bool hasPermission(const oos::apps::AppRecord &record,
-                   const char *permission) {
+bool hasPermission(const oos::apps::AppRecord &record, const char *permission) {
   for (const std::string &requested : record.manifest.requested_permissions) {
     if (requested == permission)
       return true;
@@ -29,23 +28,85 @@ bool hasPermission(const oos::apps::AppRecord &record,
   return false;
 }
 
-bool hasHandler(const oos::apps::AppRecord &record, const char *kind,
-                const char *value) {
-  for (const oos::apps::AppHandler &handler : record.manifest.handlers) {
-    if (handler.kind == kind && handler.value == value)
-      return true;
+bool seedLegacyWebRecord(const std::string &root, std::string &error) {
+  std::filesystem::create_directories(root + "/system");
+  oos::storage::SqliteDatabase database;
+  if (!database.open(root + "/system/app-registry.sqlite3") ||
+      !database.exec(
+          "CREATE TABLE applications("
+          " app_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,"
+          " active_version TEXT NOT NULL, package_kind TEXT NOT NULL,"
+          " runtime_kind TEXT NOT NULL, api_profile TEXT NOT NULL,"
+          " role TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,"
+          " trust_level TEXT NOT NULL DEFAULT 'unverified',"
+          " installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
+          "CREATE TABLE app_versions("
+          " app_id TEXT NOT NULL, version TEXT NOT NULL,"
+          " package_path TEXT NOT NULL, package_digest TEXT NOT NULL,"
+          " entrypoint TEXT NOT NULL, fallback_entrypoint TEXT NOT NULL,"
+          " stack_bytes INTEGER NOT NULL, heap_bytes INTEGER NOT NULL,"
+          " installed_at INTEGER NOT NULL, PRIMARY KEY(app_id, version));"
+          "CREATE TABLE app_permissions("
+          " app_id TEXT NOT NULL, permission TEXT NOT NULL,"
+          " requested INTEGER NOT NULL, granted INTEGER NOT NULL,"
+          " PRIMARY KEY(app_id, permission));"
+          "CREATE TABLE app_roles(app_id TEXT NOT NULL, role TEXT NOT NULL,"
+          " PRIMARY KEY(app_id, role));"
+          "CREATE TABLE app_handlers("
+          " app_id TEXT NOT NULL, handler_kind TEXT NOT NULL,"
+          " handler_value TEXT NOT NULL,"
+          " PRIMARY KEY(app_id, handler_kind, handler_value));"
+          "CREATE TABLE app_state("
+          " app_id TEXT PRIMARY KEY, state TEXT NOT NULL,"
+          " last_started_at INTEGER, last_exit_code INTEGER);"
+          "INSERT INTO applications VALUES("
+          " 'org.orangeos.legacy-web','Legacy Web','1.0.0','kaios-v3','wpe',"
+          " 'kaios-v3','',1,'unverified',1,1);"
+          "INSERT INTO app_versions VALUES("
+          " 'org.orangeos.legacy-web','1.0.0','/legacy.zip','digest',"
+          " 'index.html','',131072,4194304,1);"
+          "INSERT INTO app_permissions VALUES("
+          " 'org.orangeos.legacy-web','camera',1,1);"
+          "INSERT INTO app_roles VALUES('org.orangeos.legacy-web','launcher');"
+          "INSERT INTO app_handlers VALUES("
+          " 'org.orangeos.legacy-web','activity','view');"
+          "INSERT INTO app_state VALUES("
+          " 'org.orangeos.legacy-web','installed',NULL,NULL);"
+          "PRAGMA user_version=1;")) {
+    error = database.lastError();
+    return false;
   }
-  return false;
+  return true;
+}
+
+bool legacyRowsRemoved(const std::string &root, std::string &error) {
+  oos::storage::SqliteDatabase database;
+  if (!database.open(root + "/system/app-registry.sqlite3")) {
+    error = database.lastError();
+    return false;
+  }
+  constexpr const char *tables[] = {"applications",    "app_versions",
+                                    "app_permissions", "app_roles",
+                                    "app_handlers",    "app_state"};
+  for (const char *table : tables) {
+    oos::storage::SqliteStatement statement;
+    const std::string sql = std::string("SELECT COUNT(*) FROM ") + table +
+                            " WHERE app_id='org.orangeos.legacy-web';";
+    if (!database.prepare(sql.c_str(), statement) ||
+        statement.step() != oos::storage::SqliteStatement::Step::Row ||
+        statement.columnInt64(0) != 0) {
+      error = database.lastError();
+      return false;
+    }
+  }
+  return true;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2 && argc != 4 && argc != 5) {
-    std::fprintf(stderr,
-                 "usage: %s OOS.zip [KAIOS25.zip KAIOS3.zip "
-                 "REAL_KAIOS3.zip]\n",
-                 argv[0]);
+  if (argc != 2) {
+    std::fprintf(stderr, "usage: %s OOS.zip\n", argv[0]);
     return 2;
   }
   char root_template[] = "/tmp/oos-app-test.XXXXXX";
@@ -67,9 +128,17 @@ int main(int argc, char **argv) {
           R"({"format":1,"id":"org.orangeos.bad","name":"bad","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wamr","api_profile":"oos-wit-0.1","entrypoint":"app.aot","permissions":["camera"]})",
           invalid, error),
       "malformed permissions must be rejected");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"format":1,"id":"org.orangeos.web","name":"web","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wpe","api_profile":"oos-wit-0.1","entrypoint":"index.html"})",
+          invalid, error),
+      "non-WAMR runtime must be rejected");
 
+  success &= check(seedLegacyWebRecord(root, error), error.c_str());
   oos::apps::AppRepository repository(root);
   success &= check(repository.initialize(), repository.lastError().c_str());
+  success &= check(legacyRowsRemoved(root, error),
+                   "schema-1 Web records must be removed from every table");
   oos::apps::AppRecord installed;
   success &= check(repository.install(argv[1], &installed),
                    repository.lastError().c_str());
@@ -82,86 +151,9 @@ int main(int argc, char **argv) {
                        hasPermission(installed, "wifi-manage"),
                    "OOS manifest permissions survive registry resolution");
 
-  if (argc >= 4) {
-    oos::apps::AppInstallOptions kaios25;
-    kaios25.app_id = "org.kaios.apnconfig";
-    oos::apps::AppRecord webapp;
-    success &= check(repository.install(argv[2], kaios25, &webapp),
-                     repository.lastError().c_str());
-    success &=
-        check(webapp.manifest.package_kind == oos::apps::PackageKind::KaiOs2 &&
-                  webapp.manifest.api_profile == "kaios-v2",
-              "KaiOS 2.5 runtime discriminator");
-    success &= check(hasPermission(webapp, "device-storage:sdcard") &&
-                         hasPermission(webapp, "wifi-manage") &&
-                         hasPermission(webapp, "settings:read") &&
-                         hasPermission(webapp, "settings:write") &&
-                         hasPermission(webapp, "system-message:alarm") &&
-                         hasPermission(
-                             webapp,
-                             "datastore-owned:readwrite:test-state") &&
-                         hasPermission(
-                             webapp,
-                             "datastore-owned:readonly:owner-write"),
-                     "KaiOS 2.5 permissions survive registry resolution");
-    success &= check(hasHandler(webapp, "activity", "pick"),
-                     "KaiOS 2.5 activity handler survives registry resolution");
-    const auto owner_stores = oos::apps::ownedDataStoreGrants(
-        webapp.manifest.requested_permissions);
-    success &= check(owner_stores.size() == 2 && owner_stores[0].writable &&
-                         owner_stores[1].writable,
-                     "DataStore owners always retain write access");
-    oos::apps::AppInstallOptions kaios3;
-    kaios3.app_id = "org.kaios.calculator";
-    oos::apps::AppRecord webmanifest;
-    success &= check(repository.install(argv[3], kaios3, &webmanifest),
-                     repository.lastError().c_str());
-    success &= check(webmanifest.manifest.package_kind ==
-                             oos::apps::PackageKind::KaiOs3 &&
-                         webmanifest.manifest.api_profile == "kaios-v3",
-                     "KaiOS 3 runtime discriminator");
-    success &= check(hasPermission(webmanifest, "bluetooth") &&
-                         hasPermission(webmanifest, "camera") &&
-                         hasPermission(webmanifest, "settings:read") &&
-                         hasPermission(webmanifest, "settings:write") &&
-                         hasPermission(webmanifest, "system-message:alarm"),
-                     "KaiOS 3 permissions survive registry resolution");
-    success &= check(hasHandler(webmanifest, "activity", "view"),
-                     "KaiOS 3 activity handler survives registry resolution");
-    oos::apps::AppLaunch web_launch;
-    success &=
-        check(repository.prepareLaunch("org.kaios.calculator", web_launch),
-              repository.lastError().c_str());
-    success &= check(web_launch.executable_path == webmanifest.package_path,
-                     "WPE launch keeps the ZIP as canonical source");
-    success &= check(web_launch.entrypoint == webmanifest.manifest.entrypoint,
-                     "WPE launch exposes the resolved ZIP entrypoint");
-    success &= check(web_launch.entrypoint == "main.html",
-                     "WPE launch strips query parameters from start_url");
-    success &= check(hasPermission(web_launch.app, "bluetooth") &&
-                         hasPermission(web_launch.app, "camera"),
-                     "WPE launch receives granted permissions");
-    if (argc == 5) {
-      oos::apps::AppInstallOptions real_kaios3;
-      real_kaios3.app_id = "omnij2me";
-      oos::apps::AppRecord real_webmanifest;
-      success &=
-          check(repository.install(argv[4], real_kaios3, &real_webmanifest),
-                repository.lastError().c_str());
-      oos::apps::AppLaunch real_web_launch;
-      success &= check(repository.prepareLaunch("omnij2me", real_web_launch),
-                       repository.lastError().c_str());
-      success &= check(real_webmanifest.manifest.package_kind ==
-                               oos::apps::PackageKind::KaiOs3 &&
-                           real_web_launch.entrypoint == "index.html",
-                       "real KaiOS 3 relative start_url is normalized");
-    }
-  }
-
   std::vector<oos::apps::AppRecord> records;
   success &= check(repository.list(records), repository.lastError().c_str());
-  const size_t expected_records = argc == 5 ? 4u : (argc == 4 ? 3u : 1u);
-  success &= check(records.size() == expected_records, "registry app count");
+  success &= check(records.size() == 1, "registry app count");
 
   oos::apps::AppLaunch launch;
   success &= check(repository.prepareLaunch("org.orangeos.test", launch),

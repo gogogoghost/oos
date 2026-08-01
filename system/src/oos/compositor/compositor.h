@@ -9,8 +9,8 @@ class Display;
 
 namespace oos::compositor {
 
-// OOS owns the only route to the physical display. Native/WASM drawing and
-// external producers such as WPE all submit through this host compositor.
+// OOS owns the only route to the physical display. Native guests and future
+// out-of-process producers submit through this host compositor.
 class Compositor final : public SurfaceSink, public runtime::GraphicsHost {
 public:
   explicit Compositor(device::Display &display);

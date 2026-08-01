@@ -5,6 +5,7 @@ umask 022
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$ROOT_DIR/scripts/lib/package-common.sh"
+source "$ROOT_DIR/third_party/versions.env"
 
 DEVICE=nokia-2780-flip
 OUTPUT_DIR=
@@ -22,32 +23,12 @@ if [[ $# -gt 0 && "$1" != -* ]]; then
 fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --device)
-      [[ $# -ge 2 ]] || { usage; exit 2; }
-      DEVICE=$2
-      shift 2
-      ;;
-    --output)
-      [[ $# -ge 2 ]] || { usage; exit 2; }
-      OUTPUT_DIR=$2
-      shift 2
-      ;;
-    --tgz)
-      CREATE_TGZ=1
-      shift
-      ;;
-    --activate)
-      ACTIVATE=1
-      shift
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      usage
-      exit 2
-      ;;
+    --device) DEVICE=${2:-}; shift 2 ;;
+    --output) OUTPUT_DIR=${2:-}; shift 2 ;;
+    --tgz) CREATE_TGZ=1; shift ;;
+    --activate) ACTIVATE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 2 ;;
   esac
 done
 
@@ -56,88 +37,51 @@ done
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]] ||
   package_die "Invalid or missing res version: $VERSION"
 
-OUTPUT_DIR=${OUTPUT_DIR:-$ROOT_DIR/dist/$DEVICE/oos}
-package_require_directory "$OUTPUT_DIR"
-
-RES_NAME="res-$VERSION"
-DESTINATION="$OUTPUT_DIR/$RES_NAME"
-[[ ! -e "$DESTINATION" ]] || package_die "Res output already exists: $DESTINATION"
-
-OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
-OOS_WPE_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos-wpe"
-WPE_SYSROOT="$ROOT_DIR/build/wpe-sysroot/$DEVICE"
-NATIVE_APPS="$ROOT_DIR/build/native-apps"
-BOOT_SPLASH="$ROOT_DIR/system/assets/boot/$DEVICE/boot-splash.png"
-if [[ ! -f "$BOOT_SPLASH" ]]; then
-  BOOT_SPLASH="$ROOT_DIR/system/assets/boot/nokia-2780-flip/boot-splash.png"
-fi
-LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
-WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
-SYSTEM_FONT="$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
-SYSTEM_FONT_LICENSE="$ROOT_DIR/system/assets/fonts/LICENSE.txt"
-INSPECTOR_RESOURCE="$WPE_SYSROOT/share/wpe-webkit-2.0/inspector.gresource"
-package_require_file "$OOS_BINARY"
-package_require_file "$OOS_WPE_BINARY"
-package_require_directory "$WPE_SYSROOT/lib"
-package_require_directory "$WPE_SYSROOT/libexec"
-"$ROOT_DIR/scripts/build-native-app-aot.sh"
-package_require_file "$NATIVE_APPS/launcher.wasm"
-package_require_file "$NATIVE_APPS/launcher.aot"
-package_require_file "$BOOT_SPLASH"
-package_require_file "$LUCIDE_LICENSE"
-package_require_file "$WAMR_LICENSE"
-package_require_file "$SYSTEM_FONT"
-package_require_file "$SYSTEM_FONT_LICENSE"
-package_require_file "$INSPECTOR_RESOURCE"
-package_require_file \
-  "$WPE_SYSROOT/lib/oos/web-process-extensions/liboos-wamr-web-process.so"
-
 if [[ -f "$ROOT_DIR/.env" ]]; then
   set -a
   source "$ROOT_DIR/.env"
   set +a
 fi
-BUILTIN_KAIOS3_APP_ID=${OOS_BUILTIN_KAIOS3_APP_ID:-}
-BUILTIN_KAIOS3_PACKAGE=${OOS_BUILTIN_KAIOS3_PACKAGE:-}
-BUILTIN_KAIOS3_AOT_CACHE=${OOS_BUILTIN_KAIOS3_AOT_CACHE:-}
-if [[ -n "$BUILTIN_KAIOS3_APP_ID" || -n "$BUILTIN_KAIOS3_PACKAGE" ]]; then
-  [[ "$BUILTIN_KAIOS3_APP_ID" =~ ^[A-Za-z0-9._-]+$ ]] ||
-    package_die "Invalid built-in KaiOS 3 application id"
-  package_require_file "$BUILTIN_KAIOS3_PACKAGE"
-fi
-if [[ -n "$BUILTIN_KAIOS3_AOT_CACHE" ]]; then
-  package_require_directory "$BUILTIN_KAIOS3_AOT_CACHE"
-  find "$BUILTIN_KAIOS3_AOT_CACHE" -type f -name '*.aot' -print -quit |
-    grep -q . || package_die \
-      "Built-in KaiOS 3 AOT cache contains no .aot files"
-fi
-
-run_patchelf() {
-  if command -v patchelf >/dev/null 2>&1; then
-    patchelf "$@"
-  elif [[ -n ${WPE_DISTROBOX:-} ]]; then
-    distrobox enter "$WPE_DISTROBOX" -- patchelf "$@"
-  else
-    package_die \
-      "patchelf is required (install it locally or in WPE_DISTROBOX)"
-  fi
-}
-
-WPE_NDK=${WPE_NDK:-/home/jax/Android/Sdk/ndk/magisk}
-CXX_RUNTIME="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so"
-if [[ ! -f "$CXX_RUNTIME" ]]; then
-  CXX_RUNTIME="$WPE_NDK/sources/cxx-stl/llvm-libc++/libs/armeabi-v7a/libc++_shared.so"
-fi
-package_require_file "$CXX_RUNTIME"
 case "$DEVICE" in
-  nokia-2780-flip) SYSTEM_DIR=${NOKIA_2780_SYSTEM_DIR:-} ;;
-  nokia-8110-4g) SYSTEM_DIR=${NOKIA_8110_SYSTEM_DIR:-} ;;
+  nokia-2780-flip)
+    SYSTEM_DIR=${NOKIA_2780_SYSTEM_DIR:-}
+    ANDROID_API=29
+    ;;
+  nokia-8110-4g)
+    SYSTEM_DIR=${NOKIA_8110_SYSTEM_DIR:-}
+    ANDROID_API=23
+    ;;
 esac
 package_require_directory "$SYSTEM_DIR/lib"
-source "$ROOT_DIR/system/config/wpe/devices/$DEVICE.env"
-package_require_file "$WPE_SYSROOT/.oos-wpe-profile"
-grep -q "^device=$DEVICE$" "$WPE_SYSROOT/.oos-wpe-profile" ||
-  package_die "WPE sysroot profile does not target $DEVICE"
+
+OUTPUT_DIR=${OUTPUT_DIR:-$ROOT_DIR/dist/$DEVICE/oos}
+package_require_directory "$OUTPUT_DIR"
+RES_NAME="res-$VERSION"
+DESTINATION="$OUTPUT_DIR/$RES_NAME"
+[[ ! -e "$DESTINATION" ]] || package_die "Res output already exists: $DESTINATION"
+
+OOS_BINARY="$ROOT_DIR/build/android-$DEVICE/bin/oos"
+DEVICE_RUNTIME_LIBRARY=
+if [[ "$DEVICE" == nokia-8110-4g ]]; then
+  DEVICE_RUNTIME_LIBRARY="$ROOT_DIR/build/android-$DEVICE/devices/$DEVICE/liboos-android23-buffer.so"
+fi
+NATIVE_APPS="$ROOT_DIR/build/native-apps"
+LUCIDE_LICENSE="$ROOT_DIR/LICENSES/Lucide.txt"
+WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
+SYSTEM_FONT="$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
+SYSTEM_FONT_LICENSE="$ROOT_DIR/system/assets/fonts/LICENSE.txt"
+
+package_require_file "$OOS_BINARY"
+if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
+  package_require_file "$DEVICE_RUNTIME_LIBRARY"
+fi
+"$ROOT_DIR/scripts/build-native-app-aot.sh"
+package_require_file "$NATIVE_APPS/launcher.wasm"
+package_require_file "$NATIVE_APPS/launcher.aot"
+package_require_file "$LUCIDE_LICENSE"
+package_require_file "$WAMR_LICENSE"
+package_require_file "$SYSTEM_FONT"
+package_require_file "$SYSTEM_FONT_LICENSE"
 
 STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/oos-res.XXXXXX")
 cleanup() {
@@ -150,29 +94,18 @@ trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
   "$STAGING/packages/org.orangeos.launcher" \
-  "$STAGING/share/oos" "$STAGING/share/fonts" \
-  "$STAGING/share/licenses/oos" \
-  "$STAGING/etc"
+  "$STAGING/share/fonts" \
+  "$STAGING/share/licenses/oos"
 
+install -m 0755 "$OOS_BINARY" "$STAGING/bin/oos"
+if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
+  install -m 0755 "$DEVICE_RUNTIME_LIBRARY" "$STAGING/lib/"
+fi
 "$ROOT_DIR/scripts/package-oos-wasm-app.sh" \
   --manifest "$ROOT_DIR/apps/launcher/oos-manifest.json" \
   --wasm "$NATIVE_APPS/launcher.wasm" \
   --aot "$NATIVE_APPS/launcher.aot" \
   --output "$STAGING/packages/org.orangeos.launcher/application.zip"
-BUILTIN_MANIFEST_LINES=()
-if [[ -n "$BUILTIN_KAIOS3_PACKAGE" ]]; then
-  mkdir -p "$STAGING/packages/$BUILTIN_KAIOS3_APP_ID"
-  install -m 0644 "$BUILTIN_KAIOS3_PACKAGE" \
-    "$STAGING/packages/$BUILTIN_KAIOS3_APP_ID/application.zip"
-  BUILTIN_MANIFEST_LINES+=("builtin_web_app=$BUILTIN_KAIOS3_APP_ID")
-fi
-if [[ -n "$BUILTIN_KAIOS3_AOT_CACHE" ]]; then
-  mkdir -p "$STAGING/share/oos/webassembly-aot"
-  rsync -a "$BUILTIN_KAIOS3_AOT_CACHE/" \
-    "$STAGING/share/oos/webassembly-aot/"
-  BUILTIN_MANIFEST_LINES+=("builtin_web_app_aot=sha256-cache")
-fi
-install -m 0644 "$BOOT_SPLASH" "$STAGING/share/oos/boot-splash.png"
 install -m 0644 "$LUCIDE_LICENSE" \
   "$STAGING/share/licenses/oos/Lucide.txt"
 install -m 0644 "$WAMR_LICENSE" \
@@ -182,177 +115,23 @@ install -m 0644 "$SYSTEM_FONT" \
 install -m 0644 "$SYSTEM_FONT_LICENSE" \
   "$STAGING/share/licenses/oos/RedHatFonts.txt"
 
-declare -A COPIED_ELF=()
-declare -a ELF_QUEUE=()
-
-copy_runtime_elf() {
-  local source_file=$1
-  local relative_path=$2
-  local destination_file="$STAGING/$relative_path"
-  [[ -f "$source_file" ]] || package_die "Missing runtime ELF: $source_file"
-  if [[ -n ${COPIED_ELF[$relative_path]+x} ]]; then
-    return
-  fi
-  mkdir -p "$(dirname "$destination_file")"
-  cp -L --preserve=mode,timestamps "$source_file" "$destination_file"
-  COPIED_ELF[$relative_path]=1
-  ELF_QUEUE+=("$destination_file")
-}
-
-find_sysroot_library() {
-  local library_name=$1
-  find "$WPE_SYSROOT/lib" -maxdepth 1 \( -type f -o -type l \) \
-    -name "$library_name" -print -quit
-}
-
-system_provides_library() {
-  local library_name=$1
-  find "$SYSTEM_DIR/lib" -maxdepth 1 \( -type f -o -type l \) \
-    -name "$library_name" -print -quit | grep -q .
-}
-
-copy_runtime_elf "$OOS_BINARY" bin/oos
-copy_runtime_elf "$OOS_WPE_BINARY" bin/oos-wpe
-copy_runtime_elf "$CXX_RUNTIME" lib/libc++_shared.so
-if [[ "$DEVICE" == nokia-8110-4g ]]; then
-  # This shim is built with the current OOS sources. The copy in an existing
-  # WPE sysroot may predate Android 23 compatibility additions such as ashmem.
-  ANDROID23_BUFFER="$ROOT_DIR/build/android-$DEVICE/devices/$DEVICE/liboos-android23-buffer.so"
-  package_require_file "$ANDROID23_BUFFER"
-  copy_runtime_elf "$ANDROID23_BUFFER" lib/liboos-android23-buffer.so
-fi
-for runtime_entry in \
-  lib/libWPEBackend-android.so \
-  lib/oos/web-process-extensions/liboos-wamr-web-process.so \
-  lib/wpe-webkit-2.0/injected-bundle/libWPEInjectedBundle.so \
-  lib/gio/modules/libgioenvironmentproxy.so \
-  lib/gio/modules/libgioopenssl.so \
-  libexec/gstreamer-1.0/gst-plugin-scanner \
-  libexec/wpe-webkit-2.0/WPENetworkProcess \
-  libexec/wpe-webkit-2.0/WPEWebProcess; do
-  copy_runtime_elf "$WPE_SYSROOT/$runtime_entry" "$runtime_entry"
-done
-
-# GStreamer discovers these at runtime, so they do not appear in WPE's ELF
-# dependency graph. Keep a capability-oriented KaiOS media baseline instead of
-# shipping every Cerbero plugin.
-GSTREAMER_PLUGINS=(
-  libgstadaptivedemux2.so
-  libgstapp.so
-  libgstaudioconvert.so
-  libgstaudioparsers.so
-  libgstaudioresample.so
-  libgstautodetect.so
-  libgstcoreelements.so
-  libgstdash.so
-  libgstencoding.so
-  libgstflac.so
-  libgstgio.so
-  libgsthls.so
-  libgstid3demux.so
-  libgstinterleave.so
-  libgstisomp4.so
-  libgstmatroska.so
-  libgstmpg123.so
-  libgstmse.so
-  libgstogg.so
-  libgstopensles.so
-  libgstopus.so
-  libgstopusparse.so
-  libgstpbtypes.so
-  libgstplayback.so
-  libgstsoup.so
-  libgstsubparse.so
-  libgsttypefindfunctions.so
-  libgstvideoconvertscale.so
-  libgstvideoparsersbad.so
-  libgstvideorate.so
-  libgstvolume.so
-  libgstvorbis.so
-  libgstwavenc.so
-  libgstwavparse.so
-)
-# The Android media plugin from the API 29 build is usable on the 2780, while
-# the API 23 profile cannot resolve its ANativeWindow JNI entry point. WPE
-# WebAudio uses OpenSL ES directly and does not depend on this decoder plugin.
-if ((OOS_WPE_ANDROID_API >= 29)); then
-  GSTREAMER_PLUGINS+=(libgstandroidmedia.so)
-fi
-for plugin in "${GSTREAMER_PLUGINS[@]}"; do
-  copy_runtime_elf "$WPE_SYSROOT/lib/gstreamer-1.0/$plugin" \
-    "lib/gstreamer-1.0/$plugin"
-done
-
-queue_index=0
-while (( queue_index < ${#ELF_QUEUE[@]} )); do
-  runtime_file=${ELF_QUEUE[$queue_index]}
-  ((queue_index += 1))
-  while IFS= read -r needed_library; do
-    [[ -n "$needed_library" ]] || continue
-    if [[ -n ${COPIED_ELF[lib/$needed_library]+x} ]]; then
-      continue
-    fi
-    if [[ "$needed_library" == libc++_shared.so ]]; then
-      copy_runtime_elf "$CXX_RUNTIME" "lib/$needed_library"
-      continue
-    fi
-    sysroot_library=$(find_sysroot_library "$needed_library")
-    if [[ -n "$sysroot_library" ]]; then
-      copy_runtime_elf "$sysroot_library" "lib/$needed_library"
-    elif ! system_provides_library "$needed_library"; then
-      package_die "Cannot resolve $needed_library required by $runtime_file"
-    fi
-  done < <(readelf -d "$runtime_file" 2>/dev/null \
-    | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
-done
-
-# The HLS plugin uses Cerbero's unversioned OpenSSL libcrypto. Leaving that
-# SONAME in /opt/oos makes Android's OpenSL media stack bind its system libssl
-# to the incompatible Cerbero library. Give the WPE copy a private identity so
-# HLS and the system audio stack can coexist in WPEWebProcess.
-if [[ -f "$STAGING/lib/libcrypto.so" ]]; then
-  WPE_CRYPTO_NAME=liboos-wpe-crypto.so
-  WPE_CRYPTO_PATH="$STAGING/lib/$WPE_CRYPTO_NAME"
-  mv "$STAGING/lib/libcrypto.so" "$WPE_CRYPTO_PATH"
-  run_patchelf --set-soname "$WPE_CRYPTO_NAME" "$WPE_CRYPTO_PATH"
-  for queue_index in "${!ELF_QUEUE[@]}"; do
-    runtime_file=${ELF_QUEUE[$queue_index]}
-    if [[ "$runtime_file" == "$STAGING/lib/libcrypto.so" ]]; then
-      ELF_QUEUE[$queue_index]=$WPE_CRYPTO_PATH
-      continue
-    fi
-    if run_patchelf --print-needed "$runtime_file" 2>/dev/null \
-        | grep -qx libcrypto.so; then
-      run_patchelf --replace-needed libcrypto.so "$WPE_CRYPTO_NAME" \
-        "$runtime_file"
-    fi
-  done
-fi
-
-for runtime_share in fontconfig glib-2.0 icu licenses wpe-webkit-2.0 xml; do
-  if [[ -d "$WPE_SYSROOT/share/$runtime_share" ]]; then
-    rsync -a "$WPE_SYSROOT/share/$runtime_share" "$STAGING/share/"
-  fi
-done
-if [[ -d "$WPE_SYSROOT/etc" ]]; then
-  rsync -a "$WPE_SYSROOT/etc/" "$STAGING/etc/"
-fi
-
 package_verify_elf_dependencies "$STAGING" "$SYSTEM_DIR"
 
-if [[ -n ${WPE_STRIP:-} ]]; then
-  STRIP_TOOL=$WPE_STRIP
-elif [[ -x "$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" ]]; then
-  STRIP_TOOL="$WPE_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+ANDROID_NDK=${ANDROID_NDK:-/home/jax/Android/Sdk/ndk/r21e}
+if [[ -n ${OOS_STRIP:-} ]]; then
+  STRIP_TOOL=$OOS_STRIP
+elif [[ -x "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" ]]; then
+  STRIP_TOOL="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 elif command -v llvm-strip >/dev/null 2>&1; then
   STRIP_TOOL=$(command -v llvm-strip)
 else
-  package_die "Cannot find llvm-strip; set WPE_STRIP in .env"
+  package_die "Cannot find llvm-strip; set OOS_STRIP in .env"
 fi
-for runtime_file in "${ELF_QUEUE[@]}"; do
-  "$STRIP_TOOL" --strip-unneeded "$runtime_file"
-done
-echo "Packaged and stripped ${#ELF_QUEUE[@]} runtime ELF files"
+"$STRIP_TOOL" --strip-unneeded "$STAGING/bin/oos"
+if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
+  "$STRIP_TOOL" --strip-unneeded \
+    "$STAGING/lib/$(basename "$DEVICE_RUNTIME_LIBRARY")"
+fi
 
 printf '%s\n' \
   "format=2" \
@@ -360,29 +139,18 @@ printf '%s\n' \
   "version=$VERSION" \
   "device=$DEVICE" \
   "abi=armeabi-v7a" \
-  "android_api=$OOS_WPE_ANDROID_API" \
-  "wpe_profile=$OOS_WPE_PROFILE" \
-  "buffer_abi=$OOS_WPE_BUFFER_ABI" \
-  "javascript_jit=baseline,dfg" \
-  "webassembly_runtime=wamr-2.4.4" \
-  "webassembly_execution=interpreter,aot" \
-  "remote_inspector=runtime-optional" \
-  "native_app_runtime=wamr-2.4.4" \
-  "web_app_runtime=wpe-webkit-2.52.5" \
-  "web_app_host=external-single-foreground" \
-  "web_audio_output=gstreamer-opensles" \
-  "${BUILTIN_MANIFEST_LINES[@]}" \
-  "native_app_execution=aot" \
+  "android_api=$ANDROID_API" \
+  "native_app_runtime=${WAMR_VERSION}" \
+  "native_app_execution=interpreter,aot" \
   "native_app_interface=oos-wit-0.1.0-core" \
   "system_font=ui-proportional.otf" \
   "launcher_framework=egui-0.35" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
-  > "$STAGING/manifest.env"
+  >"$STAGING/manifest.env"
 package_write_checksums "$STAGING"
 
 mv "$STAGING" "$DESTINATION"
-
 if [[ "$ACTIVATE" -eq 1 ]]; then
   ACTIVATE_TMP="$OUTPUT_DIR/.res.$$.new"
   ln -s "$RES_NAME" "$ACTIVATE_TMP"
@@ -390,7 +158,6 @@ if [[ "$ACTIVATE" -eq 1 ]]; then
   ACTIVATE_TMP=
   echo "Activated $RES_NAME"
 fi
-
 if [[ "$CREATE_TGZ" -eq 1 ]]; then
   ARCHIVE="$(dirname "$OUTPUT_DIR")/oos-res-$DEVICE-$VERSION.tgz"
   package_create_tgz "$DESTINATION" "$ARCHIVE"

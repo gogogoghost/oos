@@ -41,7 +41,7 @@ if [[ ! -x "$LOCAL_BINARY" ]]; then
   exit 1
 fi
 
-"$ADB" shell "su -c 'setprop ctl.stop b2g; setprop ctl.stop b2gkillerd; if [ -x /data/local/tmp/oos-wpe/wpe_chroot_device.sh ]; then /data/local/tmp/oos-wpe/wpe_chroot_device.sh stop; fi; mkdir -p $REMOTE_DIR; chmod 0777 $REMOTE_DIR'"
+"$ADB" shell "su -c 'setprop ctl.stop b2g; setprop ctl.stop b2gkillerd; mkdir -p $REMOTE_DIR; chmod 0777 $REMOTE_DIR'"
 "$ADB" push "$LOCAL_BINARY" "$REMOTE_DIR/$PROGRAM" >/dev/null
 stop_cover
 "$ADB" shell "su -c 'chmod 0755 $REMOTE_DIR/$PROGRAM; nohup $REMOTE_DIR/$PROGRAM >$REMOTE_DIR/cover.log 2>&1 </dev/null & echo \$! >$REMOTE_PID'"

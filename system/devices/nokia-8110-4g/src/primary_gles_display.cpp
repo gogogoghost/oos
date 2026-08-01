@@ -119,7 +119,7 @@ bool finiteRect(const OosGfxDrawCommand &command) {
 class PrimaryGlesDisplay::Impl final : public runtime::GlesFrameTarget {
 public:
   Impl() : gles_(*this) {
-    const char *trace = std::getenv("OOS_TRACE_WPE_FRAMES");
+    const char *trace = std::getenv("OOS_TRACE_COMPOSITOR_FRAMES");
     trace_frames_ = trace && trace[0] && std::strcmp(trace, "0") != 0;
   }
 
