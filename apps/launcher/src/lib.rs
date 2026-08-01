@@ -94,14 +94,14 @@ impl Launcher {
         match (self.view, code) {
             (View::Home, LINUX_KEY_OK) => self.view = View::Apps,
             (View::Home, LINUX_KEY_SOFT_LEFT) => {
-                self.notice = Some("No alerts");
+                self.notice = Some("No notifications");
                 self.notice_until_us = now_us + 1_400_000;
             }
             (View::Home, LINUX_KEY_SOFT_RIGHT) => {
                 self.notice = Some("Camera is not installed");
                 self.notice_until_us = now_us + 1_400_000;
             }
-            (View::Apps, LINUX_KEY_BACK | LINUX_KEY_SOFT_LEFT) => {
+            (View::Apps, LINUX_KEY_BACK | LINUX_KEY_SOFT_RIGHT) => {
                 self.view = View::Home;
                 self.notice = None;
             }
@@ -117,7 +117,7 @@ impl Launcher {
                 self.notice = Some("App is not installed");
                 self.notice_until_us = now_us + 1_400_000;
             }
-            (View::Apps, LINUX_KEY_SOFT_RIGHT) => {
+            (View::Apps, LINUX_KEY_SOFT_LEFT) => {
                 self.notice = Some("Options are not available");
                 self.notice_until_us = now_us + 1_400_000;
             }
@@ -139,7 +139,7 @@ impl Launcher {
         });
         let backend_output = self
             .renderer
-            .submit(&self.context, output, [16, 18, 22, 255])
+            .submit(&self.context, output, [13, 16, 16, 255])
             .map_err(|error| error.message())?;
         if !backend_output.platform_output.commands.is_empty()
             || backend_output
@@ -158,7 +158,7 @@ fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Optio
         .exact_size(20.0)
         .frame(
             egui::Frame::new()
-                .fill(Color32::from_rgb(8, 9, 11))
+                .fill(Color32::from_rgb(13, 16, 16))
                 .inner_margin(egui::Margin::symmetric(7, 2)),
         )
         .show(ui, |ui| {
@@ -177,28 +177,28 @@ fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Optio
         .exact_size(28.0)
         .frame(
             egui::Frame::new()
-                .fill(Color32::from_rgb(243, 244, 246))
+                .fill(Color32::from_rgb(32, 33, 33))
                 .inner_margin(egui::Margin::symmetric(5, 5)),
         )
         .show(ui, |ui| {
             let labels = if view == View::Home {
-                ["Alerts", "Apps", "Camera"]
+                ["Notices", "Apps", "Camera"]
             } else {
-                ["Back", "Open", "Options"]
+                ["Options", "Open", "Back"]
             };
             ui.columns(3, |columns| {
                 columns[0].label(
                     RichText::new(labels[0])
                         .size(10.0)
                         .strong()
-                        .color(Color32::from_rgb(21, 23, 26)),
+                        .color(Color32::from_rgb(240, 237, 233)),
                 );
                 columns[1].with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(labels[1])
                             .size(10.0)
                             .strong()
-                            .color(Color32::from_rgb(212, 92, 0)),
+                            .color(Color32::from_rgb(230, 81, 0)),
                     );
                 });
                 columns[2].with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
@@ -206,7 +206,7 @@ fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Optio
                         RichText::new(labels[2])
                             .size(10.0)
                             .strong()
-                            .color(Color32::from_rgb(21, 23, 26)),
+                            .color(Color32::from_rgb(240, 237, 233)),
                     );
                 });
             });
@@ -214,7 +214,7 @@ fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Optio
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(Color32::from_rgb(17, 20, 26))
+                .fill(Color32::from_rgb(21, 22, 22))
                 .inner_margin(egui::Margin::same(9)),
         )
         .show(ui, |ui| {
@@ -229,7 +229,7 @@ fn render_launcher(ui: &mut egui::Ui, view: View, selected: usize, notice: Optio
                 ui.painter().rect_filled(
                     Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height())),
                     0.0,
-                    Color32::from_rgb(255, 122, 0),
+                    Color32::from_rgb(230, 81, 0),
                 );
                 ui.painter().text(
                     rect.center(),
@@ -249,14 +249,14 @@ fn render_home(ui: &mut egui::Ui) {
         ui.painter().circle_stroke(
             center,
             20.0,
-            egui::Stroke::new(3.0, Color32::from_rgb(255, 122, 0)),
+            egui::Stroke::new(3.0, Color32::from_rgb(230, 81, 0)),
         );
         ui.painter().line_segment(
             [
                 center + Vec2::new(-13.0, 13.0),
                 center + Vec2::new(13.0, -13.0),
             ],
-            egui::Stroke::new(2.0, Color32::from_rgb(255, 122, 0)),
+            egui::Stroke::new(2.0, Color32::from_rgb(230, 81, 0)),
         );
         ui.add_space(54.0);
         ui.label(
@@ -284,7 +284,7 @@ fn render_apps(ui: &mut egui::Ui, selected: usize) {
             RichText::new("O")
                 .size(16.0)
                 .strong()
-                .color(Color32::from_rgb(255, 122, 0)),
+                .color(Color32::from_rgb(230, 81, 0)),
         );
         ui.label(RichText::new("Apps").size(16.0).strong());
     });
@@ -295,12 +295,12 @@ fn render_apps(ui: &mut egui::Ui, selected: usize) {
         .show(ui, |ui| {
             for (index, app) in APPS.iter().enumerate() {
                 let fill = if index == selected {
-                    Color32::from_rgb(42, 46, 53)
+                    Color32::from_rgb(43, 44, 45)
                 } else {
-                    Color32::from_rgb(32, 36, 43)
+                    Color32::from_rgb(21, 22, 22)
                 };
                 let stroke = if index == selected {
-                    egui::Stroke::new(2.0, Color32::from_rgb(255, 138, 31))
+                    egui::Stroke::new(2.0, Color32::from_rgb(230, 81, 0))
                 } else {
                     egui::Stroke::NONE
                 };

@@ -30,13 +30,13 @@ constexpr uint16_t kKeySoftRight = 357;
 lv_color_t color(uint32_t rgb) { return lv_color_hex(rgb); }
 
 constexpr uint32_t kOrange = 0xe65100;
-constexpr uint32_t kCanvas = 0x201f1d;
-constexpr uint32_t kSurface = 0x292725;
-constexpr uint32_t kSelectedSurface = 0x34302d;
-constexpr uint32_t kStatusBackground = 0x171614;
+constexpr uint32_t kCanvas = 0x151616;
+constexpr uint32_t kSurface = 0x202121;
+constexpr uint32_t kSelectedSurface = 0x2b2c2d;
+constexpr uint32_t kStatusBackground = 0x0d1010;
 constexpr uint32_t kText = 0xf0ede9;
 constexpr uint32_t kMuted = 0xa9a29a;
-constexpr uint32_t kDivider = 0x3d3935;
+constexpr uint32_t kDivider = 0x343637;
 constexpr uint32_t kWhite = 0xffffff;
 constexpr uint32_t kStatusInactive = 0x5f5a55;
 
@@ -249,7 +249,7 @@ public:
     home_date =
         makeLabel(content, date_text.c_str(), &lv_font_montserrat_12, kMuted);
     lv_obj_set_pos(home_date, 16, 121);
-    lv_label_set_text(soft_left, "Alerts");
+    lv_label_set_text(soft_left, "Notices");
     lv_label_set_text(soft_center, "Apps");
     lv_label_set_text(soft_right, "Camera");
     updateClock();
@@ -298,9 +298,9 @@ public:
       app_cards[index] = card;
     }
     updateSelection();
-    lv_label_set_text(soft_left, "Back");
+    lv_label_set_text(soft_left, "Options");
     lv_label_set_text(soft_center, "Open");
-    lv_label_set_text(soft_right, "Options");
+    lv_label_set_text(soft_right, "Back");
     needs_refresh = true;
   }
 
@@ -430,7 +430,7 @@ public:
       if (event.code == kKeyOk) {
         showApps();
       } else if (event.code == kKeySoftLeft) {
-        showNotice("No alerts", now);
+        showNotice("No notifications", now);
       } else if (event.code == kKeySoftRight) {
         showNotice("Camera is not installed", now);
       }
@@ -439,7 +439,7 @@ public:
 
     switch (event.code) {
     case kKeyBack:
-    case kKeySoftLeft:
+    case kKeySoftRight:
       showHome();
       break;
     case kKeyLeft:
@@ -461,7 +461,7 @@ public:
     case kKeyOk:
       showNotice("App is not installed", now);
       break;
-    case kKeySoftRight:
+    case kKeySoftLeft:
       showNotice("Options are not available", now);
       break;
     default:
