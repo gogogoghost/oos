@@ -28,26 +28,29 @@ constexpr uint16_t kKeySoftRight = 357;
 lv_color_t color(uint32_t rgb) { return lv_color_hex(rgb); }
 
 constexpr uint32_t kOrange = 0xe65100;
-constexpr uint32_t kCanvas = 0xf8f8f8;
-constexpr uint32_t kSurface = 0xffffff;
-constexpr uint32_t kText = 0x202124;
-constexpr uint32_t kMuted = 0x74777d;
-constexpr uint32_t kDivider = 0xe2e4e7;
+constexpr uint32_t kCanvas = 0x201f1d;
+constexpr uint32_t kSurface = 0x292725;
+constexpr uint32_t kSelectedSurface = 0x34302d;
+constexpr uint32_t kStatusBackground = 0x171614;
+constexpr uint32_t kText = 0xf0ede9;
+constexpr uint32_t kMuted = 0xa9a29a;
+constexpr uint32_t kDivider = 0x3d3935;
 constexpr uint32_t kWhite = 0xffffff;
-constexpr uint32_t kStatusInactive = 0xffb38f;
+constexpr uint32_t kStatusInactive = 0x5f5a55;
 
 struct AppVisual {
   const char *name;
   const char *symbol;
+  uint32_t icon_color;
 };
 
 constexpr std::array<AppVisual, 6> kCoreApps = {
-    {{"Phone", LV_SYMBOL_CALL},
-     {"Messages", LV_SYMBOL_ENVELOPE},
-     {"Contacts", "C"},
-     {"Camera", LV_SYMBOL_IMAGE},
-     {"Files", LV_SYMBOL_DIRECTORY},
-     {"Settings", LV_SYMBOL_SETTINGS}}};
+    {{"Phone", LV_SYMBOL_CALL, 0x2f7658},
+     {"Messages", LV_SYMBOL_ENVELOPE, 0x35669a},
+     {"Contacts", "C", 0x6e527e},
+     {"Camera", LV_SYMBOL_IMAGE, 0x9b493b},
+     {"Files", LV_SYMBOL_DIRECTORY, 0x397174},
+     {"Settings", LV_SYMBOL_SETTINGS, 0x625e59}}};
 
 void stripObject(lv_obj_t *object) {
   lv_obj_set_style_border_width(object, 0, 0);
@@ -115,37 +118,47 @@ public:
     stripObject(status);
     lv_obj_set_size(status, LV_PCT(100), 22);
     lv_obj_align(status, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(status, color(kOrange), 0);
+    lv_obj_set_style_bg_color(status, color(kStatusBackground), 0);
     lv_obj_set_style_bg_opa(status, LV_OPA_COVER, 0);
 
-    status_time = makeLabel(status, "00:00", &lv_font_montserrat_10, kWhite);
+    status_time = makeLabel(status, "00:00", &lv_font_montserrat_10, kText);
     lv_obj_align(status_time, LV_ALIGN_LEFT_MID, 6, 0);
 
+    status_indicators = lv_obj_create(status);
+    stripObject(status_indicators);
+    lv_obj_set_size(status_indicators, 188, 22);
+    lv_obj_align(status_indicators, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_set_style_bg_opa(status_indicators, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_column(status_indicators, 5, 0);
+    lv_obj_set_flex_flow(status_indicators, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(status_indicators, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    status_signal_container = lv_obj_create(status_indicators);
+    stripObject(status_signal_container);
+    lv_obj_set_size(status_signal_container, 13, 11);
+    lv_obj_set_style_bg_opa(status_signal_container, LV_OPA_TRANSP, 0);
     for (size_t index = 0; index < status_signal.size(); ++index) {
-      lv_obj_t *bar = lv_obj_create(status);
+      lv_obj_t *bar = lv_obj_create(status_signal_container);
       stripObject(bar);
       const int height = 3 + static_cast<int>(index) * 2;
       lv_obj_set_size(bar, 2, height);
-      lv_obj_set_pos(bar, 116 + static_cast<int>(index) * 3, 17 - height);
+      lv_obj_set_pos(bar, static_cast<int>(index) * 3, 11 - height);
       lv_obj_set_style_bg_color(bar, color(kStatusInactive), 0);
       lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
       status_signal[index] = bar;
     }
     status_radio =
-        makeLabel(status, "--", &lv_font_montserrat_10, kStatusInactive);
-    lv_obj_set_width(status_radio, 21);
-    lv_obj_set_style_text_align(status_radio, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(status_radio, 130, 5);
-    status_wifi = makeLabel(status, LV_SYMBOL_WIFI, &lv_font_montserrat_10,
-                            kStatusInactive);
-    lv_obj_set_pos(status_wifi, 156, 5);
-    status_charge =
-        makeLabel(status, LV_SYMBOL_CHARGE, &lv_font_montserrat_10, kWhite);
-    lv_obj_set_pos(status_charge, 174, 5);
+        makeLabel(status_indicators, "", &lv_font_montserrat_10, kText);
+    status_wifi = makeLabel(status_indicators, LV_SYMBOL_WIFI,
+                            &lv_font_montserrat_10, kText);
+    status_charge = makeLabel(status_indicators, LV_SYMBOL_CHARGE,
+                              &lv_font_montserrat_10, kOrange);
+    lv_obj_add_flag(status_radio, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(status_wifi, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(status_charge, LV_OBJ_FLAG_HIDDEN);
-    status_battery = makeLabel(status, "-- " LV_SYMBOL_BATTERY_EMPTY,
+    status_battery = makeLabel(status_indicators, LV_SYMBOL_BATTERY_EMPTY,
                                &lv_font_montserrat_10, kStatusInactive);
-    lv_obj_align(status_battery, LV_ALIGN_RIGHT_MID, -6, 0);
 
     content = lv_obj_create(root);
     stripObject(content);
@@ -184,6 +197,8 @@ public:
     root = nullptr;
     status = nullptr;
     status_time = nullptr;
+    status_indicators = nullptr;
+    status_signal_container = nullptr;
     status_signal.fill(nullptr);
     status_radio = nullptr;
     status_wifi = nullptr;
@@ -198,8 +213,6 @@ public:
     home_date = nullptr;
     home_connectivity = nullptr;
     app_cards.fill(nullptr);
-    app_icons.fill(nullptr);
-    app_labels.fill(nullptr);
     notice = nullptr;
     initialized = false;
     notice_until_us = 0;
@@ -214,8 +227,6 @@ public:
     selected = 0;
     notice = nullptr;
     app_cards.fill(nullptr);
-    app_icons.fill(nullptr);
-    app_labels.fill(nullptr);
     home_time = nullptr;
     home_date = nullptr;
     home_connectivity = nullptr;
@@ -275,8 +286,6 @@ public:
     view = View::Apps;
     notice = nullptr;
     app_cards.fill(nullptr);
-    app_icons.fill(nullptr);
-    app_labels.fill(nullptr);
     home_time = nullptr;
     home_date = nullptr;
     home_connectivity = nullptr;
@@ -309,13 +318,16 @@ public:
       lv_obj_set_pos(card, 7 + column * 77, 47 + row * 91);
       lv_obj_set_style_bg_color(card, color(kCanvas), 0);
       lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+      lv_obj_set_style_border_width(card, 2, 0);
+      lv_obj_set_style_border_color(card, color(kOrange), 0);
+      lv_obj_set_style_border_opa(card, LV_OPA_TRANSP, 0);
       lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE);
 
       lv_obj_t *icon = lv_obj_create(card);
       stripObject(icon);
       lv_obj_set_size(icon, 38, 38);
       lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 10);
-      lv_obj_set_style_bg_color(icon, color(kOrange), 0);
+      lv_obj_set_style_bg_color(icon, color(app.icon_color), 0);
       lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, 0);
       lv_obj_t *symbol =
           makeLabel(icon, app.symbol, &lv_font_montserrat_20, kWhite);
@@ -327,8 +339,6 @@ public:
       lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
       app_cards[index] = card;
-      app_icons[index] = icon;
-      app_labels[index] = label;
     }
     updateSelection();
     lv_label_set_text(soft_left, "Back");
@@ -343,13 +353,10 @@ public:
       if (!card)
         continue;
       const bool active = index == selected;
-      lv_obj_set_style_bg_color(card, color(active ? kOrange : kCanvas), 0);
-      lv_obj_set_style_text_color(app_labels[index],
-                                  color(active ? kWhite : kText), 0);
-      lv_obj_set_style_bg_color(app_icons[index],
-                                color(active ? kWhite : kOrange), 0);
-      lv_obj_set_style_text_color(lv_obj_get_child(app_icons[index], 0),
-                                  color(active ? kOrange : kWhite), 0);
+      lv_obj_set_style_bg_color(card,
+                                color(active ? kSelectedSurface : kCanvas), 0);
+      lv_obj_set_style_border_opa(card, active ? LV_OPA_COVER : LV_OPA_TRANSP,
+                                  0);
     }
     needs_refresh = true;
   }
@@ -374,21 +381,27 @@ public:
   void applyStatus() {
     const bool cellular =
         system_status.cellular_available && system_status.cellular_registered;
+    if (system_status.cellular_available)
+      lv_obj_remove_flag(status_signal_container, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(status_signal_container, LV_OBJ_FLAG_HIDDEN);
     for (size_t index = 0; index < status_signal.size(); ++index) {
       const bool active =
           cellular && static_cast<int>(index) < system_status.signal_bars;
       lv_obj_set_style_bg_color(status_signal[index],
-                                color(active ? kWhite : kStatusInactive), 0);
+                                color(active ? kText : kStatusInactive), 0);
     }
-    const char *technology = system_status.radio_technology.empty()
-                                 ? "--"
-                                 : system_status.radio_technology.c_str();
-    lv_label_set_text(status_radio, technology);
-    lv_obj_set_style_text_color(status_radio,
-                                color(cellular ? kWhite : kStatusInactive), 0);
-    lv_obj_set_style_text_color(
-        status_wifi,
-        color(system_status.wifi_connected ? kWhite : kStatusInactive), 0);
+    if (cellular && !system_status.radio_technology.empty()) {
+      lv_label_set_text(status_radio, system_status.radio_technology.c_str());
+      lv_obj_remove_flag(status_radio, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_label_set_text(status_radio, "");
+      lv_obj_add_flag(status_radio, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (system_status.wifi_connected)
+      lv_obj_remove_flag(status_wifi, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(status_wifi, LV_OBJ_FLAG_HIDDEN);
 
     if (system_status.charging)
       lv_obj_remove_flag(status_charge, LV_OBJ_FLAG_HIDDEN);
@@ -406,15 +419,14 @@ public:
       battery_symbol = LV_SYMBOL_BATTERY_1;
     char battery_text[24] = {};
     if (system_status.battery_available)
-      std::snprintf(battery_text, sizeof(battery_text), "%d %s",
+      std::snprintf(battery_text, sizeof(battery_text), "%d%% %s",
                     system_status.battery_percent, battery_symbol);
     else
-      std::snprintf(battery_text, sizeof(battery_text), "-- %s",
-                    battery_symbol);
+      std::snprintf(battery_text, sizeof(battery_text), "%s", battery_symbol);
     lv_label_set_text(status_battery, battery_text);
     lv_obj_set_style_text_color(
         status_battery,
-        color(system_status.battery_available ? kWhite : kStatusInactive), 0);
+        color(system_status.battery_available ? kText : kStatusInactive), 0);
 
     if (home_connectivity) {
       if (system_status.wifi_connected)
@@ -451,7 +463,7 @@ public:
     stripObject(notice);
     lv_obj_set_size(notice, 224, 30);
     lv_obj_align(notice, LV_ALIGN_BOTTOM_MID, 0, -4);
-    lv_obj_set_style_bg_color(notice, color(kText), 0);
+    lv_obj_set_style_bg_color(notice, color(kSurface), 0);
     lv_obj_set_style_bg_opa(notice, LV_OPA_COVER, 0);
     lv_obj_set_style_border_side(notice, LV_BORDER_SIDE_LEFT, 0);
     lv_obj_set_style_border_width(notice, 3, 0);
@@ -560,6 +572,8 @@ public:
   lv_obj_t *root = nullptr;
   lv_obj_t *status = nullptr;
   lv_obj_t *status_time = nullptr;
+  lv_obj_t *status_indicators = nullptr;
+  lv_obj_t *status_signal_container = nullptr;
   std::array<lv_obj_t *, 4> status_signal = {};
   lv_obj_t *status_radio = nullptr;
   lv_obj_t *status_wifi = nullptr;
@@ -575,8 +589,6 @@ public:
   lv_obj_t *home_connectivity = nullptr;
   lv_obj_t *notice = nullptr;
   std::array<lv_obj_t *, 6> app_cards = {};
-  std::array<lv_obj_t *, 6> app_icons = {};
-  std::array<lv_obj_t *, 6> app_labels = {};
   std::string clock_text;
   std::string date_text;
   std::string error;
