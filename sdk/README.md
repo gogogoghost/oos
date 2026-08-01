@@ -43,6 +43,10 @@ Other languages should generate guest bindings from `sdk/wit/oos.wit` and target
 the `app` world. The runtime contract contains no Rust-specific types, WASI,
 EGL, framebuffer, Binder, evdev, file descriptor, or HAL object.
 
+The Rust crates in `sdk/rust` are libraries and intentionally do not own a
+workspace or lock file. Each application locks its complete dependency graph in
+its own directory and can use these crates through a path dependency.
+
 The production WAMR 2.4.4 runtime loads the generated Canonical ABI core Wasm
 or ARMv7 AOT file. `build-native-apps.sh` also wraps the same module as a real
 Component Model artifact for runtimes that support components. WAMR 2.4.4 does

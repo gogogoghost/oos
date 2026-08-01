@@ -4,19 +4,19 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TARGET=wasm32-unknown-unknown
+DEMO_DIR="$ROOT_DIR/apps/tests/egui-demo"
+SMOKE_DIR="$ROOT_DIR/apps/tests/wit-smoke"
 APPS_TARGET_DIR="$ROOT_DIR/build/cargo"
 
 CARGO_TARGET_DIR="$APPS_TARGET_DIR" cargo build \
-  --manifest-path "$ROOT_DIR/Cargo.toml" \
+  --manifest-path "$DEMO_DIR/Cargo.toml" \
   --target "$TARGET" \
-  --release \
-  -p oos-egui-demo
+  --release
 
 CARGO_TARGET_DIR="$APPS_TARGET_DIR" cargo build \
-  --manifest-path "$ROOT_DIR/Cargo.toml" \
+  --manifest-path "$SMOKE_DIR/Cargo.toml" \
   --target "$TARGET" \
-  --release \
-  -p oos-wit-smoke
+  --release
 
 mkdir -p "$ROOT_DIR/build/native-apps"
 SOURCE="$APPS_TARGET_DIR/$TARGET/release/oos_egui_demo.wasm"

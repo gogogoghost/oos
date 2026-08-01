@@ -35,6 +35,10 @@ from a non-blocking device status monitor.
 Firmware reference trees under `third_party` document proprietary device
 protocols. They are not application runtimes and are not linked into OOS.
 
+Each Rust/Wasm application is an independent Cargo project with its own
+manifest, lock file, and release policy. Adding an application under `apps/`
+does not require registering it in a repository-level Cargo workspace.
+
 ## Build Environment
 
 Copy `.env.example` to `.env` and configure both extracted stock systems:

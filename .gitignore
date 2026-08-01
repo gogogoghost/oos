@@ -8,6 +8,7 @@
 /dist/
 /apps/target/
 /target/
+**/target/
 /system/build/
 /system/third_party/
 /oom

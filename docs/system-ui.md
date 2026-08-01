@@ -33,3 +33,5 @@ otherwise it is forwarded to the foreground application.
 Adding an application means adding a new directory below `apps/` and depending
 on the appropriate root SDK backend. Shared UI framework integration must be
 added to `sdk/`, never copied into an application or placed in `system/`.
+Rust/Wasm applications are independent Cargo projects; there is no root Cargo
+workspace that must be updated when an application is added.
