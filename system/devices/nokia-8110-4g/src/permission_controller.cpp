@@ -31,7 +31,7 @@ public:
   void getPackagesForUid(uid_t uid,
                          android::Vector<android::String16> &packages) final {
     if (checkPermission(android::String16(), 0, static_cast<int32_t>(uid)))
-      packages.add(android::String16("org.orangeos.system"));
+      packages.add(android::String16("cc.jaxy.oos.system"));
   }
 
   bool isRuntimePermission(const android::String16 &permission) final {

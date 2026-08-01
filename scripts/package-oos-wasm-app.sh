@@ -10,7 +10,8 @@ AOT=
 OUTPUT=
 
 usage() {
-  echo "usage: $0 --manifest FILE --wasm FILE [--aot FILE] --output APPLICATION.zip" >&2
+  echo "usage: $0 --manifest FILE [--wasm FILE] [--aot FILE] --output APPLICATION.zip" >&2
+  echo "       at least one of --wasm or --aot is required" >&2
 }
 
 while [[ $# -gt 0 ]]; do
@@ -24,10 +25,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -f "$MANIFEST" && -f "$WASM" && -n "$OUTPUT" ]] || {
+[[ -f "$MANIFEST" && -n "$OUTPUT" && ( -n "$WASM" || -n "$AOT" ) ]] || {
   usage
   exit 2
 }
+if [[ -n "$WASM" && ! -f "$WASM" ]]; then
+  echo "Wasm module does not exist: $WASM" >&2
+  exit 1
+fi
 if [[ -n "$AOT" && ! -f "$AOT" ]]; then
   echo "AOT module does not exist: $AOT" >&2
   exit 1
@@ -41,14 +46,15 @@ OUTPUT=$(realpath -m "$OUTPUT")
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/oos-wasm-package.XXXXXX")
 TEMPORARY="$OUTPUT.tmp.$$.zip"
 trap 'rm -rf "$STAGING"; rm -f "$TEMPORARY"' EXIT
-mkdir -p "$STAGING/module"
-install -m 0644 "$MANIFEST" "$STAGING/oos-manifest.json"
-install -m 0644 "$WASM" "$STAGING/module/app.wasm"
-entries=(oos-manifest.json module/app.wasm)
+install -m 0644 "$MANIFEST" "$STAGING/manifest.json"
+entries=(manifest.json)
+if [[ -n "$WASM" ]]; then
+  install -m 0644 "$WASM" "$STAGING/entry.wasm"
+  entries+=(entry.wasm)
+fi
 if [[ -n "$AOT" ]]; then
-  mkdir -p "$STAGING/aot/armv7/wamr-2.4.4"
-  install -m 0644 "$AOT" "$STAGING/aot/armv7/wamr-2.4.4/app.aot"
-  entries+=(aot/armv7/wamr-2.4.4/app.aot)
+  install -m 0644 "$AOT" "$STAGING/entry.aot"
+  entries+=(entry.aot)
 fi
 PACKAGE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT_DIR" log -1 --format=%ct)}
 for entry in "${entries[@]}"; do

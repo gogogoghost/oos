@@ -2,30 +2,31 @@
 
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: $0 OUTPUT.zip" >&2
+if [[ $# -lt 1 || $# -gt 2 || ! ${2:-aot} =~ ^(aot|wasm|both)$ ]]; then
+  echo "usage: $0 OUTPUT.zip [aot|wasm|both]" >&2
   exit 2
 fi
 output=$(realpath -m "$1")
+mode=${2:-aot}
 staging=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-package.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
-mkdir -p "$staging/aot/armv7/wamr-2.4.4"
-printf '\0aot-test-module\n' > "$staging/aot/armv7/wamr-2.4.4/app.aot"
-cat > "$staging/oos-manifest.json" <<'EOF'
+entries=(manifest.json)
+if [[ $mode == aot || $mode == both ]]; then
+  printf '\0aot-test-module\n' > "$staging/entry.aot"
+  entries+=(entry.aot)
+fi
+if [[ $mode == wasm || $mode == both ]]; then
+  printf '\0wasm-test-module\n' > "$staging/entry.wasm"
+  entries+=(entry.wasm)
+fi
+cat > "$staging/manifest.json" <<'EOF'
 {
-  "format": 1,
-  "id": "org.orangeos.test",
+  "id": "cc.jaxy.oos.test",
   "name": "OOS Test",
   "version": "1.0.0",
-  "package_kind": "oos-wasm-v1",
-  "runtime_kind": "wamr",
-  "api_profile": "oos-wit-0.1",
-  "entrypoint": "aot/armv7/wamr-2.4.4/app.aot",
   "role": "test",
-  "permissions": {"camera": {}, "wifi-manage": {}},
-  "memory": {"stack_bytes": 131072, "heap_bytes": 4194304}
+  "permissions": {"camera": {}, "wifi-manage": {}}
 }
 EOF
 mkdir -p "$(dirname "$output")"
-(cd "$staging" && zip -q -D -9 "$output" oos-manifest.json \
-  aot/armv7/wamr-2.4.4/app.aot)
+(cd "$staging" && zip -q -D -9 "$output" "${entries[@]}")

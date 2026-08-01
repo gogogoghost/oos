@@ -33,9 +33,11 @@ for link in bin lib lib64 sbin; do
   fi
 done
 install -m 0755 "$ROOT_DIR/build/local/bin/oos" "$OOS_PREFIX/bin/oos"
-rm -f "$OOS_PREFIX/packages/org.orangeos.launcher/application.zip"
-rmdir "$OOS_PREFIX/packages/org.orangeos.launcher" \
-  "$OOS_PREFIX/packages" 2>/dev/null || true
+for launcher_id in org.orangeos.launcher cc.jaxy.oos.launcher; do
+  rm -f "$OOS_PREFIX/packages/$launcher_id/application.zip"
+  rmdir "$OOS_PREFIX/packages/$launcher_id" 2>/dev/null || true
+done
+rmdir "$OOS_PREFIX/packages" 2>/dev/null || true
 install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
   "$OOS_PREFIX/etc/local-keymap.conf"
 install -m 0644 "$ROOT_DIR/system/assets/fonts/ui-proportional.otf" \

@@ -155,9 +155,8 @@ int runRepositoryCommand(int argc, char **argv,
                    repository.lastError().c_str());
       return 1;
     }
-    std::printf("%s\t%s\t%s\n", installed.manifest.id.c_str(),
-                installed.manifest.version.c_str(),
-                oos::apps::runtimeKindName(installed.manifest.runtime_kind));
+    std::printf("%s\t%s\n", installed.manifest.id.c_str(),
+                installed.manifest.version.c_str());
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--list-apps") == 0) {
@@ -168,9 +167,8 @@ int runRepositoryCommand(int argc, char **argv,
       return 1;
     }
     for (const auto &record : records) {
-      std::printf("%s\t%s\t%s\t%s\n", record.manifest.id.c_str(),
+      std::printf("%s\t%s\t%s\n", record.manifest.id.c_str(),
                   record.manifest.version.c_str(),
-                  oos::apps::runtimeKindName(record.manifest.runtime_kind),
                   record.enabled ? "enabled" : "disabled");
     }
     return 0;
@@ -233,8 +231,6 @@ int run(int argc, char **argv) {
     native_launch.data_directory = app_launch.data_directory.c_str();
     native_launch.system_data_root = data_root;
     native_launch.app_repository = &repository;
-    native_launch.stack_size = app_launch.app.manifest.stack_bytes;
-    native_launch.heap_size = app_launch.app.manifest.heap_bytes;
     native_launch.service_permission_mask =
         oos::apps::deviceServicePermissionMask(
             app_launch.app.manifest.requested_permissions);

@@ -57,8 +57,8 @@ make system DEVICE=nokia-8110-4g
 
 Useful outputs are:
 
-- `build/native-apps/launcher.wasm`: portable egui SDK test module.
-- `build/native-apps/launcher.aot`: ARMv7 WAMR AOT SDK test module.
+- `build/native-apps/launcher.wasm`: portable egui module and `wamrc` input.
+- `build/native-apps/launcher.aot`: optimized ARMv7 WAMR AOT module.
 - `build/android-<device>/bin/oos`: device-specific system process.
 - `build/android-<device>/bin/tests/<device>/`: device tests, when enabled.
 

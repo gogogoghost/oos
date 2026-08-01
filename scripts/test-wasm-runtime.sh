@@ -22,10 +22,13 @@ cmake --build "$BUILD_DIR"
   "$ROOT_DIR/system/assets/fonts"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
-TEST_PACKAGE="$TEST_DIRECTORY/application.zip"
+TEST_AOT_PACKAGE="$TEST_DIRECTORY/aot-only.zip"
+TEST_WASM_PACKAGE="$TEST_DIRECTORY/wasm-only.zip"
 trap 'rm -rf "$TEST_DIRECTORY"' EXIT
-"$ROOT_DIR/system/tests/host/create-app-package.sh" "$TEST_PACKAGE"
-"$BUILD_DIR/oos_app_repository_test" "$TEST_PACKAGE"
+"$ROOT_DIR/system/tests/host/create-app-package.sh" "$TEST_AOT_PACKAGE" aot
+"$BUILD_DIR/oos_app_repository_test" "$TEST_AOT_PACKAGE" entry.aot
+"$ROOT_DIR/system/tests/host/create-app-package.sh" "$TEST_WASM_PACKAGE" wasm
+"$BUILD_DIR/oos_app_repository_test" "$TEST_WASM_PACKAGE" entry.wasm
 "$BUILD_DIR/oos_device_storage_test"
 "$BUILD_DIR/oos_font_assets_test"
 "$BUILD_DIR/oos_system_service_test"

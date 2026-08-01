@@ -1,7 +1,8 @@
 # OOS Application Packages And State
 
-OOS supports one application type: an `oos-wasm-v1` ZIP executed by WAMR.
-There is no browser runtime and KaiOS Web packages are not accepted.
+OOS applications are ZIP packages executed by the built-in WAMR runtime. There
+is no application type or runtime discriminator because OOS supports only this
+format. Browser and KaiOS Web packages are not accepted.
 
 ## Package Format
 
@@ -9,42 +10,49 @@ An application ZIP has this layout:
 
 ```text
 application.zip
-├── oos-manifest.json
-├── aot/armv7/wamr-2.4.4/app.aot
-└── module/app.wasm
+├── manifest.json
+├── entry.wasm
+└── entry.aot          # optional, preferred when present
 ```
 
-The AOT entry is preferred on the ARMv7 phones. `module/app.wasm` is the
-portable fallback and is also useful for host testing. A minimal manifest is:
+An application must contain `entry.wasm`, `entry.aot`, or both. OOS prefers
+`entry.aot` when both are present. Production packages may contain only
+`entry.aot` to avoid shipping the redundant core Wasm module. A complete minimal
+manifest is:
 
 ```json
 {
-  "format": 1,
-  "id": "org.example.app",
+  "id": "cc.jaxy.oos.example",
   "name": "Example",
-  "version": "1.0.0",
-  "package_kind": "oos-wasm-v1",
-  "runtime_kind": "wamr",
-  "api_profile": "oos-wit-0.1",
-  "entrypoint": "aot/armv7/wamr-2.4.4/app.aot",
-  "fallback_entrypoint": "module/app.wasm",
-  "memory": {
-    "stack_bytes": 131072,
-    "heap_bytes": 4194304
+  "version": "1.0.0"
+}
+```
+
+IDs use lowercase reverse-domain notation with at least three components, such
+as `cc.jaxy.oos.launcher` or `com.example.weather`. A system role and requested
+permissions are optional functional metadata:
+
+```json
+{
+  "id": "cc.jaxy.oos.launcher",
+  "name": "Orange OS Launcher",
+  "version": "0.1.0",
+  "role": "launcher",
+  "permissions": {
+    "settings": {"access": "readonly"}
   }
 }
 ```
 
-`package_kind` and `runtime_kind` must have exactly the values above. An
-unknown runtime is rejected rather than silently dispatched. Package IDs,
-versions, entry paths, memory bounds, and requested permissions are validated
-before installation.
+The obsolete `format`, `package_kind`, `runtime_kind`, `api_profile`, entrypoint,
+and `memory` fields are rejected. Fixed paths prevent a Manifest from selecting
+an incompatible executable or runtime.
 
 Create a deterministic package with:
 
 ```sh
 ./scripts/package-oos-wasm-app.sh \
-  --manifest apps/launcher/oos-manifest.json \
+  --manifest apps/launcher/manifest.json \
   --wasm build/native-apps/launcher.wasm \
   --aot build/native-apps/launcher.aot \
   --output application.zip
@@ -62,26 +70,33 @@ The canonical package is stored at:
 /data/packages/<app-id>/<version>/<content-key>/application.zip
 ```
 
-`/data/system/app-registry.sqlite3` records the active version, runtime,
-entrypoints, WIT profile, memory limits, permissions, roles, handlers, and
-lifecycle state. Launch preparation extracts only the selected AOT/Wasm entry
-to `/data/cache/aot/<content-key>/app.aot` or `app.wasm`; the ZIP remains the
-installed source of truth.
+`/data/system/app-registry.sqlite3` records the active version, package digest,
+permissions, roles, handlers, and lifecycle state. Launch preparation extracts
+the preferred fixed entry to `/data/cache/aot/<content-key>/`; the ZIP remains
+the installed source of truth.
 
-The schema version is 2. When a schema-1 registry is opened, records whose
-package/runtime are not `oos-wasm-v1`/`wamr` are removed transactionally. Old
-Web profile/cache files are not reused and may be removed separately after an
-upgrade rollback is no longer required.
+The registry schema version is 3. Schema-1 and schema-2 registries are migrated
+transactionally. Only their OOS/WAMR records are retained; obsolete runtime,
+entrypoint, and per-app memory columns are removed.
+
+## Runtime Memory Policy
+
+Memory limits are not package metadata. OOS currently gives every application
+a 128 KiB WAMR execution stack. The WAMR host-managed heap is disabled because
+WIT data exchange uses the guest's exported `cabi_realloc`; application memory
+comes from its normal Wasm linear memory. Central policy prevents packages from
+reserving several extra MiB for every resident application. A future system
+resource policy can vary these limits without changing the package format.
 
 The command-line operations are:
 
 ```sh
 /opt/oos/bin/oos --install /data/tmp/example.zip
 /opt/oos/bin/oos --list-apps
-/opt/oos/bin/oos --app org.example.app
+/opt/oos/bin/oos --app cc.jaxy.oos.example
 ```
 
-The package identity always comes from `oos-manifest.json`; installers cannot
+The package identity always comes from `manifest.json`; installers cannot
 override it with a second application ID.
 
 ## Persistent Storage

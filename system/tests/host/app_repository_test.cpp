@@ -102,11 +102,70 @@ bool legacyRowsRemoved(const std::string &root, std::string &error) {
   return true;
 }
 
+bool hasColumn(oos::storage::SqliteDatabase &database, const char *table,
+               const char *column, bool &found, std::string &error) {
+  oos::storage::SqliteStatement statement;
+  const std::string sql = std::string("PRAGMA table_info(") + table + ");";
+  if (!database.prepare(sql.c_str(), statement)) {
+    error = database.lastError();
+    return false;
+  }
+  found = false;
+  while (true) {
+    const auto result = statement.step();
+    if (result == oos::storage::SqliteStatement::Step::Done)
+      return true;
+    const char *name = statement.columnText(1);
+    if (result != oos::storage::SqliteStatement::Step::Row || !name) {
+      error = database.lastError();
+      return false;
+    }
+    if (std::strcmp(name, column) == 0)
+      found = true;
+  }
+}
+
+bool registrySchemaIsSimplified(const std::string &root, std::string &error) {
+  oos::storage::SqliteDatabase database;
+  if (!database.open(root + "/system/app-registry.sqlite3")) {
+    error = database.lastError();
+    return false;
+  }
+  oos::storage::SqliteStatement version;
+  if (!database.prepare("PRAGMA user_version;", version) ||
+      version.step() != oos::storage::SqliteStatement::Step::Row ||
+      version.columnInt64(0) != 3) {
+    error = "application registry was not migrated to schema 3";
+    return false;
+  }
+  struct ObsoleteColumn {
+    const char *table;
+    const char *column;
+  };
+  constexpr ObsoleteColumn obsolete[] = {
+      {"applications", "package_kind"},        {"applications", "runtime_kind"},
+      {"applications", "api_profile"},         {"app_versions", "entrypoint"},
+      {"app_versions", "fallback_entrypoint"}, {"app_versions", "stack_bytes"},
+      {"app_versions", "heap_bytes"},
+  };
+  for (const auto &item : obsolete) {
+    bool found = false;
+    if (!hasColumn(database, item.table, item.column, found, error))
+      return false;
+    if (found) {
+      error = std::string("obsolete registry column remains: ") + item.table +
+              "." + item.column;
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    std::fprintf(stderr, "usage: %s OOS.zip\n", argv[0]);
+  if (argc != 3) {
+    std::fprintf(stderr, "usage: %s OOS.zip entry.aot|entry.wasm\n", argv[0]);
     return 2;
   }
   char root_template[] = "/tmp/oos-app-test.XXXXXX";
@@ -120,49 +179,55 @@ int main(int argc, char **argv) {
   std::string error;
   bool success = check(
       !oos::apps::parseAppManifest(
-          R"({"format":1,"id":"../bad","name":"bad","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wamr","api_profile":"oos-wit-0.1","entrypoint":"../app.aot"})",
-          invalid, error),
+          R"({"id":"../bad","name":"bad","version":"1.0.0"})", invalid, error),
       "unsafe manifest must be rejected");
   success &= check(
       !oos::apps::parseAppManifest(
-          R"({"format":1,"id":"org.orangeos.bad","name":"bad","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wamr","api_profile":"oos-wit-0.1","entrypoint":"app.aot","permissions":["camera"]})",
+          R"({"id":"cc.jaxy.oos.bad","name":"bad","version":"1.0.0","permissions":["camera"]})",
           invalid, error),
       "malformed permissions must be rejected");
   success &= check(
       !oos::apps::parseAppManifest(
-          R"({"format":1,"id":"org.orangeos.web","name":"web","version":"1.0.0","package_kind":"oos-wasm-v1","runtime_kind":"wpe","api_profile":"oos-wit-0.1","entrypoint":"index.html"})",
+          R"({"id":"cc.jaxy.oos.old","name":"old","version":"1.0.0","runtime_kind":"wamr"})",
           invalid, error),
-      "non-WAMR runtime must be rejected");
+      "obsolete runtime fields must be rejected");
 
   success &= check(seedLegacyWebRecord(root, error), error.c_str());
   oos::apps::AppRepository repository(root);
-  success &= check(repository.initialize(), repository.lastError().c_str());
+  const bool initialized = repository.initialize();
+  success &= check(initialized, repository.lastError().c_str());
+  if (!initialized) {
+    std::filesystem::remove_all(root);
+    return 1;
+  }
   success &= check(legacyRowsRemoved(root, error),
                    "schema-1 Web records must be removed from every table");
+  success &= check(registrySchemaIsSimplified(root, error), error.c_str());
   oos::apps::AppRecord installed;
-  success &= check(repository.install(argv[1], &installed),
-                   repository.lastError().c_str());
+  const bool package_installed = repository.install(argv[1], &installed);
+  success &= check(package_installed, repository.lastError().c_str());
   success &=
-      check(installed.manifest.id == "org.orangeos.test", "installed app id");
-  success &=
-      check(installed.manifest.runtime_kind == oos::apps::RuntimeKind::Wamr,
-            "installed runtime discriminator");
+      check(installed.manifest.id == "cc.jaxy.oos.test", "installed app id");
   success &= check(hasPermission(installed, "camera") &&
                        hasPermission(installed, "wifi-manage"),
                    "OOS manifest permissions survive registry resolution");
 
   std::vector<oos::apps::AppRecord> records;
-  success &= check(repository.list(records), repository.lastError().c_str());
+  const bool listed = repository.list(records);
+  success &= check(listed, repository.lastError().c_str());
   success &= check(records.size() == 1, "registry app count");
 
   oos::apps::AppLaunch launch;
-  success &= check(repository.prepareLaunch("org.orangeos.test", launch),
-                   repository.lastError().c_str());
+  const bool launch_prepared =
+      repository.prepareLaunch("cc.jaxy.oos.test", launch);
+  success &= check(launch_prepared, repository.lastError().c_str());
   success &= check(access(launch.executable_path.c_str(), R_OK) == 0,
                    "AOT cache file is materialized");
   success &= check(!launch.entrypoint.empty(), "native entrypoint is resolved");
+  success &= check(launch.entrypoint == argv[2],
+                   "package entry is accepted and selected");
   success &= check(launch.data_directory.find(
-                       "users/0/wasm/org.orangeos.test") != std::string::npos,
+                       "users/0/wasm/cc.jaxy.oos.test") != std::string::npos,
                    "per-app data directory");
 
   oos::storage::AppStorage storage(launch.data_directory);

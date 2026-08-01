@@ -44,9 +44,10 @@ on the OOS event-loop thread because WAMR threads are disabled. A non-zero
 return, trap, missing export, invalid pointer, invalid draw range, or resource
 limit violation fails that app call instead of passing untrusted data to GLES.
 
-The default guest heap is 4 MiB plus the module's initial linear memory. Future
-app manifests may request a different bounded budget; silently granting a
-large per-app heap is not acceptable on this device.
+Each instance gets a 128 KiB execution stack. WAMR's optional host-managed heap
+is disabled; allocation through the generated WIT bindings uses the module's
+own linear memory and exported `cabi_realloc`. Resource policy therefore stays
+under OOS control instead of being requested by application manifests.
 
 ## WIT Interface Package
 
@@ -129,19 +130,18 @@ interface model.
 
 ## Execution And Isolation
 
-Each native application ZIP can contain both forms:
-
-- `aot/armv7/wamr-2.4.4/app.aot`: used in production.
-- `module/app.wasm`: portable core Wasm fallback and diagnostic form.
+Each native application ZIP contains `entry.wasm`, `entry.aot`, or both. AOT is
+preferred when present, and AOT-only production packages avoid carrying a
+redundant core Wasm module.
 
 The optional `launcher.component.wasm` remains a build/tooling artifact until
 the runtime has a Component Model loader; it is not required in the device
 package.
 
-AOT retains WebAssembly bounds checks and WAMR validation but removes the
-continuous interpreter cost on the Nokia 2780. JIT is deliberately not part
-of the native-app runtime: AOT is deterministic, needs no writable-executable
-memory on the phone, and is available for this ARMv7 target. This decision is
+AOT retains WebAssembly bounds checks and WAMR validation. WAMR's interpreter
+remains available for portable `entry.wasm` packages; JIT is not part of the
+native-app runtime. AOT is deterministic, needs no writable-executable memory
+on the phone, and is available for this ARMv7 target. This decision is
 independent from any browser engine or JavaScript runtime.
 
 Module files are loaded with writable private `mmap` rather than copied into

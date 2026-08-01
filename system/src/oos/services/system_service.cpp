@@ -629,9 +629,6 @@ public:
       appendJsonString(response, records[index].manifest.version);
       response += ",\"enabled\":";
       response += records[index].enabled ? "true" : "false";
-      response += ",\"runtime\":";
-      appendJsonString(response,
-                       apps::runtimeKindName(records[index].manifest.runtime_kind));
       response += ",\"activities\":[";
       bool first_handler = true;
       for (const apps::AppHandler &handler : records[index].manifest.handlers) {

@@ -1,10 +1,8 @@
 #include "oos/apps/app_manifest.h"
 
 #include "oos/apps/json.h"
-#include "oos/apps/zip_archive.h"
 
 #include <cctype>
-#include <limits>
 
 namespace oos::apps {
 namespace {
@@ -34,22 +32,30 @@ bool optionalString(const JsonValue &root, const char *key, std::string &value,
 }
 
 bool validIdentifier(const std::string &value) {
-  if (value.empty() || value.size() > 128 || value.front() == '.' ||
-      value.back() == '.')
+  if (value.empty() || value.size() > 128)
     return false;
-  bool last_dot = false;
+
+  size_t separators = 0;
+  bool segment_start = true;
   for (const unsigned char character : value) {
     if (character == '.') {
-      if (last_dot)
+      if (segment_start)
         return false;
-      last_dot = true;
+      ++separators;
+      segment_start = true;
       continue;
     }
-    last_dot = false;
-    if (!std::isalnum(character) && character != '-' && character != '_')
+    if (segment_start) {
+      if (character < 'a' || character > 'z')
+        return false;
+      segment_start = false;
+      continue;
+    }
+    if ((character < 'a' || character > 'z') &&
+        (character < '0' || character > '9'))
       return false;
   }
-  return true;
+  return !segment_start && separators >= 2;
 }
 
 bool validVersion(const std::string &value) {
@@ -60,31 +66,6 @@ bool validVersion(const std::string &value) {
         character != '+')
       return false;
   }
-  return true;
-}
-
-bool boundedMemory(const JsonValue &root, AppManifest &manifest,
-                   std::string &error) {
-  const JsonValue *memory = root.get("memory");
-  if (!memory)
-    return true;
-  if (!memory->isObject()) {
-    error = "manifest field 'memory' must be an object";
-    return false;
-  }
-  const JsonValue *stack = memory->get("stack_bytes");
-  const JsonValue *heap = memory->get("heap_bytes");
-  if ((stack && (!stack->isNumber() || stack->integerValue() < 64 * 1024 ||
-                 stack->integerValue() > 1024 * 1024)) ||
-      (heap && (!heap->isNumber() || heap->integerValue() < 1024 * 1024 ||
-                heap->integerValue() > 16 * 1024 * 1024))) {
-    error = "manifest memory limits are outside the supported range";
-    return false;
-  }
-  if (stack)
-    manifest.stack_bytes = static_cast<uint32_t>(stack->integerValue());
-  if (heap)
-    manifest.heap_bytes = static_cast<uint32_t>(heap->integerValue());
   return true;
 }
 
@@ -123,70 +104,46 @@ bool collectPermissions(const JsonValue *permissions, AppManifest &manifest,
   return true;
 }
 
+bool rejectLegacyFields(const JsonValue &root, std::string &error) {
+  constexpr const char *legacy_fields[] = {
+      "format",     "package_kind",        "runtime_kind", "api_profile",
+      "entrypoint", "fallback_entrypoint", "memory",
+  };
+  for (const char *field : legacy_fields) {
+    if (root.get(field)) {
+      error = std::string("manifest field '") + field +
+              "' is obsolete in the fixed OOS package format";
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
-
-const char *packageKindName(PackageKind kind) {
-  (void)kind;
-  return "oos-wasm-v1";
-}
-
-const char *runtimeKindName(RuntimeKind kind) {
-  (void)kind;
-  return "wamr";
-}
 
 bool parseAppManifest(const std::string &json, AppManifest &manifest,
                       std::string &error) {
   JsonValue root;
   if (!parseJson(json, root, error)) {
-    error = "parse oos-manifest.json: " + error;
+    error = "parse manifest.json: " + error;
     return false;
   }
   if (!root.isObject()) {
-    error = "oos-manifest.json must contain an object";
+    error = "manifest.json must contain an object";
     return false;
   }
-  const JsonValue *format = root.get("format");
-  if (!format || !format->isNumber() || format->integerValue() != 1) {
-    error = "unsupported or missing app package format";
-    return false;
-  }
-
   AppManifest parsed;
-  parsed.format = 1;
-  std::string package_kind;
-  std::string runtime_kind;
-  if (!requiredString(root, "id", parsed.id, error) ||
+  if (!rejectLegacyFields(root, error) ||
+      !requiredString(root, "id", parsed.id, error) ||
       !requiredString(root, "name", parsed.name, error) ||
       !requiredString(root, "version", parsed.version, error) ||
-      !requiredString(root, "package_kind", package_kind, error) ||
-      !requiredString(root, "runtime_kind", runtime_kind, error) ||
-      !requiredString(root, "api_profile", parsed.api_profile, error) ||
-      !requiredString(root, "entrypoint", parsed.entrypoint, error) ||
-      !optionalString(root, "fallback_entrypoint", parsed.fallback_entrypoint,
-                      error) ||
       !optionalString(root, "role", parsed.role, error) ||
-      !boundedMemory(root, parsed, error) ||
       !collectPermissions(root.get("permissions"), parsed, error))
     return false;
 
   if (!validIdentifier(parsed.id) || !validVersion(parsed.version)) {
-    error = "manifest id or version contains unsupported characters";
-    return false;
-  }
-  if (package_kind != "oos-wasm-v1") {
-    error = "unsupported package_kind: " + package_kind;
-    return false;
-  }
-  if (runtime_kind != "wamr") {
-    error = "unsupported runtime_kind: " + runtime_kind;
-    return false;
-  }
-  if (!validPackagePath(parsed.entrypoint) || parsed.entrypoint.back() == '/' ||
-      (!parsed.fallback_entrypoint.empty() &&
-       (!validPackagePath(parsed.fallback_entrypoint) ||
-        parsed.fallback_entrypoint.back() == '/'))) {
-    error = "manifest entrypoint is not a safe package path";
+    error = "manifest id must be a lowercase reverse-domain identifier and "
+            "version must contain only supported characters";
     return false;
   }
   manifest = std::move(parsed);

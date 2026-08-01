@@ -55,36 +55,20 @@ bool parseRecord(storage::SqliteStatement &statement, AppRecord &record) {
   const char *id = statement.columnText(0);
   const char *name = statement.columnText(1);
   const char *version = statement.columnText(2);
-  const char *package_kind = statement.columnText(3);
-  const char *runtime_kind = statement.columnText(4);
-  const char *api_profile = statement.columnText(5);
-  const char *entrypoint = statement.columnText(6);
-  const char *fallback = statement.columnText(7);
-  const char *role = statement.columnText(8);
-  const char *package_path = statement.columnText(11);
-  const char *digest = statement.columnText(12);
-  if (!id || !name || !version || !package_kind || !runtime_kind ||
-      !api_profile || !entrypoint || !package_path || !digest)
+  const char *role = statement.columnText(3);
+  const char *package_path = statement.columnText(4);
+  const char *digest = statement.columnText(5);
+  if (!id || !name || !version || !package_path || !digest)
     return false;
 
   AppRecord parsed;
-  parsed.manifest.format = 1;
   parsed.manifest.id = id;
   parsed.manifest.name = name;
   parsed.manifest.version = version;
-  if (std::strcmp(package_kind, "oos-wasm-v1") != 0)
-    return false;
-  if (std::strcmp(runtime_kind, "wamr") != 0)
-    return false;
-  parsed.manifest.api_profile = api_profile;
-  parsed.manifest.entrypoint = entrypoint;
-  parsed.manifest.fallback_entrypoint = fallback ? fallback : "";
   parsed.manifest.role = role ? role : "";
-  parsed.manifest.stack_bytes = static_cast<uint32_t>(statement.columnInt64(9));
-  parsed.manifest.heap_bytes = static_cast<uint32_t>(statement.columnInt64(10));
   parsed.package_path = package_path;
   parsed.package_digest = digest;
-  parsed.enabled = statement.columnInt64(13) != 0;
+  parsed.enabled = statement.columnInt64(6) != 0;
   record = std::move(parsed);
   return true;
 }
@@ -130,6 +114,77 @@ bool loadHandlers(storage::SqliteDatabase &database, AppRecord &record) {
   }
 }
 
+bool createRegistrySchema(storage::SqliteDatabase &database) {
+  return database.exec(
+      "CREATE TABLE IF NOT EXISTS applications("
+      " app_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,"
+      " active_version TEXT NOT NULL, role TEXT NOT NULL DEFAULT '',"
+      " enabled INTEGER NOT NULL DEFAULT 1,"
+      " trust_level TEXT NOT NULL DEFAULT 'unverified',"
+      " installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
+      "CREATE TABLE IF NOT EXISTS app_versions("
+      " app_id TEXT NOT NULL, version TEXT NOT NULL,"
+      " package_path TEXT NOT NULL, package_digest TEXT NOT NULL,"
+      " installed_at INTEGER NOT NULL, PRIMARY KEY(app_id, version));"
+      "CREATE TABLE IF NOT EXISTS app_permissions("
+      " app_id TEXT NOT NULL, permission TEXT NOT NULL,"
+      " requested INTEGER NOT NULL DEFAULT 1,"
+      " granted INTEGER NOT NULL DEFAULT 1,"
+      " PRIMARY KEY(app_id, permission));"
+      "CREATE TABLE IF NOT EXISTS app_roles("
+      " app_id TEXT NOT NULL, role TEXT NOT NULL,"
+      " PRIMARY KEY(app_id, role));"
+      "CREATE TABLE IF NOT EXISTS app_handlers("
+      " app_id TEXT NOT NULL, handler_kind TEXT NOT NULL,"
+      " handler_value TEXT NOT NULL,"
+      " PRIMARY KEY(app_id, handler_kind, handler_value));"
+      "CREATE TABLE IF NOT EXISTS app_state("
+      " app_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'installed',"
+      " last_started_at INTEGER, last_exit_code INTEGER);"
+      "PRAGMA user_version=3;");
+}
+
+bool migrateLegacyRegistry(storage::SqliteDatabase &database) {
+  if (database.exec(
+          "BEGIN IMMEDIATE;"
+          "ALTER TABLE applications RENAME TO applications_legacy;"
+          "ALTER TABLE app_versions RENAME TO app_versions_legacy;"
+          "CREATE TABLE applications("
+          " app_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,"
+          " active_version TEXT NOT NULL, role TEXT NOT NULL DEFAULT '',"
+          " enabled INTEGER NOT NULL DEFAULT 1,"
+          " trust_level TEXT NOT NULL DEFAULT 'unverified',"
+          " installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
+          "CREATE TABLE app_versions("
+          " app_id TEXT NOT NULL, version TEXT NOT NULL,"
+          " package_path TEXT NOT NULL, package_digest TEXT NOT NULL,"
+          " installed_at INTEGER NOT NULL, PRIMARY KEY(app_id, version));"
+          "INSERT INTO applications(app_id,display_name,active_version,role,"
+          "enabled,trust_level,installed_at,updated_at)"
+          " SELECT app_id,display_name,active_version,role,enabled,trust_level,"
+          "installed_at,updated_at FROM applications_legacy"
+          " WHERE package_kind='oos-wasm-v1' AND runtime_kind='wamr';"
+          "INSERT INTO app_versions(app_id,version,package_path,package_digest,"
+          "installed_at) SELECT app_id,version,package_path,package_digest,"
+          "installed_at FROM app_versions_legacy WHERE app_id IN"
+          " (SELECT app_id FROM applications);"
+          "DELETE FROM app_permissions WHERE app_id NOT IN"
+          " (SELECT app_id FROM applications);"
+          "DELETE FROM app_roles WHERE app_id NOT IN"
+          " (SELECT app_id FROM applications);"
+          "DELETE FROM app_handlers WHERE app_id NOT IN"
+          " (SELECT app_id FROM applications);"
+          "DELETE FROM app_state WHERE app_id NOT IN"
+          " (SELECT app_id FROM applications);"
+          "DROP TABLE applications_legacy;"
+          "DROP TABLE app_versions_legacy;"
+          "PRAGMA user_version=3;"
+          "COMMIT;"))
+    return true;
+  database.exec("ROLLBACK;");
+  return false;
+}
+
 } // namespace
 
 class AppRepository::Impl {
@@ -158,72 +213,25 @@ bool AppRepository::initialize() {
     error_ = impl_->database.lastError();
     return false;
   }
-  storage::SqliteStatement schema_version;
-  if (!impl_->database.prepare("PRAGMA user_version;", schema_version) ||
-      schema_version.step() != storage::SqliteStatement::Step::Row) {
-    error_ = impl_->database.lastError();
-    return false;
+  int64_t version = 0;
+  {
+    storage::SqliteStatement schema_version;
+    if (!impl_->database.prepare("PRAGMA user_version;", schema_version) ||
+        schema_version.step() != storage::SqliteStatement::Step::Row) {
+      error_ = impl_->database.lastError();
+      return false;
+    }
+    version = schema_version.columnInt64(0);
   }
-  const int64_t version = schema_version.columnInt64(0);
-  if (version > 2) {
+  if (version > 3) {
     error_ = "application registry schema is newer than this OOS runtime";
     return false;
   }
-  if (!impl_->database.exec(
-          "CREATE TABLE IF NOT EXISTS applications("
-          " app_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,"
-          " active_version TEXT NOT NULL, package_kind TEXT NOT NULL,"
-          " runtime_kind TEXT NOT NULL, api_profile TEXT NOT NULL,"
-          " role TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,"
-          " trust_level TEXT NOT NULL DEFAULT 'unverified',"
-          " installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
-          "CREATE TABLE IF NOT EXISTS app_versions("
-          " app_id TEXT NOT NULL, version TEXT NOT NULL,"
-          " package_path TEXT NOT NULL, package_digest TEXT NOT NULL,"
-          " entrypoint TEXT NOT NULL, fallback_entrypoint TEXT NOT NULL,"
-          " stack_bytes INTEGER NOT NULL, heap_bytes INTEGER NOT NULL,"
-          " installed_at INTEGER NOT NULL,"
-          " PRIMARY KEY(app_id, version));"
-          "CREATE TABLE IF NOT EXISTS app_permissions("
-          " app_id TEXT NOT NULL, permission TEXT NOT NULL,"
-          " requested INTEGER NOT NULL DEFAULT 1,"
-          " granted INTEGER NOT NULL DEFAULT 1,"
-          " PRIMARY KEY(app_id, permission));"
-          "CREATE TABLE IF NOT EXISTS app_roles("
-          " app_id TEXT NOT NULL, role TEXT NOT NULL,"
-          " PRIMARY KEY(app_id, role));"
-          "CREATE TABLE IF NOT EXISTS app_handlers("
-          " app_id TEXT NOT NULL, handler_kind TEXT NOT NULL,"
-          " handler_value TEXT NOT NULL,"
-          " PRIMARY KEY(app_id, handler_kind, handler_value));"
-          "CREATE TABLE IF NOT EXISTS app_state("
-          " app_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'installed',"
-          " last_started_at INTEGER, last_exit_code INTEGER);")) {
-    error_ = impl_->database.lastError();
-    return false;
-  }
-  if (version < 2 && !impl_->database.exec(
-                         "BEGIN IMMEDIATE;"
-                         "DELETE FROM app_permissions WHERE app_id IN (SELECT "
-                         "app_id FROM applications WHERE "
-                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr');"
-                         "DELETE FROM app_roles WHERE app_id IN (SELECT app_id "
-                         "FROM applications WHERE package_kind<>'oos-wasm-v1' "
-                         "OR runtime_kind<>'wamr');"
-                         "DELETE FROM app_handlers WHERE app_id IN (SELECT "
-                         "app_id FROM applications WHERE "
-                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr');"
-                         "DELETE FROM app_state WHERE app_id IN (SELECT app_id "
-                         "FROM applications WHERE package_kind<>'oos-wasm-v1' "
-                         "OR runtime_kind<>'wamr');"
-                         "DELETE FROM app_versions WHERE app_id IN (SELECT "
-                         "app_id FROM applications WHERE "
-                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr');"
-                         "DELETE FROM applications WHERE "
-                         "package_kind<>'oos-wasm-v1' OR runtime_kind<>'wamr';"
-                         "PRAGMA user_version=2;"
-                         "COMMIT;")) {
-    impl_->database.exec("ROLLBACK;");
+  const bool schema_ready = version == 0 ? createRegistrySchema(impl_->database)
+                            : version < 3
+                                ? migrateLegacyRegistry(impl_->database)
+                                : createRegistrySchema(impl_->database);
+  if (!schema_ready) {
     error_ = impl_->database.lastError();
     return false;
   }
@@ -248,13 +256,12 @@ bool AppRepository::install(const char *package_path,
     return false;
   }
   AppManifest manifest;
-  constexpr const char *manifest_name = "oos-manifest.json";
-  if (!archive.find(manifest_name)) {
-    error_ = "application ZIP has no oos-manifest.json";
+  if (!archive.find(kAppManifestPath)) {
+    error_ = "application ZIP has no manifest.json";
     return false;
   }
   std::vector<uint8_t> manifest_bytes;
-  if (!archive.read(manifest_name, manifest_bytes, kMaximumManifestBytes)) {
+  if (!archive.read(kAppManifestPath, manifest_bytes, kMaximumManifestBytes)) {
     error_ = archive.lastError();
     return false;
   }
@@ -262,13 +269,11 @@ bool AppRepository::install(const char *package_path,
   if (!parseAppManifest(manifest_json, manifest, error_))
     return false;
   if (!options.app_id.empty() && options.app_id != manifest.id) {
-    error_ = "explicit application id does not match oos-manifest.json";
+    error_ = "explicit application id does not match manifest.json";
     return false;
   }
-  if (!archive.find(manifest.entrypoint.c_str()) &&
-      (manifest.fallback_entrypoint.empty() ||
-       !archive.find(manifest.fallback_entrypoint.c_str()))) {
-    error_ = "application package does not contain a configured entrypoint";
+  if (!archive.find(kAotModulePath) && !archive.find(kWasmModulePath)) {
+    error_ = "application package has no entry.aot or entry.wasm";
     return false;
   }
   const std::string digest = contentDigest(package_path, error_);
@@ -292,47 +297,32 @@ bool AppRepository::install(const char *package_path,
     storage::SqliteStatement version;
     if (!impl_->database.prepare(
             "INSERT INTO app_versions(app_id,version,package_path,"
-            "package_digest,entrypoint,fallback_entrypoint,stack_bytes,"
-            "heap_bytes,installed_at) "
-            "VALUES(?,?,?,?,?,?,?,?,strftime('%s','now'))"
+            "package_digest,installed_at) "
+            "VALUES(?,?,?,?,strftime('%s','now'))"
             " ON CONFLICT(app_id,version) DO UPDATE SET"
             " package_path=excluded.package_path,"
             " package_digest=excluded.package_digest,"
-            " entrypoint=excluded.entrypoint,"
-            " fallback_entrypoint=excluded.fallback_entrypoint,"
-            " stack_bytes=excluded.stack_bytes,heap_bytes=excluded.heap_bytes,"
             " installed_at=excluded.installed_at;",
             version) ||
         !version.bindText(1, manifest.id) ||
         !version.bindText(2, manifest.version) ||
         !version.bindText(3, destination) || !version.bindText(4, digest) ||
-        !version.bindText(5, manifest.entrypoint) ||
-        !version.bindText(6, manifest.fallback_entrypoint) ||
-        !version.bindInt64(7, manifest.stack_bytes) ||
-        !version.bindInt64(8, manifest.heap_bytes) ||
         version.step() != storage::SqliteStatement::Step::Done)
       break;
 
     storage::SqliteStatement app;
     if (!impl_->database.prepare(
             "INSERT INTO applications(app_id,display_name,active_version,"
-            "package_kind,runtime_kind,api_profile,role,installed_at,updated_"
-            "at)"
-            " VALUES(?,?,?,?,?,?,?,strftime('%s','now'),strftime('%s','now'))"
+            "role,installed_at,updated_at)"
+            " VALUES(?,?,?,?,strftime('%s','now'),strftime('%s','now'))"
             " ON CONFLICT(app_id) DO UPDATE SET"
             " display_name=excluded.display_name,"
             " active_version=excluded.active_version,"
-            " package_kind=excluded.package_kind,"
-            " runtime_kind=excluded.runtime_kind,"
-            " api_profile=excluded.api_profile,role=excluded.role,"
+            " role=excluded.role,"
             " updated_at=excluded.updated_at;",
             app) ||
         !app.bindText(1, manifest.id) || !app.bindText(2, manifest.name) ||
-        !app.bindText(3, manifest.version) ||
-        !app.bindText(4, packageKindName(manifest.package_kind)) ||
-        !app.bindText(5, runtimeKindName(manifest.runtime_kind)) ||
-        !app.bindText(6, manifest.api_profile) ||
-        !app.bindText(7, manifest.role) ||
+        !app.bindText(3, manifest.version) || !app.bindText(4, manifest.role) ||
         app.step() != storage::SqliteStatement::Step::Done)
       break;
 
@@ -419,10 +409,9 @@ bool AppRepository::resolve(const char *app_id, AppRecord &record) {
   error_.clear();
   storage::SqliteStatement statement;
   if (!impl_->database.prepare(
-          "SELECT a.app_id,a.display_name,v.version,a.package_kind,"
-          "a.runtime_kind,a.api_profile,v.entrypoint,v.fallback_entrypoint,"
-          "a.role,v.stack_bytes,v.heap_bytes,v.package_path,v.package_digest,"
-          "a.enabled FROM applications a JOIN app_versions v ON"
+          "SELECT a.app_id,a.display_name,v.version,a.role,v.package_path,"
+          "v.package_digest,a.enabled FROM applications a JOIN app_versions v "
+          "ON"
           " v.app_id=a.app_id AND v.version=a.active_version"
           " WHERE a.app_id=?;",
           statement) ||
@@ -448,10 +437,9 @@ bool AppRepository::list(std::vector<AppRecord> &records) {
   records.clear();
   storage::SqliteStatement statement;
   if (!impl_->database.prepare(
-          "SELECT a.app_id,a.display_name,v.version,a.package_kind,"
-          "a.runtime_kind,a.api_profile,v.entrypoint,v.fallback_entrypoint,"
-          "a.role,v.stack_bytes,v.heap_bytes,v.package_path,v.package_digest,"
-          "a.enabled FROM applications a JOIN app_versions v ON"
+          "SELECT a.app_id,a.display_name,v.version,a.role,v.package_path,"
+          "v.package_digest,a.enabled FROM applications a JOIN app_versions v "
+          "ON"
           " v.app_id=a.app_id AND v.version=a.active_version"
           " ORDER BY a.app_id;",
           statement)) {
@@ -487,11 +475,13 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
     error_ = archive.lastError();
     return false;
   }
-  std::string entrypoint = record.manifest.entrypoint;
-  if (!archive.find(entrypoint.c_str()))
-    entrypoint = record.manifest.fallback_entrypoint;
-  if (entrypoint.empty() || !archive.find(entrypoint.c_str())) {
-    error_ = "active package entrypoint is unavailable";
+  std::string entrypoint;
+  if (archive.find(kAotModulePath))
+    entrypoint = kAotModulePath;
+  else if (archive.find(kWasmModulePath))
+    entrypoint = kWasmModulePath;
+  else {
+    error_ = "active package has no executable entry";
     return false;
   }
   const std::string cache_directory =

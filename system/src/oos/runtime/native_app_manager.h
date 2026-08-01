@@ -27,7 +27,7 @@ struct NativeAppLaunchOptions {
   const char *removable_media_directory = "/data/media/removable";
   const char *font_directory = "/opt/oos/share/fonts";
   uint32_t stack_size = 128 * 1024;
-  uint32_t heap_size = 4 * 1024 * 1024;
+  uint32_t heap_size = 0;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
 };
