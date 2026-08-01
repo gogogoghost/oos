@@ -2,6 +2,7 @@
 #include "oos/runtime/graphics_host.h"
 #include "oos/ui/imgui_backend.h"
 #include "oos/ui/lvgl_backend.h"
+#include "oos/ui/system_status.h"
 #include "oos/ui/system_ui.h"
 
 #include <cassert>
@@ -96,6 +97,13 @@ public:
   size_t draw_commands = 0;
 };
 
+class FakeStatusSource final : public oos::ui::SystemStatusSource {
+public:
+  oos::ui::SystemStatusSnapshot snapshot() const override { return value; }
+
+  oos::ui::SystemStatusSnapshot value;
+};
+
 void testLvglBackend() {
   FakeGraphicsHost graphics;
   oos::ui::LvglBackend backend(graphics);
@@ -140,17 +148,35 @@ void testSystemUi() {
   oos::apps::AppRepository repository(path);
   assert(repository.initialize());
   FakeGraphicsHost graphics;
-  oos::ui::SystemUi system_ui(graphics, repository);
+  FakeStatusSource statuses;
+  statuses.value.revision = 1;
+  statuses.value.battery_available = true;
+  statuses.value.battery_percent = 82;
+  statuses.value.charging = true;
+  statuses.value.wifi_available = true;
+  statuses.value.wifi_connected = true;
+  statuses.value.cellular_available = true;
+  statuses.value.cellular_registered = true;
+  statuses.value.signal_bars = 3;
+  statuses.value.radio_technology = "4G";
+  oos::ui::SystemUi system_ui(graphics, repository, &statuses);
   assert(system_ui.initialize());
   uint32_t next_delay_ms = 0;
   assert(system_ui.frame(1000, next_delay_ms));
-  assert(next_delay_ms > 0);
+  assert(next_delay_ms > 0 && next_delay_ms <= 1000);
   const size_t home_frames = graphics.frame_submissions;
+
+  statuses.value.revision = 2;
+  statuses.value.battery_percent = 64;
+  assert(system_ui.frame(1500, next_delay_ms));
+  assert(graphics.frame_submissions > home_frames);
+  const size_t status_frames = graphics.frame_submissions;
+
   const oos::input::KeyEvent open_apps = {
       2000, 352, oos::input::KeyAction::Pressed, {}, {}};
   assert(system_ui.dispatchKey(open_apps));
   assert(system_ui.frame(2000, next_delay_ms));
-  assert(graphics.frame_submissions > home_frames);
+  assert(graphics.frame_submissions > status_frames);
   system_ui.shutdown();
   assert(graphics.textures.empty());
   std::filesystem::remove_all(path);

@@ -45,6 +45,12 @@ regions into one retained host texture, then submits one full-screen quad.
 commands. LVGL is the default SystemUI framework; Dear ImGui is intended for
 diagnostics and engineering tools rather than the phone shell.
 
+The SystemUI rendering loop is event-driven. A worker queries battery, Wi-Fi,
+and the platform modem away from the UI thread and publishes a revisioned
+snapshot. The LVGL tree is invalidated only when that revision, the minute, or
+visible interaction state changes; a stalled HAL query cannot stall key input
+or frame submission.
+
 ## GLES2 Path
 
 The `gles` WIT interface is a programmable GLES 2.0 rendering path for engine

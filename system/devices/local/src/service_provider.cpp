@@ -36,8 +36,8 @@ bool ServiceProvider::recordWav(const std::string &path, int duration_ms,
 
 bool ServiceProvider::enumerateCameras(
     std::vector<hardware::CameraInfo> &cameras) {
-  cameras = {{"mock-camera-0", hardware::LensFacing::Back, 90, 3, true, 1920,
-              1080}};
+  cameras = {
+      {"mock-camera-0", hardware::LensFacing::Back, 90, 3, true, 1920, 1080}};
   return true;
 }
 
@@ -52,8 +52,8 @@ bool ServiceProvider::captureJpeg(const std::string &, const std::string &path,
 }
 
 bool ServiceProvider::queryBattery(hardware::BatterySnapshot &snapshot) {
-  snapshot = {hardware::BatteryState::Charging, 82, 4'050'000, 350'000, 250,
-              true};
+  snapshot = {
+      hardware::BatteryState::Charging, 82, 4'050'000, 350'000, 250, true};
   return true;
 }
 
@@ -81,8 +81,8 @@ bool ServiceProvider::supportsAmplitudeControl() { return true; }
 bool ServiceProvider::setVibrationAmplitude(uint8_t) { return true; }
 
 bool ServiceProvider::wifiStatus(network::WifiStatus &status) {
-  status = {"COMPLETED", "OOS Mock Network", "02:00:00:00:00:01",
-            "192.0.2.2", 1};
+  status = {"COMPLETED", "OOS Mock Network", "02:00:00:00:00:01", "192.0.2.2",
+            1};
   return true;
 }
 
@@ -99,8 +99,7 @@ bool ServiceProvider::wifiListNetworks(
   return true;
 }
 
-bool ServiceProvider::wifiConnect(const std::string &,
-                                  network::WifiSecurity,
+bool ServiceProvider::wifiConnect(const std::string &, network::WifiSecurity,
                                   const std::string &, int &network_id) {
   network_id = 1;
   return true;
@@ -112,8 +111,8 @@ bool ServiceProvider::wifiForget(int) { return true; }
 bool ServiceProvider::wifiSaveConfiguration() { return true; }
 
 bool ServiceProvider::ipStatus(network::IpConfiguration &configuration) {
-  configuration = {"wlan0", "192.0.2.2", 24, "192.0.2.1", "192.0.2.53",
-                   "198.51.100.53"};
+  configuration = {"wlan0",     "192.0.2.2",  24,
+                   "192.0.2.1", "192.0.2.53", "198.51.100.53"};
   return true;
 }
 
@@ -127,8 +126,7 @@ bool ServiceProvider::bluetoothDisable(int) { return true; }
 
 bool ServiceProvider::bluetoothClassicScan(
     std::vector<network::BluetoothDevice> &devices, int) {
-  devices = {{"02:00:00:00:00:02", "OOS Mock Headset", -38, 0x240404, 3,
-              {0}}};
+  devices = {{"02:00:00:00:00:02", "OOS Mock Headset", -38, 0x240404, 3, {0}}};
   return true;
 }
 
@@ -153,8 +151,9 @@ bool ServiceProvider::bluetoothProfileDisconnect(const std::string &,
                                                  network::BluetoothProfile) {
   return true;
 }
-bool ServiceProvider::bluetoothProfileConnectionCycle(
-    const std::string &, network::BluetoothProfile, int) {
+bool ServiceProvider::bluetoothProfileConnectionCycle(const std::string &,
+                                                      network::BluetoothProfile,
+                                                      int) {
   return true;
 }
 bool ServiceProvider::bluetoothLeConnectionCycle(const std::string &, int,
@@ -167,8 +166,7 @@ bool ServiceProvider::modemSnapshot(modem::ModemSnapshot &snapshot, int) {
   snapshot.service_connected = true;
   snapshot.radio_state = 1;
   snapshot.baseband_version = "OOS-MOCK-1.0";
-  snapshot.identity = {"000000000000000", "00", "00000000",
-                       "00000000000000"};
+  snapshot.identity = {"000000000000000", "00", "00000000", "00000000000000"};
   snapshot.sim = {1, 0, 1};
   snapshot.signal.gsm_strength = 20;
   snapshot.signal.gsm_bit_error_rate = 0;
@@ -190,6 +188,18 @@ bool ServiceProvider::modemSnapshot(modem::ModemSnapshot &snapshot, int) {
   return true;
 }
 
+bool ServiceProvider::modemNetworkStatus(modem::NetworkStatus &status, int) {
+  status = {};
+  status.service_connected = true;
+  status.radio_state = 1;
+  status.signal.gsm_strength = 20;
+  status.signal.lte_strength = 30;
+  status.signal.lte_rsrp = -95;
+  status.voice_registration = {1, 14, 0, 1};
+  status.data_registration = {1, 14, 0, 1};
+  return true;
+}
+
 bool ServiceProvider::setRadioPower(bool, modem::ModemRequestStatus &status,
                                     int) {
   status = {"set-radio-power", 0, false};
@@ -197,9 +207,16 @@ bool ServiceProvider::setRadioPower(bool, modem::ModemRequestStatus &status,
 }
 
 bool ServiceProvider::testH264RoundTrip(int width, int height, int frame_count,
-                                       hardware::CodecResult &result, int) {
-  result = {"mock.h264.encoder", "mock.h264.decoder", true, true,
-            width, height, frame_count, frame_count, frame_count,
+                                        hardware::CodecResult &result, int) {
+  result = {"mock.h264.encoder",
+            "mock.h264.decoder",
+            true,
+            true,
+            width,
+            height,
+            frame_count,
+            frame_count,
+            frame_count,
             static_cast<size_t>(frame_count) * 1024};
   return true;
 }

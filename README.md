@@ -11,6 +11,9 @@ JavaScript engine, HTML launcher, or KaiOS Web application compatibility layer.
 The production SystemUI is process-local C++/LVGL. Dear ImGui has a native
 GPU-mesh backend for diagnostics and system tools. Rust/egui remains the first
 WIT framework adapter and regression application for third-party Wasm apps.
+The phone shell uses `#E65100` as its single interaction accent and obtains
+battery, charging, Wi-Fi, signal-strength, roaming, and radio-technology state
+from a non-blocking device status monitor.
 
 ## Repository Layout
 

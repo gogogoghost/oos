@@ -145,9 +145,9 @@ bool ServiceProvider::enumerateCameras(
 }
 
 bool ServiceProvider::setTorch(const std::string &camera_id, bool enabled) {
-  return impl_->ensureCamera() && impl_->finish(
-                                      impl_->camera->setTorch(camera_id, enabled),
-                                      *impl_->camera);
+  return impl_->ensureCamera() &&
+         impl_->finish(impl_->camera->setTorch(camera_id, enabled),
+                       *impl_->camera);
 }
 
 bool ServiceProvider::captureJpeg(const std::string &camera_id,
@@ -155,9 +155,9 @@ bool ServiceProvider::captureJpeg(const std::string &camera_id,
                                   hardware::PhotoResult &result, int max_width,
                                   int max_height, bool flash, int timeout_ms) {
   return impl_->ensureCamera() &&
-         impl_->finish(impl_->camera->captureJpeg(
-                           camera_id, path, result, max_width, max_height, flash,
-                           timeout_ms),
+         impl_->finish(impl_->camera->captureJpeg(camera_id, path, result,
+                                                  max_width, max_height, flash,
+                                                  timeout_ms),
                        *impl_->camera);
 }
 
@@ -179,21 +179,19 @@ int ServiceProvider::waitForBatteryEvent(int timeout_ms,
 }
 
 bool ServiceProvider::setInteractive(bool interactive) {
-  return impl_->ensurePower() && impl_->finish(
-                                      impl_->power->setInteractive(interactive),
-                                      *impl_->power);
+  return impl_->ensurePower() &&
+         impl_->finish(impl_->power->setInteractive(interactive),
+                       *impl_->power);
 }
 
 bool ServiceProvider::acquireWakeLock(const std::string &name) {
-  return impl_->ensurePower() && impl_->finish(
-                                      impl_->power->acquireWakeLock(name),
-                                      *impl_->power);
+  return impl_->ensurePower() &&
+         impl_->finish(impl_->power->acquireWakeLock(name), *impl_->power);
 }
 
 bool ServiceProvider::releaseWakeLock(const std::string &name) {
-  return impl_->ensurePower() && impl_->finish(
-                                      impl_->power->releaseWakeLock(name),
-                                      *impl_->power);
+  return impl_->ensurePower() &&
+         impl_->finish(impl_->power->releaseWakeLock(name), *impl_->power);
 }
 
 bool ServiceProvider::enableAutoSuspend() {
@@ -318,9 +316,9 @@ bool ServiceProvider::bluetoothEnable(int timeout_ms) {
 }
 
 bool ServiceProvider::bluetoothDisable(int timeout_ms) {
-  return impl_->ensureBluetooth() && impl_->finish(
-                                          impl_->bluetooth->disable(timeout_ms),
-                                          *impl_->bluetooth);
+  return impl_->ensureBluetooth() &&
+         impl_->finish(impl_->bluetooth->disable(timeout_ms),
+                       *impl_->bluetooth);
 }
 
 bool ServiceProvider::bluetoothClassicScan(
@@ -339,10 +337,9 @@ bool ServiceProvider::bluetoothLeScan(
 
 bool ServiceProvider::bluetoothPair(const std::string &address,
                                     network::BluetoothTransport transport) {
-  return impl_->ensureBluetooth() && impl_->finish(
-                                          impl_->bluetooth->pair(address,
-                                                                 transport),
-                                          *impl_->bluetooth);
+  return impl_->ensureBluetooth() &&
+         impl_->finish(impl_->bluetooth->pair(address, transport),
+                       *impl_->bluetooth);
 }
 
 bool ServiceProvider::bluetoothUnpair(const std::string &address) {
@@ -374,15 +371,13 @@ bool ServiceProvider::bluetoothProfileConnectionCycle(
     const std::string &address, network::BluetoothProfile profile,
     int hold_ms) {
   return impl_->ensureBluetooth() &&
-         impl_->finish(
-             impl_->bluetooth->profileConnectionCycle(address, profile,
-                                                       hold_ms),
-             *impl_->bluetooth);
+         impl_->finish(impl_->bluetooth->profileConnectionCycle(
+                           address, profile, hold_ms),
+                       *impl_->bluetooth);
 }
 
 bool ServiceProvider::bluetoothLeConnectionCycle(const std::string &address,
-                                                 int hold_ms,
-                                                 int timeout_ms) {
+                                                 int hold_ms, int timeout_ms) {
   return impl_->ensureBluetooth() &&
          impl_->finish(
              impl_->bluetooth->leConnectionCycle(address, hold_ms, timeout_ms),
@@ -396,18 +391,24 @@ bool ServiceProvider::modemSnapshot(modem::ModemSnapshot &snapshot,
                        *impl_->modem);
 }
 
+bool ServiceProvider::modemNetworkStatus(modem::NetworkStatus &status,
+                                         int timeout_ms) {
+  return impl_->ensureModem() &&
+         impl_->finish(impl_->modem->queryNetworkStatus(status, timeout_ms),
+                       *impl_->modem);
+}
+
 bool ServiceProvider::setRadioPower(bool enabled,
                                     modem::ModemRequestStatus &status,
                                     int timeout_ms) {
   return impl_->ensureModem() &&
-         impl_->finish(
-             impl_->modem->setRadioPower(enabled, status, timeout_ms),
-             *impl_->modem);
+         impl_->finish(impl_->modem->setRadioPower(enabled, status, timeout_ms),
+                       *impl_->modem);
 }
 
 bool ServiceProvider::testH264RoundTrip(int width, int height, int frame_count,
-                                       hardware::CodecResult &result,
-                                       int timeout_ms) {
+                                        hardware::CodecResult &result,
+                                        int timeout_ms) {
   return impl_->ensureCodec() &&
          impl_->finish(impl_->codec->testH264RoundTrip(
                            width, height, frame_count, result, timeout_ms),

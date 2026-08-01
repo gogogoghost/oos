@@ -35,8 +35,8 @@ public:
   bool enumerateCameras(std::vector<hardware::CameraInfo> &cameras);
   bool setTorch(const std::string &camera_id, bool enabled);
   bool captureJpeg(const std::string &camera_id, const std::string &path,
-                   hardware::PhotoResult &result, int max_width,
-                   int max_height, bool flash, int timeout_ms);
+                   hardware::PhotoResult &result, int max_width, int max_height,
+                   bool flash, int timeout_ms);
 
   bool queryBattery(hardware::BatterySnapshot &snapshot);
   int waitForBatteryEvent(int timeout_ms, hardware::BatterySnapshot &snapshot);
@@ -90,11 +90,12 @@ public:
                                   int timeout_ms);
 
   bool modemSnapshot(modem::ModemSnapshot &snapshot, int timeout_ms);
+  bool modemNetworkStatus(modem::NetworkStatus &status, int timeout_ms);
   bool setRadioPower(bool enabled, modem::ModemRequestStatus &status,
                      int timeout_ms);
 
   bool testH264RoundTrip(int width, int height, int frame_count,
-                        hardware::CodecResult &result, int timeout_ms);
+                         hardware::CodecResult &result, int timeout_ms);
 
   const std::string &lastError() const;
 

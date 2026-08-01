@@ -574,6 +574,80 @@ bool ModemManager::querySnapshot(ModemSnapshot &snapshot, int timeout_ms) {
   return true;
 }
 
+bool ModemManager::queryNetworkStatus(NetworkStatus &status, int timeout_ms) {
+  status = {};
+  status.service_connected = initialized();
+  if (!initialized()) {
+    implementation_->error = "Radio HAL is not initialized";
+    return false;
+  }
+  auto run = [&](const char *name, auto sender, auto apply) {
+    ResponseRecord record;
+    ModemRequestStatus request_status;
+    if (!implementation_->request(name, sender, record, request_status,
+                                  timeout_ms))
+      return false;
+    if (!request_status.timed_out && request_status.error == 0)
+      apply(record);
+    return true;
+  };
+
+  if (!run(
+          "getSignalStrength",
+          [&](int32_t serial) {
+            return implementation_->radio_service->getSignalStrength(serial);
+          },
+          [&](const ResponseRecord &record) {
+            const auto &value = record.signal_strength;
+            status.signal = {
+                static_cast<int>(value.gw.signalStrength),
+                static_cast<int>(value.gw.bitErrorRate),
+                static_cast<int>(value.cdma.dbm),
+                static_cast<int>(value.cdma.ecio),
+                static_cast<int>(value.evdo.dbm),
+                static_cast<int>(value.evdo.ecio),
+                static_cast<int>(value.evdo.signalNoiseRatio),
+                static_cast<int>(value.lte.signalStrength),
+                static_cast<int>(value.lte.rsrp),
+                static_cast<int>(value.lte.rsrq),
+                value.lte.rssnr,
+                static_cast<int>(value.lte.cqi),
+                static_cast<int>(value.lte.timingAdvance),
+                static_cast<int>(value.tdScdma.rscp),
+            };
+          }) ||
+      !run(
+          "getVoiceRegistrationState",
+          [&](int32_t serial) {
+            return implementation_->radio_service->getVoiceRegistrationState(
+                serial);
+          },
+          [&](const ResponseRecord &record) {
+            status.voice_registration = {
+                static_cast<int>(record.voice_registration.regState),
+                record.voice_registration.rat,
+                record.voice_registration.reasonForDenial, 0};
+          }) ||
+      !run(
+          "getDataRegistrationState",
+          [&](int32_t serial) {
+            return implementation_->radio_service->getDataRegistrationState(
+                serial);
+          },
+          [&](const ResponseRecord &record) {
+            status.data_registration = {
+                static_cast<int>(record.data_registration.regState),
+                record.data_registration.rat,
+                record.data_registration.reasonDataDenied,
+                record.data_registration.maxDataCalls};
+          }))
+    return false;
+
+  status.radio_state = implementation_->store->radioState();
+  implementation_->error.clear();
+  return true;
+}
+
 bool ModemManager::setRadioPower(bool enabled, ModemRequestStatus &status,
                                  int timeout_ms) {
   if (!initialized()) {

@@ -396,6 +396,64 @@ bool ModemManager::querySnapshot(ModemSnapshot &snapshot, int timeout_ms) {
   return true;
 }
 
+bool ModemManager::queryNetworkStatus(NetworkStatus &status, int timeout_ms) {
+  status = {};
+  status.service_connected = initialized();
+  if (!initialized()) {
+    implementation_->error = "RIL socket is not initialized";
+    return false;
+  }
+  auto run = [&](int code, auto apply) {
+    Response response;
+    if (!implementation_->request(code, {}, response, timeout_ms))
+      return false;
+    if (response.error == RIL_E_SUCCESS)
+      apply(response.payload);
+    return true;
+  };
+
+  if (!run(RIL_REQUEST_SIGNAL_STRENGTH,
+           [&](const auto &payload) {
+             Reader reader(payload);
+             status.signal.gsm_strength = reader.integer();
+             status.signal.gsm_bit_error_rate = reader.integer();
+             status.signal.cdma_dbm = reader.integer();
+             status.signal.cdma_ecio = reader.integer();
+             status.signal.evdo_dbm = reader.integer();
+             status.signal.evdo_ecio = reader.integer();
+             status.signal.evdo_snr = reader.integer();
+             status.signal.lte_strength = reader.integer();
+             status.signal.lte_rsrp = reader.integer();
+             status.signal.lte_rsrq = reader.integer();
+             status.signal.lte_rssnr = reader.integer();
+             status.signal.lte_cqi = reader.integer();
+             status.signal.tdscdma_rscp = reader.integer();
+           }) ||
+      !run(RIL_REQUEST_VOICE_REGISTRATION_STATE,
+           [&](const auto &payload) {
+             Reader reader(payload);
+             const auto values = reader.strings();
+             status.voice_registration.state = integerString(values, 0);
+             status.voice_registration.radio_technology =
+                 integerString(values, 3);
+             status.voice_registration.denial_reason =
+                 integerString(values, 13, 0);
+           }) ||
+      !run(RIL_REQUEST_DATA_REGISTRATION_STATE, [&](const auto &payload) {
+        Reader reader(payload);
+        const auto values = reader.strings();
+        status.data_registration.state = integerString(values, 0);
+        status.data_registration.radio_technology = integerString(values, 3);
+        status.data_registration.denial_reason = integerString(values, 4, 0);
+        status.data_registration.max_data_calls = integerString(values, 5, 0);
+      }))
+    return false;
+
+  status.radio_state = implementation_->radio_state;
+  implementation_->error.clear();
+  return true;
+}
+
 bool ModemManager::setRadioPower(bool enabled, ModemRequestStatus &status,
                                  int timeout_ms) {
   status = {};

@@ -18,6 +18,7 @@
 #include "oos/input/key_input.h"
 #include "oos/resources/boot_splash.h"
 #include "oos/runtime/native_app_manager.h"
+#include "oos/ui/system_status.h"
 #include "oos/ui/system_ui.h"
 
 namespace oos::platform {
@@ -266,10 +267,13 @@ int run(int argc, char **argv) {
   std::signal(SIGTERM, stopRuntime);
 
   if (run_system_ui) {
-    oos::ui::SystemUi system_ui(compositor, repository);
+    oos::ui::DeviceStatusMonitor status_monitor(*platform_device);
+    status_monitor.start();
+    oos::ui::SystemUi system_ui(compositor, repository, &status_monitor);
     if (!system_ui.initialize()) {
       std::fprintf(stderr, "failed to start SystemUI: %s\n",
                    system_ui.lastError().c_str());
+      status_monitor.stop();
       platform_device->shutdown();
       return 1;
     }
@@ -283,14 +287,14 @@ int run(int argc, char **argv) {
                      system_ui.lastError().c_str());
         break;
       }
-      const int poll_result =
-          input.poll(static_cast<int>(next_delay_ms), dispatchSystemUiKey,
-                     &input_context);
+      const int poll_result = input.poll(static_cast<int>(next_delay_ms),
+                                         dispatchSystemUiKey, &input_context);
       if (poll_result < 0 || !input_context.success)
         break;
     }
     const bool stopped = g_stop_requested || input.stopRequested();
     system_ui.shutdown();
+    status_monitor.stop();
     platform_device->shutdown();
     return stopped ? 0 : 1;
   }

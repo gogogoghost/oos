@@ -16,11 +16,14 @@ class GraphicsHost;
 
 namespace oos::ui {
 
+class SystemStatusSource;
+
 // Trusted, process-local shell shown when OOS starts without an application
 // argument. It owns the status bar, home screen and application grid.
 class SystemUi {
 public:
-  SystemUi(runtime::GraphicsHost &graphics, apps::AppRepository &repository);
+  SystemUi(runtime::GraphicsHost &graphics, apps::AppRepository &repository,
+           SystemStatusSource *status_source = nullptr);
   ~SystemUi();
 
   SystemUi(const SystemUi &) = delete;

@@ -76,6 +76,17 @@ struct ModemSnapshot {
   std::vector<ModemRequestStatus> requests;
 };
 
+// Minimal read-only state used by latency-sensitive system components such as
+// SystemUI. Unlike ModemSnapshot, this does not request identity, call, data
+// call, hardware configuration or radio capability diagnostics.
+struct NetworkStatus {
+  bool service_connected = false;
+  int radio_state = -1;
+  SignalStatus signal;
+  RegistrationStatus voice_registration;
+  RegistrationStatus data_registration;
+};
+
 class ModemManager {
 public:
   ModemManager();
@@ -91,6 +102,7 @@ public:
   // Performs read-only Radio HAL requests. Individual request failures are
   // reported in snapshot.requests; false means the HAL itself was unavailable.
   bool querySnapshot(ModemSnapshot &snapshot, int timeout_ms = 5000);
+  bool queryNetworkStatus(NetworkStatus &status, int timeout_ms = 1500);
 
   // Explicitly mutates RF power. Diagnostics do not call this automatically.
   bool setRadioPower(bool enabled, ModemRequestStatus &status,

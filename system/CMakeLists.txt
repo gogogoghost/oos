@@ -182,6 +182,7 @@ unset(OOS_BOOT_SPLASH_BYTES)
 add_executable(oos
   src/main.cpp
   src/runtime.cpp
+  src/oos/ui/device_status_monitor.cpp
   "${OOS_GENERATED_RESOURCE_DIR}/embedded_boot_splash.cpp")
 target_compile_options(oos PRIVATE -fno-exceptions -fno-rtti)
 if(NOT BUILD_LOCAL)
