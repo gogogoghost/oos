@@ -82,6 +82,7 @@ add_library(oos_imgui_core STATIC
   "${OOS_IMGUI_DIR}/imgui_widgets.cpp")
 target_include_directories(oos_imgui_core SYSTEM PUBLIC "${OOS_IMGUI_DIR}")
 target_compile_definitions(oos_imgui_core PUBLIC
+  IMGUI_DISABLE_DEFAULT_FONT
   IMGUI_DISABLE_DEBUG_TOOLS
   IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
   IMGUI_DISABLE_OBSOLETE_FUNCTIONS
@@ -117,6 +118,12 @@ target_include_directories(oos_compositor PUBLIC
 target_link_libraries(oos_compositor PUBLIC oos_device_api)
 add_library(oos::compositor ALIAS oos_compositor)
 
+add_library(oos_app_sessions STATIC
+  src/oos/runtime/application_session_manager.cpp)
+target_include_directories(oos_app_sessions PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(oos_app_sessions PUBLIC oos_compositor oos_window)
+
 add_subdirectory("${OOS_REPO_ROOT}/sdk"
                  "${CMAKE_CURRENT_BINARY_DIR}/sdk")
 
@@ -149,6 +156,12 @@ add_library(oos_system_services STATIC
 target_include_directories(oos_system_services PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_system_services PUBLIC oos_app_model)
+
+add_library(oos_system_settings STATIC
+  src/oos/ui/system_ui_settings.cpp)
+target_include_directories(oos_system_settings PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(oos_system_settings PUBLIC oos_app_model)
 
 add_library(oos_wasm_runtime STATIC
   src/oos/runtime/native_app_manager.cpp
@@ -194,7 +207,8 @@ if(NOT BUILD_LOCAL)
 endif()
 target_link_libraries(oos PRIVATE
   oos_device_api oos_compositor oos_app_model oos_device_storage oos_sdk_ui
-  oos_window oos_wasm_runtime oos_launcher_app oos_systemui_app)
+  oos_window oos_app_sessions oos_wasm_runtime oos_system_settings oos_launcher_app
+  oos_settings_app oos_systemui_app)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

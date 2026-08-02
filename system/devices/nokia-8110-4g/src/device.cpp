@@ -14,10 +14,15 @@ constexpr DeviceDescriptor kDescriptor = {
     "nokia-8110-4g", "Nokia", "8110 4G", 23, 240, 320, 0, 0};
 
 constexpr ServiceConfiguration kServices = {
-    "/dev/input", "/data/misc/wifi/sockets/wlan0",
-    "bluetoothd", "slot1",
-    "default",    "default",
+    "/dev/input",
+    "/data/misc/wifi/sockets/wlan0",
+    "bluetoothd",
+    "slot1",
+    "default",
+    "default",
     "0",
+    false,
+    WifiLifecycle::LegacyHardware,
 };
 
 class Nokia8110Device final : public Device {

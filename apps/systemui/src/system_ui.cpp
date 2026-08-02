@@ -1,10 +1,13 @@
 #include "oos/apps/systemui/system_ui.h"
 
 #include "oos/compositor/compositor.h"
+#include "oos/sdk/ui/fonts.h"
 #include "oos/sdk/ui/icons.h"
 #include "oos/sdk/ui/imgui_backend.h"
 #include "oos/sdk/ui/lvgl_backend.h"
+#include "oos/sdk/ui/theme.h"
 #include "oos/ui/system_status.h"
+#include "oos/ui/system_ui_settings.h"
 
 #include <algorithm>
 #include <array>
@@ -19,10 +22,12 @@ namespace sdk_ui = oos::sdk::ui;
 
 constexpr uint16_t kKeyBack = 158;
 constexpr uint16_t kKeyOk = 352;
-constexpr uint32_t kOrange = 0xe65100;
-constexpr uint32_t kStatusBackground = 0x0d1010;
-constexpr uint32_t kText = 0xf0ede9;
-constexpr uint32_t kStatusInactive = 0x5f5a55;
+constexpr uint32_t kOrange = sdk_ui::theme::kPrimaryLight;
+constexpr uint32_t kStatusBackground = sdk_ui::theme::kStatusBackground;
+constexpr uint32_t kText = sdk_ui::theme::kText;
+constexpr uint32_t kStatusInactive = sdk_ui::theme::kStatusInactive;
+constexpr uint32_t kDarkForeground = 0x17191b;
+constexpr uint32_t kDarkInactive = 0x62686b;
 
 lv_color_t color(uint32_t rgb) { return lv_color_hex(rgb); }
 
@@ -59,10 +64,10 @@ public:
 
   Impl(compositor::LayerSurface &status_surface,
        compositor::LayerSurface &overlay_surface,
-       ui::SystemStatusSource *status_source)
+       ui::SystemStatusSource *status_source, ui::SystemUiSettings *settings)
       : status_backend(status_surface), overlay_backend(overlay_surface),
         status_surface(status_surface), overlay_surface(overlay_surface),
-        status_source(status_source) {}
+        status_source(status_source), settings(settings) {}
 
   bool initialize() {
     if (initialized)
@@ -80,10 +85,12 @@ public:
       return false;
     }
     stripObject(root);
-    lv_obj_set_style_bg_color(root, color(kStatusBackground), 0);
+    status_root = root;
+    lv_obj_set_style_bg_color(root, color(appearance.background_rgb), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
 
-    status_time = makeLabel(root, "00:00", &lv_font_montserrat_10, kText);
+    status_time =
+        makeLabel(root, currentTime().c_str(), sdk_ui::fonts::get(12), kText);
     lv_obj_align(status_time, LV_ALIGN_LEFT_MID, 7, 0);
 
     indicators = lv_obj_create(root);
@@ -110,18 +117,20 @@ public:
       lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
       signal[index] = bar;
     }
-    radio = makeLabel(indicators, "", &lv_font_montserrat_10, kText);
-    wifi = makeLabel(indicators, sdk_ui::icons::kWifi, &lv_font_montserrat_10,
+    radio = makeLabel(indicators, "", sdk_ui::fonts::get(12), kText);
+    wifi = makeLabel(indicators, sdk_ui::icons::kWifi, sdk_ui::fonts::get(12),
                      kText);
     charge = makeLabel(indicators, sdk_ui::icons::kCharge,
-                       &lv_font_montserrat_10, kOrange);
+                       sdk_ui::fonts::get(12), kOrange);
     battery = makeLabel(indicators, sdk_ui::icons::kBatteryEmpty,
-                        &lv_font_montserrat_10, kStatusInactive);
+                        sdk_ui::fonts::get(12), kStatusInactive);
     lv_obj_add_flag(radio, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wifi, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(charge, LV_OBJ_FLAG_HIDDEN);
 
     overlay_surface.setVisible(false);
+    applyAppearance();
+    updatePreferences();
     updateClock();
     updateStatus();
     status_needs_refresh = true;
@@ -135,6 +144,7 @@ public:
     overlay_surface.clearFrame();
     overlay_backend.shutdown();
     status_backend.shutdown();
+    status_root = nullptr;
     status_time = nullptr;
     indicators = nullptr;
     signal_container = nullptr;
@@ -161,27 +171,29 @@ public:
   void applyStatus() {
     const bool cellular =
         system_status.cellular_available && system_status.cellular_registered;
-    if (system_status.cellular_available)
+    if (preferences.show_network && system_status.cellular_available)
       lv_obj_remove_flag(signal_container, LV_OBJ_FLAG_HIDDEN);
     else
       lv_obj_add_flag(signal_container, LV_OBJ_FLAG_HIDDEN);
     for (size_t index = 0; index < signal.size(); ++index) {
       const bool active =
           cellular && static_cast<int>(index) < system_status.signal_bars;
-      lv_obj_set_style_bg_color(signal[index],
-                                color(active ? kText : kStatusInactive), 0);
+      lv_obj_set_style_bg_color(
+          signal[index], color(active ? foregroundColor() : inactiveColor()),
+          0);
     }
-    if (cellular && !system_status.radio_technology.empty()) {
+    if (preferences.show_network && cellular &&
+        !system_status.radio_technology.empty()) {
       lv_label_set_text(radio, system_status.radio_technology.c_str());
       lv_obj_remove_flag(radio, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(radio, LV_OBJ_FLAG_HIDDEN);
     }
-    if (system_status.wifi_connected)
+    if (preferences.show_network && system_status.wifi_connected)
       lv_obj_remove_flag(wifi, LV_OBJ_FLAG_HIDDEN);
     else
       lv_obj_add_flag(wifi, LV_OBJ_FLAG_HIDDEN);
-    if (system_status.charging)
+    if (system_status.battery_available && system_status.charging)
       lv_obj_remove_flag(charge, LV_OBJ_FLAG_HIDDEN);
     else
       lv_obj_add_flag(charge, LV_OBJ_FLAG_HIDDEN);
@@ -196,16 +208,65 @@ public:
     else if (system_status.battery_percent >= 10)
       symbol = sdk_ui::icons::kBatteryQuarter;
     char text[24] = {};
-    if (system_status.battery_available)
+    if (system_status.battery_available && preferences.show_battery_percentage)
       std::snprintf(text, sizeof(text), "%d%% %s",
                     system_status.battery_percent, symbol);
     else
       std::snprintf(text, sizeof(text), "%s", symbol);
     lv_label_set_text(battery, text);
-    lv_obj_set_style_text_color(
-        battery,
-        color(system_status.battery_available ? kText : kStatusInactive), 0);
+    lv_obj_set_style_text_color(battery,
+                                color(system_status.battery_available
+                                          ? foregroundColor()
+                                          : inactiveColor()),
+                                0);
+    if (system_status.battery_available)
+      lv_obj_remove_flag(battery, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(battery, LV_OBJ_FLAG_HIDDEN);
     status_needs_refresh = true;
+  }
+
+  uint32_t foregroundColor() const {
+    return appearance.dark_icons ? kDarkForeground : kText;
+  }
+
+  uint32_t inactiveColor() const {
+    return appearance.dark_icons ? kDarkInactive : kStatusInactive;
+  }
+
+  void applyAppearance() {
+    if (!status_root)
+      return;
+    lv_obj_set_style_bg_color(status_root, color(appearance.background_rgb), 0);
+    lv_obj_set_style_text_color(status_time, color(foregroundColor()), 0);
+    lv_obj_set_style_text_color(radio, color(foregroundColor()), 0);
+    lv_obj_set_style_text_color(wifi, color(foregroundColor()), 0);
+    lv_obj_set_style_text_color(charge, color(foregroundColor()), 0);
+    applyStatus();
+    status_needs_refresh = true;
+  }
+
+  void setStatusBarAppearance(ui::StatusBarAppearance next) {
+    next.background_rgb &= 0x00ffffffu;
+    if (appearance == next)
+      return;
+    appearance = next;
+    applyAppearance();
+  }
+
+  void updatePreferences() {
+    if (!settings)
+      return;
+    const ui::StatusBarPreferences next = settings->statusBar();
+    if (next.revision == last_preferences_revision)
+      return;
+    last_preferences_revision = next.revision;
+    preferences = next;
+    if (preferences.show_clock)
+      lv_obj_remove_flag(status_time, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(status_time, LV_OBJ_FLAG_HIDDEN);
+    applyStatus();
   }
 
   void updateStatus() {
@@ -278,6 +339,7 @@ public:
     if (!initialized)
       return false;
     updateClock();
+    updatePreferences();
     updateStatus();
     if (mode == OverlayMode::Notification &&
         monotonic_us >= notification_until_us) {
@@ -358,6 +420,8 @@ public:
   compositor::LayerSurface &status_surface;
   compositor::LayerSurface &overlay_surface;
   ui::SystemStatusSource *status_source = nullptr;
+  ui::SystemUiSettings *settings = nullptr;
+  lv_obj_t *status_root = nullptr;
   lv_obj_t *status_time = nullptr;
   lv_obj_t *indicators = nullptr;
   lv_obj_t *signal_container = nullptr;
@@ -367,12 +431,15 @@ public:
   lv_obj_t *charge = nullptr;
   lv_obj_t *battery = nullptr;
   ui::SystemStatusSnapshot system_status;
+  ui::StatusBarPreferences preferences;
+  ui::StatusBarAppearance appearance{kStatusBackground, false};
   std::string notification;
   std::string error;
   OverlayMode mode = OverlayMode::Hidden;
   int64_t notification_until_us = 0;
   int64_t last_minute = -1;
-  uint64_t last_status_revision = 0;
+  uint64_t last_status_revision = UINT64_MAX;
+  uint64_t last_preferences_revision = 0;
   bool initialized = false;
   bool status_needs_refresh = false;
   bool overlay_needs_refresh = false;
@@ -380,9 +447,10 @@ public:
 
 SystemUi::SystemUi(compositor::LayerSurface &status_surface,
                    compositor::LayerSurface &overlay_surface,
-                   ui::SystemStatusSource *status_source)
+                   ui::SystemStatusSource *status_source,
+                   ui::SystemUiSettings *settings)
     : impl_(std::make_unique<Impl>(status_surface, overlay_surface,
-                                   status_source)) {}
+                                   status_source, settings)) {}
 
 SystemUi::~SystemUi() { shutdown(); }
 
@@ -410,6 +478,10 @@ void SystemUi::setLocked(bool locked) { impl_->setLocked(locked); }
 
 bool SystemUi::locked() const {
   return impl_->mode == Impl::OverlayMode::Locked;
+}
+
+void SystemUi::applyStatusBarAppearance(ui::StatusBarAppearance appearance) {
+  impl_->setStatusBarAppearance(appearance);
 }
 
 const std::string &SystemUi::lastError() const { return impl_->error; }

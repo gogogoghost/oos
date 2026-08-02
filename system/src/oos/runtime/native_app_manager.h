@@ -14,6 +14,10 @@ namespace oos::apps {
 class AppRepository;
 }
 
+namespace oos::ui {
+class StatusBarAppearanceController;
+}
+
 namespace oos::runtime {
 
 class GraphicsHost;
@@ -23,6 +27,7 @@ struct NativeAppLaunchOptions {
   const char *data_directory = nullptr;
   const char *system_data_root = nullptr;
   apps::AppRepository *app_repository = nullptr;
+  ui::StatusBarAppearanceController *status_bar = nullptr;
   const char *internal_media_directory = "/data/media/internal";
   const char *removable_media_directory = "/data/media/removable";
   const char *font_directory = "/opt/oos/share/fonts";

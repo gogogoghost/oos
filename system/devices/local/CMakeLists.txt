@@ -48,10 +48,19 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_link_libraries(oos_test_key_debouncer PRIVATE oos_input)
   add_test(NAME input-debounce COMMAND oos_test_key_debouncer)
 
+  add_executable(oos_test_supplicant_text
+    "${CMAKE_SOURCE_DIR}/tests/host/supplicant_text_test.cpp"
+    "${CMAKE_SOURCE_DIR}/src/oos/network/supplicant_text.cpp")
+  target_compile_options(oos_test_supplicant_text PRIVATE -UNDEBUG)
+  target_include_directories(oos_test_supplicant_text PRIVATE
+    "${CMAKE_SOURCE_DIR}/src")
+  add_test(NAME supplicant-text COMMAND oos_test_supplicant_text)
+
   add_executable(oos_test_ui_backends
     "${CMAKE_SOURCE_DIR}/tests/host/ui_backend_test.cpp")
   target_compile_options(oos_test_ui_backends PRIVATE -UNDEBUG)
   target_link_libraries(oos_test_ui_backends PRIVATE
-    oos_sdk_ui oos_launcher_app oos_systemui_app)
+    oos_sdk_ui oos_launcher_app oos_settings_app oos_systemui_app
+    oos_system_settings oos_app_sessions oos::platform)
   add_test(NAME ui-backends COMMAND oos_test_ui_backends)
 endif()

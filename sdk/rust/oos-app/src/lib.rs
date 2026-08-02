@@ -68,6 +68,17 @@ pub fn log(level: u32, message: &str) {
     runtime::log(level, message)
 }
 
+pub fn set_status_bar_style(background_rgb: u32, dark_icons: bool) -> Result<(), ErrorCode> {
+    runtime::set_status_bar_style(
+        background_rgb,
+        if dark_icons {
+            runtime::StatusBarIconTheme::Dark
+        } else {
+            runtime::StatusBarIconTheme::Light
+        },
+    )
+}
+
 pub fn kv_get(key: &str) -> Result<Option<Vec<u8>>, ErrorCode> {
     storage::kv_get(key)
 }

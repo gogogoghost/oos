@@ -17,15 +17,16 @@
 #include <utility>
 #include <vector>
 
-#include "oos/apps/zip_archive.h"
 #include "oos/apps/permissions.h"
+#include "oos/apps/zip_archive.h"
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
-#include "oos/runtime/graphics_host.h"
 #include "oos/resources/font_assets.h"
+#include "oos/runtime/graphics_host.h"
 #include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
+#include "oos/ui/status_bar_appearance.h"
 
 namespace oos::runtime {
 namespace {
@@ -51,8 +52,7 @@ constexpr const char *kCodecInterface = "oos:platform/codec@0.1.0";
 constexpr const char *kStorageInterface = "oos:platform/storage@0.1.0";
 constexpr const char *kDeviceStorageInterface =
     "oos:platform/device-storage@0.1.0";
-constexpr const char *kFontAssetsInterface =
-    "oos:platform/font-assets@0.1.0";
+constexpr const char *kFontAssetsInterface = "oos:platform/font-assets@0.1.0";
 constexpr const char *kSystemServicesInterface =
     "oos:platform/system-services@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
@@ -117,6 +117,7 @@ struct AppHostContext {
   storage::DeviceStorageService *device_storage = nullptr;
   resources::FontAssetService *font_assets = nullptr;
   services::SystemServiceHub *system_services = nullptr;
+  ui::StatusBarAppearanceController *status_bar = nullptr;
   const std::string *app_id = nullptr;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
@@ -163,8 +164,9 @@ bool servicePermissionGranted(wasm_exec_env_t environment,
           (host->service_permission_mask & required_permission) != 0);
 }
 
-bool servicePermissionGranted(wasm_exec_env_t environment,
-                              apps::DeviceServicePermission required_permission) {
+bool servicePermissionGranted(
+    wasm_exec_env_t environment,
+    apps::DeviceServicePermission required_permission) {
   return servicePermissionGranted(environment,
                                   apps::permissionBit(required_permission));
 }
@@ -199,7 +201,8 @@ resources::FontAssetService *fontAssetsFor(wasm_exec_env_t environment) {
 device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
   if (!host || !host->device || !host->services ||
-      !servicePermissionGranted(environment, attachedServicePermission(environment)))
+      !servicePermissionGranted(environment,
+                                attachedServicePermission(environment)))
     return nullptr;
   if (!*host->services)
     *host->services = std::make_unique<device::ServiceProvider>(*host->device);
@@ -208,8 +211,8 @@ device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
 
 services::SystemServiceHub *systemServicesFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  return host && servicePermissionGranted(
-                     environment, apps::DeviceServicePermission::System)
+  return host && servicePermissionGranted(environment,
+                                          apps::DeviceServicePermission::System)
              ? host->system_services
              : nullptr;
 }
@@ -232,6 +235,18 @@ bool writeResult(wasm_exec_env_t environment, uint32_t result_offset,
 }
 
 uint32_t nativeAbiVersion(wasm_exec_env_t) { return OOS_WASM_ABI_VERSION; }
+
+void nativeSetStatusBarStyle(wasm_exec_env_t environment,
+                             uint32_t background_rgb, uint32_t icon_theme,
+                             uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  const bool valid = icon_theme <= 1 && (background_rgb & 0xff000000u) == 0;
+  if (valid && host && host->status_bar) {
+    host->status_bar->setStatusBarAppearance({background_rgb, icon_theme == 1});
+  }
+  writeResult(environment, result_offset, valid && host && host->status_bar,
+              valid ? WitError::Unavailable : WitError::InvalidArgument);
+}
 
 void nativeSurfaceSize(wasm_exec_env_t environment, uint32_t result_offset) {
   GraphicsHost *graphics = graphicsFor(environment);
@@ -559,10 +574,10 @@ uint32_t nativeDeviceCapability(wasm_exec_env_t environment, uint32_t feature) {
 }
 
 void writeUnavailable(wasm_exec_env_t environment, uint32_t result_offset) {
-  const size_t error_offset = reinterpret_cast<uintptr_t>(
-                                  wasm_runtime_get_function_attachment(
-                                      environment)) &
-                              kServiceErrorOffsetMask;
+  const size_t error_offset =
+      reinterpret_cast<uintptr_t>(
+          wasm_runtime_get_function_attachment(environment)) &
+      kServiceErrorOffsetMask;
   if (error_offset > 64) {
     trapInvalidReturnArea(environment);
     return;
@@ -740,9 +755,9 @@ void nativeDeviceStorageRead(wasm_exec_env_t environment, uint32_t volume,
                                                 path_offset, path_length, path);
   if (!service || !arguments) {
     result[0] = 1;
-    result[4] = static_cast<uint8_t>(service ? WitError::InvalidArgument
-                                             : deviceStorageAccessError(
-                                                   environment));
+    result[4] =
+        static_cast<uint8_t>(service ? WitError::InvalidArgument
+                                     : deviceStorageAccessError(environment));
     return;
   }
   uint64_t native_size = 0;
@@ -841,9 +856,9 @@ void nativeFontLoad(wasm_exec_env_t environment, uint32_t role,
       return;
     }
     result[0] = 1;
-    result[4] = static_cast<uint8_t>(
-        loaded == resources::FontAssetStatus::Ok ? WitError::Io
-                                                 : fontAssetError(loaded));
+    result[4] = static_cast<uint8_t>(loaded == resources::FontAssetStatus::Ok
+                                         ? WitError::Io
+                                         : fontAssetError(loaded));
     return;
   }
   result = appMutableArray<uint8_t>(environment, result_offset, 12, 12);
@@ -1303,11 +1318,11 @@ void nativeServiceMessage(wasm_exec_env_t environment, uint32_t result_offset) {
       environment, attachedServicePermission(environment));
   device::ServiceProvider *services =
       permission_granted ? servicesFor(environment) : nullptr;
-  const std::string message =
-      !permission_granted     ? "permission denied"
-      : !services             ? "service unavailable"
-      : services->lastError().empty() ? "service ready"
-                                      : services->lastError();
+  const std::string message = !permission_granted ? "permission denied"
+                              : !services         ? "service unavailable"
+                              : services->lastError().empty()
+                                  ? "service ready"
+                                  : services->lastError();
   if (!result ||
       !lowerString(environment, message.c_str(), result[0], result[1])) {
     trapInvalidReturnArea(environment);
@@ -1349,8 +1364,8 @@ void nativeAudioRecord(wasm_exec_env_t environment, uint32_t path_offset,
     return;
   }
   hardware::RecordingResult recording;
-  if (!servicesFor(environment)->recordWav(path, static_cast<int>(duration_ms),
-                                           recording)) {
+  if (!servicesFor(environment)
+           ->recordWav(path, static_cast<int>(duration_ms), recording)) {
     failServiceResult(result, 8);
     return;
   }
@@ -1404,7 +1419,8 @@ void nativeCameraSetTorch(wasm_exec_env_t environment, uint32_t id_offset,
                           uint32_t id_length, uint32_t enabled,
                           uint32_t result_offset) {
   std::string id;
-  const bool arguments = guestString(environment, id_offset, id_length, id, 128);
+  const bool arguments =
+      guestString(environment, id_offset, id_length, id, 128);
   writeResult(environment, result_offset,
               arguments && servicesFor(environment) &&
                   servicesFor(environment)->setTorch(id, enabled != 0),
@@ -1429,9 +1445,10 @@ void nativeCameraCapture(wasm_exec_env_t environment, uint32_t id_offset,
     return;
   }
   hardware::PhotoResult photo;
-  if (!servicesFor(environment)->captureJpeg(
-          id, path, photo, static_cast<int>(width), static_cast<int>(height),
-          flash != 0, static_cast<int>(timeout_ms))) {
+  if (!servicesFor(environment)
+           ->captureJpeg(id, path, photo, static_cast<int>(width),
+                         static_cast<int>(height), flash != 0,
+                         static_cast<int>(timeout_ms))) {
     failServiceResult(result, 8);
     return;
   }
@@ -1462,8 +1479,9 @@ void nativeBatteryEvent(wasm_exec_env_t environment, uint32_t timeout_ms,
   if (!result)
     return;
   hardware::BatterySnapshot snapshot;
-  const int changed = servicesFor(environment)->waitForBatteryEvent(
-      static_cast<int>(timeout_ms), snapshot);
+  const int changed =
+      servicesFor(environment)
+          ->waitForBatteryEvent(static_cast<int>(timeout_ms), snapshot);
   if (changed < 0) {
     failServiceResult(result, 4);
   } else if (changed > 0) {
@@ -1536,8 +1554,7 @@ void nativePowerScheduleRtcWake(wasm_exec_env_t environment,
 void nativePowerClearRtcWake(wasm_exec_env_t environment,
                              uint32_t result_offset) {
   device::ServiceProvider *services = servicesFor(environment);
-  writeResult(environment, result_offset,
-              services && services->clearRtcWake(),
+  writeResult(environment, result_offset, services && services->clearRtcWake(),
               services ? WitError::Io : serviceAccessError(environment));
 }
 
@@ -1552,7 +1569,8 @@ void nativePowerSuspend(wasm_exec_env_t environment, uint32_t timeout_ms,
 void nativeFlipState(wasm_exec_env_t environment, uint32_t result_offset) {
   uint8_t *result = serviceResultArea(environment, result_offset, 2);
   if (result)
-    result[1] = static_cast<uint8_t>(servicesFor(environment)->queryFlipState());
+    result[1] =
+        static_cast<uint8_t>(servicesFor(environment)->queryFlipState());
 }
 
 void nativeVibrate(wasm_exec_env_t environment, uint32_t duration_ms,
@@ -1565,8 +1583,7 @@ void nativeVibrate(wasm_exec_env_t environment, uint32_t duration_ms,
 
 void nativeVibrationStop(wasm_exec_env_t environment, uint32_t result_offset) {
   device::ServiceProvider *services = servicesFor(environment);
-  writeResult(environment, result_offset,
-              services && services->stopVibration(),
+  writeResult(environment, result_offset, services && services->stopVibration(),
               services ? WitError::Io : serviceAccessError(environment));
 }
 
@@ -1576,13 +1593,12 @@ uint32_t nativeAmplitudeControl(wasm_exec_env_t environment) {
 }
 
 void nativeVibrationSetAmplitude(wasm_exec_env_t environment,
-                                 uint32_t amplitude,
-                                 uint32_t result_offset) {
+                                 uint32_t amplitude, uint32_t result_offset) {
   device::ServiceProvider *services = servicesFor(environment);
   writeResult(environment, result_offset,
               services && amplitude <= 255 &&
                   services->setVibrationAmplitude(amplitude),
-              !services      ? serviceAccessError(environment)
+              !services         ? serviceAccessError(environment)
               : amplitude > 255 ? WitError::InvalidArgument
                                 : WitError::Io);
 }
@@ -1612,8 +1628,8 @@ void nativeWifiScan(wasm_exec_env_t environment, uint32_t wait_ms,
   if (!result)
     return;
   std::vector<network::WifiAccessPoint> access_points;
-  if (!servicesFor(environment)->wifiScan(access_points,
-                                          static_cast<int>(wait_ms)) ||
+  if (!servicesFor(environment)
+           ->wifiScan(access_points, static_cast<int>(wait_ms)) ||
       access_points.size() > 256) {
     failServiceResult(result, 4);
     return;
@@ -1639,8 +1655,7 @@ void nativeWifiScan(wasm_exec_env_t environment, uint32_t wait_ms,
     }
     storeCanonical<int32_t>(access_point, 8,
                             access_points[index].frequency_mhz);
-    storeCanonical<int32_t>(access_point, 12,
-                            access_points[index].signal_dbm);
+    storeCanonical<int32_t>(access_point, 12, access_points[index].signal_dbm);
   }
   storeCanonical(result, 4, pointer);
   storeCanonical(result, 8, count);
@@ -1697,9 +1712,9 @@ void nativeWifiConnect(wasm_exec_env_t environment, uint32_t ssid_offset,
     return;
   }
   int network_id = -1;
-  if (!servicesFor(environment)->wifiConnect(
-          ssid, static_cast<network::WifiSecurity>(security), credential,
-          network_id)) {
+  if (!servicesFor(environment)
+           ->wifiConnect(ssid, static_cast<network::WifiSecurity>(security),
+                         credential, network_id)) {
     failServiceResult(result, 4);
     return;
   }
@@ -1715,8 +1730,7 @@ void nativeWifiDisconnect(wasm_exec_env_t environment, uint32_t result_offset) {
 
 void nativeWifiReconnect(wasm_exec_env_t environment, uint32_t result_offset) {
   device::ServiceProvider *services = servicesFor(environment);
-  writeResult(environment, result_offset,
-              services && services->wifiReconnect(),
+  writeResult(environment, result_offset, services && services->wifiReconnect(),
               services ? WitError::Io : serviceAccessError(environment));
 }
 
@@ -1765,13 +1779,13 @@ void nativeIpUseDhcp(wasm_exec_env_t environment, uint32_t timeout_ms,
               services ? WitError::Io : serviceAccessError(environment));
 }
 
-void nativeIpUseStatic(wasm_exec_env_t environment,
-                       uint32_t interface_offset, uint32_t interface_length,
-                       uint32_t address_offset, uint32_t address_length,
-                       uint32_t prefix_length, uint32_t gateway_offset,
-                       uint32_t gateway_length, uint32_t dns1_offset,
-                       uint32_t dns1_length, uint32_t dns2_offset,
-                       uint32_t dns2_length, uint32_t result_offset) {
+void nativeIpUseStatic(wasm_exec_env_t environment, uint32_t interface_offset,
+                       uint32_t interface_length, uint32_t address_offset,
+                       uint32_t address_length, uint32_t prefix_length,
+                       uint32_t gateway_offset, uint32_t gateway_length,
+                       uint32_t dns1_offset, uint32_t dns1_length,
+                       uint32_t dns2_offset, uint32_t dns2_length,
+                       uint32_t result_offset) {
   network::IpConfiguration configuration;
   configuration.prefix_length = prefix_length;
   const bool arguments =
@@ -1801,10 +1815,10 @@ void lowerBluetoothScan(wasm_exec_env_t environment, uint32_t duration_ms,
   std::vector<network::BluetoothDevice> devices;
   const bool success =
       low_energy
-          ? servicesFor(environment)->bluetoothLeScan(
-                devices, static_cast<int>(duration_ms))
-          : servicesFor(environment)->bluetoothClassicScan(
-                devices, static_cast<int>(duration_ms));
+          ? servicesFor(environment)
+                ->bluetoothLeScan(devices, static_cast<int>(duration_ms))
+          : servicesFor(environment)
+                ->bluetoothClassicScan(devices, static_cast<int>(duration_ms));
   if (!success || devices.size() > 256) {
     failServiceResult(result, 4);
     return;
@@ -1819,7 +1833,8 @@ void lowerBluetoothScan(wasm_exec_env_t environment, uint32_t duration_ms,
   }
   for (uint32_t index = 0; index < count; ++index) {
     uint8_t *record = records + index * 36;
-    if (!lowerStringAt(environment, devices[index].address.c_str(), record, 0) ||
+    if (!lowerStringAt(environment, devices[index].address.c_str(), record,
+                       0) ||
         !lowerStringAt(environment, devices[index].name.c_str(), record, 8)) {
       trapInvalidReturnArea(environment);
       return;
@@ -1852,8 +1867,7 @@ void lowerBluetoothScan(wasm_exec_env_t environment, uint32_t duration_ms,
 }
 
 void nativeBluetoothClassicScan(wasm_exec_env_t environment,
-                                uint32_t duration_ms,
-                                uint32_t result_offset) {
+                                uint32_t duration_ms, uint32_t result_offset) {
   lowerBluetoothScan(environment, duration_ms, result_offset, false);
 }
 
@@ -1884,7 +1898,8 @@ void nativeBluetoothPair(wasm_exec_env_t environment, uint32_t address_offset,
   std::string address;
   const bool arguments =
       guestString(environment, address_offset, address_length, address, 32) &&
-      transport <= static_cast<uint32_t>(network::BluetoothTransport::LowEnergy);
+      transport <=
+          static_cast<uint32_t>(network::BluetoothTransport::LowEnergy);
   device::ServiceProvider *services = servicesFor(environment);
   writeResult(
       environment, result_offset,
@@ -1896,9 +1911,8 @@ void nativeBluetoothPair(wasm_exec_env_t environment, uint32_t address_offset,
                   : WitError::InvalidArgument);
 }
 
-void nativeBluetoothUnpair(wasm_exec_env_t environment,
-                           uint32_t address_offset, uint32_t address_length,
-                           uint32_t result_offset) {
+void nativeBluetoothUnpair(wasm_exec_env_t environment, uint32_t address_offset,
+                           uint32_t address_length, uint32_t result_offset) {
   std::string address;
   const bool arguments =
       guestString(environment, address_offset, address_length, address, 32);
@@ -1918,12 +1932,12 @@ void nativeBluetoothCancelPairing(wasm_exec_env_t environment,
   const bool arguments =
       guestString(environment, address_offset, address_length, address, 32);
   device::ServiceProvider *services = servicesFor(environment);
-  writeResult(
-      environment, result_offset,
-      services && arguments && services->bluetoothCancelPairing(address),
-      !services   ? serviceAccessError(environment)
-      : arguments ? WitError::Io
-                  : WitError::InvalidArgument);
+  writeResult(environment, result_offset,
+              services && arguments &&
+                  services->bluetoothCancelPairing(address),
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
 }
 
 void nativeBluetoothProfile(wasm_exec_env_t environment,
@@ -1935,8 +1949,10 @@ void nativeBluetoothProfile(wasm_exec_env_t environment,
       guestString(environment, address_offset, address_length, address, 32) &&
       profile <= 2;
   device::ServiceProvider *services = servicesFor(environment);
-  const auto native_profile = static_cast<network::BluetoothProfile>(
-      profile == 0 ? 0x03 : profile == 1 ? 0x05 : 0x06);
+  const auto native_profile =
+      static_cast<network::BluetoothProfile>(profile == 0   ? 0x03
+                                             : profile == 1 ? 0x05
+                                                            : 0x06);
   const bool success =
       services && arguments &&
       (connect ? services->bluetoothProfileConnect(address, native_profile)
@@ -1957,8 +1973,7 @@ void nativeBluetoothProfileConnect(wasm_exec_env_t environment,
 
 void nativeBluetoothProfileDisconnect(wasm_exec_env_t environment,
                                       uint32_t address_offset,
-                                      uint32_t address_length,
-                                      uint32_t profile,
+                                      uint32_t address_length, uint32_t profile,
                                       uint32_t result_offset) {
   nativeBluetoothProfile(environment, address_offset, address_length, profile,
                          result_offset, false);
@@ -1973,15 +1988,17 @@ void nativeBluetoothProfileCycle(wasm_exec_env_t environment,
       guestString(environment, address_offset, address_length, address, 32) &&
       profile <= 2;
   device::ServiceProvider *services = servicesFor(environment);
-  const auto native_profile = static_cast<network::BluetoothProfile>(
-      profile == 0 ? 0x03 : profile == 1 ? 0x05 : 0x06);
-  writeResult(
-      environment, result_offset,
-      services && arguments && services->bluetoothProfileConnectionCycle(
-                                  address, native_profile, hold_ms),
-      !services   ? serviceAccessError(environment)
-      : arguments ? WitError::Io
-                  : WitError::InvalidArgument);
+  const auto native_profile =
+      static_cast<network::BluetoothProfile>(profile == 0   ? 0x03
+                                             : profile == 1 ? 0x05
+                                                            : 0x06);
+  writeResult(environment, result_offset,
+              services && arguments &&
+                  services->bluetoothProfileConnectionCycle(
+                      address, native_profile, hold_ms),
+              !services   ? serviceAccessError(environment)
+              : arguments ? WitError::Io
+                          : WitError::InvalidArgument);
 }
 
 void nativeBluetoothLeCycle(wasm_exec_env_t environment,
@@ -1994,8 +2011,8 @@ void nativeBluetoothLeCycle(wasm_exec_env_t environment,
   device::ServiceProvider *services = servicesFor(environment);
   writeResult(
       environment, result_offset,
-      services && arguments && services->bluetoothLeConnectionCycle(
-                                  address, hold_ms, timeout_ms),
+      services && arguments &&
+          services->bluetoothLeConnectionCycle(address, hold_ms, timeout_ms),
       !services   ? serviceAccessError(environment)
       : arguments ? WitError::Io
                   : WitError::InvalidArgument);
@@ -2015,7 +2032,8 @@ void nativeModemSnapshot(wasm_exec_env_t environment, uint32_t timeout_ms,
   uint8_t *snapshot = result + 4;
   snapshot[0] = value.service_connected;
   storeCanonical<int32_t>(snapshot, 4, value.radio_state);
-  if (!lowerStringAt(environment, value.baseband_version.c_str(), snapshot, 8) ||
+  if (!lowerStringAt(environment, value.baseband_version.c_str(), snapshot,
+                     8) ||
       !lowerStringAt(environment, value.identity.imei.c_str(), snapshot, 16) ||
       !lowerStringAt(environment, value.identity.imei_software_version.c_str(),
                      snapshot, 24) ||
@@ -2036,25 +2054,18 @@ void nativeModemSnapshot(wasm_exec_env_t environment, uint32_t timeout_ms,
   storeCanonical<int32_t>(snapshot, 52, value.sim.universal_pin_state);
   storeCanonical<int32_t>(snapshot, 56, value.sim.application_count);
   const int signal[] = {
-      value.signal.gsm_strength,
-      value.signal.gsm_bit_error_rate,
-      value.signal.cdma_dbm,
-      value.signal.cdma_ecio,
-      value.signal.evdo_dbm,
-      value.signal.evdo_ecio,
-      value.signal.evdo_snr,
-      value.signal.lte_strength,
-      value.signal.lte_rsrp,
-      value.signal.lte_rsrq,
-      value.signal.lte_rssnr,
-      value.signal.lte_cqi,
-      value.signal.lte_timing_advance,
-      value.signal.tdscdma_rscp,
+      value.signal.gsm_strength,       value.signal.gsm_bit_error_rate,
+      value.signal.cdma_dbm,           value.signal.cdma_ecio,
+      value.signal.evdo_dbm,           value.signal.evdo_ecio,
+      value.signal.evdo_snr,           value.signal.lte_strength,
+      value.signal.lte_rsrp,           value.signal.lte_rsrq,
+      value.signal.lte_rssnr,          value.signal.lte_cqi,
+      value.signal.lte_timing_advance, value.signal.tdscdma_rscp,
   };
   for (size_t index = 0; index < std::size(signal); ++index)
     storeCanonical<int32_t>(snapshot, 60 + index * 4, signal[index]);
-  const modem::RegistrationStatus registrations[] = {
-      value.voice_registration, value.data_registration};
+  const modem::RegistrationStatus registrations[] = {value.voice_registration,
+                                                     value.data_registration};
   for (size_t index = 0; index < std::size(registrations); ++index) {
     const size_t offset = 116 + index * 16;
     storeCanonical<int32_t>(snapshot, offset, registrations[index].state);
@@ -2075,8 +2086,8 @@ void nativeModemSnapshot(wasm_exec_env_t environment, uint32_t timeout_ms,
   uint32_t request_pointer = 4;
   uint8_t *requests = reinterpret_cast<uint8_t *>(1);
   if (request_count) {
-    requests =
-        allocateGuestRecord(environment, request_count * 16, 4, request_pointer);
+    requests = allocateGuestRecord(environment, request_count * 16, 4,
+                                   request_pointer);
     if (!requests)
       return;
   }
@@ -2100,8 +2111,8 @@ void nativeRadioPower(wasm_exec_env_t environment, uint32_t enabled,
   if (!result)
     return;
   modem::ModemRequestStatus status;
-  if (!servicesFor(environment)->setRadioPower(enabled != 0, status,
-                                               timeout_ms)) {
+  if (!servicesFor(environment)
+           ->setRadioPower(enabled != 0, status, timeout_ms)) {
     failServiceResult(result, 4);
     return;
   }
@@ -2120,9 +2131,11 @@ void nativeCodec(wasm_exec_env_t environment, uint32_t width, uint32_t height,
   if (!result)
     return;
   hardware::CodecResult codec;
-  if (!servicesFor(environment)->testH264RoundTrip(
-          static_cast<int>(width), static_cast<int>(height),
-          static_cast<int>(frame_count), codec, static_cast<int>(timeout_ms))) {
+  if (!servicesFor(environment)
+           ->testH264RoundTrip(static_cast<int>(width),
+                               static_cast<int>(height),
+                               static_cast<int>(frame_count), codec,
+                               static_cast<int>(timeout_ms))) {
     failServiceResult(result, 8);
     return;
   }
@@ -2157,18 +2170,17 @@ void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
   AppHostContext *host = hostFor(environment);
   services::SystemServiceHub *system_services = systemServicesFor(environment);
   if (!arguments || !host || !host->app_id || !system_services) {
-    writeBytesResult(
-        environment, result_offset, nullptr, 0, false,
-        !arguments ? WitError::InvalidArgument
-                   : servicePermissionGranted(
-                         environment, apps::DeviceServicePermission::System)
+    writeBytesResult(environment, result_offset, nullptr, 0, false,
+                     !arguments ? WitError::InvalidArgument
+                     : servicePermissionGranted(
+                           environment, apps::DeviceServicePermission::System)
                          ? WitError::Unavailable
                          : WitError::PermissionDenied);
     return;
   }
   std::string response;
-  const int result = system_services->request(*host->app_id, {}, service,
-                                              operation, payload, response, true);
+  const int result = system_services->request(
+      *host->app_id, {}, service, operation, payload, response, true);
   WitError wit_error = WitError::Failed;
   if (result == -EINVAL)
     wit_error = WitError::InvalidArgument;
@@ -2195,6 +2207,8 @@ NativeSymbol kRuntimeSymbols[] = {
     {"wall-clock-minutes", reinterpret_cast<void *>(nativeWallClockMinutes),
      "()i", nullptr},
     {"log", reinterpret_cast<void *>(nativeLog), "(iii)", nullptr},
+    {"set-status-bar-style", reinterpret_cast<void *>(nativeSetStatusBarStyle),
+     "(iii)", nullptr},
 };
 
 NativeSymbol kGraphicsSymbols[] = {
@@ -2272,27 +2286,23 @@ NativeSymbol kPowerSymbols[] = {
     {"wait-for-battery-event", reinterpret_cast<void *>(nativeBatteryEvent),
      "(ii)", reinterpret_cast<void *>(4)},
     {"set-interactive", reinterpret_cast<void *>(nativePowerSetInteractive),
-     "(ii)",
-     serviceAttachment(1, WasmServicePermission::Power)},
-    {"acquire-wake-lock",
-     reinterpret_cast<void *>(nativePowerAcquireWakeLock),
+     "(ii)", serviceAttachment(1, WasmServicePermission::Power)},
+    {"acquire-wake-lock", reinterpret_cast<void *>(nativePowerAcquireWakeLock),
      "(iii)", serviceAttachment(1, WasmServicePermission::Power)},
-    {"release-wake-lock",
-     reinterpret_cast<void *>(nativePowerReleaseWakeLock),
+    {"release-wake-lock", reinterpret_cast<void *>(nativePowerReleaseWakeLock),
      "(iii)", serviceAttachment(1, WasmServicePermission::Power)},
     {"enable-auto-suspend",
-     reinterpret_cast<void *>(nativePowerEnableAutoSuspend),
-     "(i)", serviceAttachment(1, WasmServicePermission::Power)},
-    {"disable-auto-suspend",
-     reinterpret_cast<void *>(nativePowerDisableAutoSuspend),
-     "(i)", serviceAttachment(1, WasmServicePermission::Power)},
-    {"schedule-rtc-wake",
-     reinterpret_cast<void *>(nativePowerScheduleRtcWake), "(ii)",
+     reinterpret_cast<void *>(nativePowerEnableAutoSuspend), "(i)",
      serviceAttachment(1, WasmServicePermission::Power)},
-    {"clear-rtc-wake", reinterpret_cast<void *>(nativePowerClearRtcWake),
-     "(i)", serviceAttachment(1, WasmServicePermission::Power)},
-    {"suspend", reinterpret_cast<void *>(nativePowerSuspend),
+    {"disable-auto-suspend",
+     reinterpret_cast<void *>(nativePowerDisableAutoSuspend), "(i)",
+     serviceAttachment(1, WasmServicePermission::Power)},
+    {"schedule-rtc-wake", reinterpret_cast<void *>(nativePowerScheduleRtcWake),
      "(ii)", serviceAttachment(1, WasmServicePermission::Power)},
+    {"clear-rtc-wake", reinterpret_cast<void *>(nativePowerClearRtcWake), "(i)",
+     serviceAttachment(1, WasmServicePermission::Power)},
+    {"suspend", reinterpret_cast<void *>(nativePowerSuspend), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Power)},
     {"query-flip-state", reinterpret_cast<void *>(nativeFlipState), "(i)",
      serviceAttachment(1, WasmServicePermission::Power)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
@@ -2300,15 +2310,14 @@ NativeSymbol kPowerSymbols[] = {
 };
 
 NativeSymbol kVibratorSymbols[] = {
-    {"vibrate", reinterpret_cast<void *>(nativeVibrate),
-     "(ii)", reinterpret_cast<void *>(1)},
+    {"vibrate", reinterpret_cast<void *>(nativeVibrate), "(ii)",
+     reinterpret_cast<void *>(1)},
     {"stop", reinterpret_cast<void *>(nativeVibrationStop), "(i)",
      reinterpret_cast<void *>(1)},
     {"supports-amplitude-control",
      reinterpret_cast<void *>(nativeAmplitudeControl), "()i", nullptr},
     {"set-amplitude", reinterpret_cast<void *>(nativeVibrationSetAmplitude),
-     "(ii)",
-     reinterpret_cast<void *>(1)},
+     "(ii)", reinterpret_cast<void *>(1)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
@@ -2326,11 +2335,11 @@ NativeSymbol kWifiSymbols[] = {
      serviceAttachment(1, WasmServicePermission::Wifi)},
     {"reconnect", reinterpret_cast<void *>(nativeWifiReconnect), "(i)",
      serviceAttachment(1, WasmServicePermission::Wifi)},
-    {"forget", reinterpret_cast<void *>(nativeWifiForget),
-     "(ii)", serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"forget", reinterpret_cast<void *>(nativeWifiForget), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
     {"save-configuration",
-     reinterpret_cast<void *>(nativeWifiSaveConfiguration),
-     "(i)", serviceAttachment(1, WasmServicePermission::Wifi)},
+     reinterpret_cast<void *>(nativeWifiSaveConfiguration), "(i)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      serviceAttachment(0, WasmServicePermission::Wifi)},
 };
@@ -2338,8 +2347,8 @@ NativeSymbol kWifiSymbols[] = {
 NativeSymbol kIpSymbols[] = {
     {"get-status", reinterpret_cast<void *>(nativeIpStatus), "(i)",
      serviceAttachment(4, WasmServicePermission::Wifi)},
-    {"use-dhcp", reinterpret_cast<void *>(nativeIpUseDhcp),
-     "(ii)", serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"use-dhcp", reinterpret_cast<void *>(nativeIpUseDhcp), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
     {"use-static", reinterpret_cast<void *>(nativeIpUseStatic),
      "(iiiiiiiiiiii)", serviceAttachment(1, WasmServicePermission::Wifi)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
@@ -2347,38 +2356,37 @@ NativeSymbol kIpSymbols[] = {
 };
 
 NativeSymbol kBluetoothSymbols[] = {
-    {"enable", reinterpret_cast<void *>(nativeBluetoothEnable),
-     "(ii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
-    {"disable", reinterpret_cast<void *>(nativeBluetoothDisable),
-     "(ii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"enable", reinterpret_cast<void *>(nativeBluetoothEnable), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"disable", reinterpret_cast<void *>(nativeBluetoothDisable), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"classic-scan", reinterpret_cast<void *>(nativeBluetoothClassicScan),
      "(ii)", serviceAttachment(4, WasmServicePermission::Bluetooth)},
     {"le-scan", reinterpret_cast<void *>(nativeBluetoothLeScan), "(ii)",
      serviceAttachment(4, WasmServicePermission::Bluetooth)},
-    {"pair", reinterpret_cast<void *>(nativeBluetoothPair),
-     "(iiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
-    {"unpair", reinterpret_cast<void *>(nativeBluetoothUnpair),
-     "(iii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"pair", reinterpret_cast<void *>(nativeBluetoothPair), "(iiii)",
+     serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"unpair", reinterpret_cast<void *>(nativeBluetoothUnpair), "(iii)",
+     serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"cancel-pairing", reinterpret_cast<void *>(nativeBluetoothCancelPairing),
      "(iii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"profile-connect", reinterpret_cast<void *>(nativeBluetoothProfileConnect),
      "(iiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"profile-disconnect",
-     reinterpret_cast<void *>(nativeBluetoothProfileDisconnect),
-     "(iiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
+     reinterpret_cast<void *>(nativeBluetoothProfileDisconnect), "(iiii)",
+     serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"profile-connection-cycle",
-     reinterpret_cast<void *>(nativeBluetoothProfileCycle),
-     "(iiiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
-    {"le-connection-cycle",
-     reinterpret_cast<void *>(nativeBluetoothLeCycle),
+     reinterpret_cast<void *>(nativeBluetoothProfileCycle), "(iiiii)",
+     serviceAttachment(1, WasmServicePermission::Bluetooth)},
+    {"le-connection-cycle", reinterpret_cast<void *>(nativeBluetoothLeCycle),
      "(iiiii)", serviceAttachment(1, WasmServicePermission::Bluetooth)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      serviceAttachment(0, WasmServicePermission::Bluetooth)},
 };
 
 NativeSymbol kModemSymbols[] = {
-    {"query-snapshot", reinterpret_cast<void *>(nativeModemSnapshot),
-     "(ii)", serviceAttachment(4, WasmServicePermission::Modem)},
+    {"query-snapshot", reinterpret_cast<void *>(nativeModemSnapshot), "(ii)",
+     serviceAttachment(4, WasmServicePermission::Modem)},
     {"set-radio-power", reinterpret_cast<void *>(nativeRadioPower), "(iii)",
      serviceAttachment(4, WasmServicePermission::Modem)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
@@ -2386,8 +2394,8 @@ NativeSymbol kModemSymbols[] = {
 };
 
 NativeSymbol kCodecSymbols[] = {
-    {"test-h264-round-trip", reinterpret_cast<void *>(nativeCodec),
-     "(iiiii)", reinterpret_cast<void *>(8)},
+    {"test-h264-round-trip", reinterpret_cast<void *>(nativeCodec), "(iiiii)",
+     reinterpret_cast<void *>(8)},
     {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
      nullptr},
 };
@@ -2878,6 +2886,7 @@ public:
             device_storage.get(),
             font_assets.get(),
             system_services.get(),
+            this->options.status_bar,
             &this->options.app_id,
             this->options.service_permission_mask,
             this->options.enforce_service_permissions};
@@ -2991,8 +3000,8 @@ bool WasmApp::load(const char *path) {
     return false;
   }
   if (impl_->system_services && !impl_->system_services->initialize()) {
-    impl_->error = "initialize system services: " +
-                   impl_->system_services->lastError();
+    impl_->error =
+        "initialize system services: " + impl_->system_services->lastError();
     return false;
   }
   if (!impl_->initializeRuntime() ||

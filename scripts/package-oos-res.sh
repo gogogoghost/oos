@@ -69,8 +69,6 @@ WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
 LVGL_LICENSE="$ROOT_DIR/third_party/lvgl/LICENCE.txt"
 FONT_AWESOME_LICENSE="$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt"
 IMGUI_LICENSE="$ROOT_DIR/third_party/imgui/LICENSE.txt"
-SYSTEM_FONT="$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
-SYSTEM_FONT_LICENSE="$ROOT_DIR/system/assets/fonts/LICENSE.txt"
 
 package_require_file "$OOS_BINARY"
 if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
@@ -80,8 +78,6 @@ package_require_file "$WAMR_LICENSE"
 package_require_file "$LVGL_LICENSE"
 package_require_file "$FONT_AWESOME_LICENSE"
 package_require_file "$IMGUI_LICENSE"
-package_require_file "$SYSTEM_FONT"
-package_require_file "$SYSTEM_FONT_LICENSE"
 
 STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/oos-res.XXXXXX")
 cleanup() {
@@ -93,7 +89,6 @@ cleanup() {
 trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
-  "$STAGING/share/fonts" \
   "$STAGING/share/licenses/oos"
 
 install -m 0755 "$OOS_BINARY" "$STAGING/bin/oos"
@@ -108,10 +103,6 @@ install -m 0644 "$FONT_AWESOME_LICENSE" \
   "$STAGING/share/licenses/oos/FontAwesome5.txt"
 install -m 0644 "$IMGUI_LICENSE" \
   "$STAGING/share/licenses/oos/DearImGui.txt"
-install -m 0644 "$SYSTEM_FONT" \
-  "$STAGING/share/fonts/ui-proportional.otf"
-install -m 0644 "$SYSTEM_FONT_LICENSE" \
-  "$STAGING/share/licenses/oos/RedHatFonts.txt"
 
 package_verify_elf_dependencies "$STAGING" "$SYSTEM_DIR"
 
@@ -141,7 +132,8 @@ printf '%s\n' \
   "native_app_runtime=${WAMR_VERSION}" \
   "native_app_execution=interpreter,aot" \
   "native_app_interface=oos-wit-0.1.0-core" \
-  "system_font=ui-proportional.otf" \
+  "system_font=/system/fonts/Roboto-Regular.ttf" \
+  "system_font_fallback=/system/fonts/DroidSansFallback.ttf" \
   "system_icons=font-awesome-5-free" \
   "system_ui=lvgl-${LVGL_VERSION#v}" \
   "debug_ui_backend=dear-imgui-${IMGUI_VERSION#v}" \

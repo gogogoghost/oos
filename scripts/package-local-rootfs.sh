@@ -9,8 +9,6 @@ OOS_PREFIX="$ROOTFS/opt/oos"
 required=(
   "$ROOT_DIR/build/local/bin/oos"
   "$ROOT_DIR/system/devices/local/config/keymap.conf"
-  "$ROOT_DIR/system/assets/fonts/ui-proportional.otf"
-  "$ROOT_DIR/system/assets/fonts/LICENSE.txt"
   "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
   "$ROOT_DIR/third_party/lvgl/LICENCE.txt"
   "$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt"
@@ -24,7 +22,7 @@ done
 
 mkdir -p "$OOS_PREFIX/bin" \
   "$OOS_PREFIX/etc" \
-  "$OOS_PREFIX/share/fonts" "$OOS_PREFIX/share/licenses/oos" \
+  "$OOS_PREFIX/share/licenses/oos" \
   "$ROOTFS/dev" "$ROOTFS/etc" "$ROOTFS/proc" "$ROOTFS/run" \
   "$ROOTFS/tmp" "$ROOTFS/usr" "$ROOTFS/data"
 for link in bin lib lib64 sbin; do
@@ -33,6 +31,9 @@ for link in bin lib lib64 sbin; do
   fi
 done
 install -m 0755 "$ROOT_DIR/build/local/bin/oos" "$OOS_PREFIX/bin/oos"
+rm -f "$OOS_PREFIX/share/fonts/ui-proportional.otf" \
+  "$OOS_PREFIX/share/licenses/oos/RedHatFonts.txt"
+rmdir "$OOS_PREFIX/share/fonts" 2>/dev/null || true
 for launcher_id in org.orangeos.launcher cc.jaxy.oos.launcher; do
   rm -f "$OOS_PREFIX/packages/$launcher_id/application.zip"
   rmdir "$OOS_PREFIX/packages/$launcher_id" 2>/dev/null || true
@@ -40,10 +41,6 @@ done
 rmdir "$OOS_PREFIX/packages" 2>/dev/null || true
 install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
   "$OOS_PREFIX/etc/local-keymap.conf"
-install -m 0644 "$ROOT_DIR/system/assets/fonts/ui-proportional.otf" \
-  "$OOS_PREFIX/share/fonts/ui-proportional.otf"
-install -m 0644 "$ROOT_DIR/system/assets/fonts/LICENSE.txt" \
-  "$OOS_PREFIX/share/licenses/oos/RedHatFonts.txt"
 install -m 0644 "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE" \
   "$OOS_PREFIX/share/licenses/oos/WAMR.txt"
 install -m 0644 "$ROOT_DIR/third_party/lvgl/LICENCE.txt" \
@@ -62,7 +59,7 @@ printf '%s\n' \
   "system_ui=lvgl" \
   "system_icons=font-awesome-5-free" \
   "debug_ui_backend=dear-imgui" \
-  "system_font=ui-proportional.otf" \
+  "system_font=host-system-font" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   >"$OOS_PREFIX/rootfs-manifest.env"
 echo "Local OOS rootfs ready at $ROOTFS"

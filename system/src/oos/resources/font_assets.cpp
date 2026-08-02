@@ -11,6 +11,8 @@
 namespace oos::resources {
 namespace {
 
+constexpr char kDefaultFontRoot[] = "/opt/oos/share/fonts";
+
 const char *fontFileName(FontRole role) {
   switch (role) {
   case FontRole::UiProportional:
@@ -24,6 +26,19 @@ const char *fontFileName(FontRole role) {
 
 bool validRole(FontRole role) {
   return static_cast<uint32_t>(role) <= static_cast<uint32_t>(FontRole::Emoji);
+}
+
+int openSystemUiFont() {
+  constexpr const char *candidates[] = {
+      "/system/fonts/Roboto-Regular.ttf",
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"};
+  for (const char *candidate : candidates) {
+    const int fd = open(candidate, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd >= 0)
+      return fd;
+  }
+  return -1;
 }
 
 } // namespace
@@ -46,16 +61,15 @@ FontAssetStatus FontAssetService::openFont(FontRole role, int &fd,
   }
   const int root =
       open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-  if (root < 0) {
-    error_ = "font asset directory is unavailable: " + root_;
-    return FontAssetStatus::Unavailable;
+  if (root >= 0) {
+    fd = openat(root, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    close(root);
   }
-  fd = openat(root, name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  const int open_error = errno;
-  close(root);
+  if (fd < 0 && role == FontRole::UiProportional && root_ == kDefaultFontRoot) {
+    fd = openSystemUiFont();
+  }
   if (fd < 0) {
     error_ = std::string("font asset is unavailable: ") + name;
-    errno = open_error;
     return FontAssetStatus::Unavailable;
   }
   struct stat status = {};

@@ -1,10 +1,13 @@
 #include "oos/network/wifi_manager.h"
 
+#include "oos/network/supplicant_text.h"
+
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -18,6 +21,7 @@ namespace {
 
 constexpr char kModernControlSocket[] = "/data/vendor/wifi/wpa/sockets/wlan0";
 constexpr char kLegacyControlSocket[] = "/data/misc/wifi/sockets/wlan0";
+std::atomic<unsigned> g_client_sequence{0};
 
 std::vector<std::string> splitLines(const std::string &text) {
   std::vector<std::string> lines;
@@ -173,7 +177,8 @@ bool WifiManager::initialize() {
   }
 
   implementation_->local_socket =
-      "/data/local/tmp/oos-wpa-" + std::to_string(getpid());
+      "/dev/socket/oos-wpa-" + std::to_string(getpid()) + "-" +
+      std::to_string(g_client_sequence.fetch_add(1, std::memory_order_relaxed));
   unlink(implementation_->local_socket.c_str());
   sockaddr_un local{};
   local.sun_family = AF_UNIX;
@@ -230,7 +235,7 @@ bool WifiManager::status(WifiStatus &status_value) {
     if (key == "wpa_state")
       status_value.state = value;
     else if (key == "ssid")
-      status_value.ssid = value;
+      status_value.ssid = decodeSupplicantText(value);
     else if (key == "bssid")
       status_value.bssid = value;
     else if (key == "ip_address")
@@ -259,7 +264,7 @@ bool WifiManager::scan(std::vector<WifiAccessPoint> &results, int wait_ms) {
     parseInteger(fields[1], access_point.frequency_mhz);
     parseInteger(fields[2], access_point.signal_dbm);
     access_point.flags = fields[3];
-    access_point.ssid = fields[4];
+    access_point.ssid = decodeSupplicantText(fields[4]);
     results.push_back(std::move(access_point));
   }
   return true;
@@ -278,7 +283,7 @@ bool WifiManager::listNetworks(std::vector<WifiNetwork> &networks) {
     WifiNetwork network;
     if (!parseInteger(fields[0], network.id))
       continue;
-    network.ssid = fields[1];
+    network.ssid = decodeSupplicantText(fields[1]);
     network.bssid = fields[2];
     network.flags = fields[3];
     networks.push_back(std::move(network));
@@ -328,6 +333,17 @@ bool WifiManager::connect(const std::string &ssid, WifiSecurity security,
   std::string ignored;
   implementation_->request("REMOVE_NETWORK " + id, ignored);
   return false;
+}
+
+bool WifiManager::select(int network_id) {
+  if (network_id < 0) {
+    implementation_->error = "invalid Wi-Fi network ID";
+    return false;
+  }
+  std::string response;
+  const std::string id = std::to_string(network_id);
+  return implementation_->request("ENABLE_NETWORK " + id, response) &&
+         implementation_->request("SELECT_NETWORK " + id, response);
 }
 
 bool WifiManager::disconnect() {

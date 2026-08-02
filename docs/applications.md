@@ -88,6 +88,26 @@ comes from its normal Wasm linear memory. Central policy prevents packages from
 reserving several extra MiB for every resident application. A future system
 resource policy can vary these limits without changing the package format.
 
+## Application Sessions
+
+Every launched application is represented by the same host-side application
+session contract, whether it is a trusted process-local application or a WAMR
+package. The session owns the application instance and a dedicated compositor
+layer. `ApplicationSessionManager::activate(id)` only hides the previous layer,
+reveals the requested layer, and redirects input; it does not reconstruct an
+existing application.
+
+Consequently, a background application retains its complete UI tree, Wasm
+linear memory, navigation model, cached data, and graphics resources. Only the
+foreground session receives input and frame callbacks. Session switching never
+branches on a particular application ID; built-in and package IDs are entries
+in the same factory registry.
+
+OOS currently keeps every started session resident until shutdown. It does not
+silently evict an application because doing so would violate exact state
+restoration. A future memory policy must pair eviction with an explicit
+suspend/serialize contract rather than treating reconstruction as restoration.
+
 The command-line operations are:
 
 ```sh

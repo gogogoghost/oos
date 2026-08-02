@@ -12,6 +12,11 @@ inline constexpr char kContacts[] = LV_SYMBOL_LIST;
 inline constexpr char kCamera[] = LV_SYMBOL_IMAGE;
 inline constexpr char kFiles[] = LV_SYMBOL_DIRECTORY;
 inline constexpr char kSettings[] = LV_SYMBOL_SETTINGS;
+inline constexpr char kBluetooth[] = LV_SYMBOL_BLUETOOTH;
+inline constexpr char kSimCard[] = LV_SYMBOL_SD_CARD;
+inline constexpr char kStorage[] = LV_SYMBOL_DRIVE;
+inline constexpr char kDeviceInfo[] = LV_SYMBOL_EYE_OPEN;
+inline constexpr char kStatusBar[] = LV_SYMBOL_LIST;
 
 inline constexpr char kWifi[] = LV_SYMBOL_WIFI;
 inline constexpr char kCharge[] = LV_SYMBOL_CHARGE;

@@ -49,6 +49,7 @@ public:
   bool listNetworks(std::vector<WifiNetwork> &networks);
   bool connect(const std::string &ssid, WifiSecurity security,
                const std::string &credential, int &network_id);
+  bool select(int network_id);
   bool disconnect();
   bool reconnect();
   bool forget(int network_id);

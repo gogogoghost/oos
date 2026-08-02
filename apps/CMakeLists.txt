@@ -33,10 +33,18 @@ target_compile_options(oos_launcher_app PRIVATE -fno-exceptions -fno-rtti)
 target_link_libraries(oos_launcher_app PUBLIC
   oos_sdk_ui oos_app_model oos_window)
 
+add_library(oos_settings_app STATIC
+  settings/src/settings.cpp)
+target_include_directories(oos_settings_app PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/settings/include")
+target_compile_options(oos_settings_app PRIVATE -fno-exceptions -fno-rtti)
+target_link_libraries(oos_settings_app PUBLIC
+  oos_sdk_ui oos_app_model oos_system_settings oos_window)
+
 add_library(oos_systemui_app STATIC
   systemui/src/system_ui.cpp)
 target_include_directories(oos_systemui_app PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/systemui/include")
 target_compile_options(oos_systemui_app PRIVATE -fno-exceptions -fno-rtti)
 target_link_libraries(oos_systemui_app PUBLIC
-  oos_sdk_ui oos_compositor oos_window)
+  oos_sdk_ui oos_compositor oos_system_settings oos_window)

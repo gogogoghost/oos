@@ -18,7 +18,7 @@ mount_bind() {
   if is_mounted "$target_path"; then
     return 0
   fi
-  mount --bind "$source_path" "$target_path"
+  mount -o bind "$source_path" "$target_path"
   record_mount "$target_path"
 }
 
@@ -97,6 +97,9 @@ mount_bind_optional /vendor "$OOS_ROOTFS/vendor"
 mount_bind_optional /apex/com.android.runtime \
   "$OOS_ROOTFS/apex/com.android.runtime"
 mount_bind "$OOS_PERSIST_DIR" "$OOS_ROOTFS/data"
+mkdir -p "$OOS_ROOTFS/data/misc/wifi" "$OOS_ROOTFS/data/vendor/wifi"
+mount_bind_optional /data/misc/wifi "$OOS_ROOTFS/data/misc/wifi"
+mount_bind_optional /data/vendor/wifi "$OOS_ROOTFS/data/vendor/wifi"
 mount_bind "$OOS_RES_DIR" "$OOS_ROOTFS/opt/oos"
 mount_storage_optional "${OOS_INTERNAL_STORAGE:-/storage/emulated/0}" \
   "$OOS_ROOTFS/data/media/internal"

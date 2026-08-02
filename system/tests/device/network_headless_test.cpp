@@ -1,3 +1,4 @@
+#include "oos/device/service_provider.h"
 #include "oos/device/services.h"
 
 #include <chrono>
@@ -24,7 +25,8 @@ namespace {
 void usage(const char *program) {
   std::fprintf(stderr,
                "Usage:\n"
-               "  %s wifi status|scan [seconds]|networks\n"
+               "  %s wifi status|scan [seconds]|networks|enabled\n"
+               "  %s wifi power on|off\n"
                "  %s wifi cycle\n"
                "  %s wifi connect <ssid> open\n"
                "  %s wifi connect <ssid> wpa <psk>\n"
@@ -38,7 +40,7 @@ void usage(const char *program) {
                "  %s bluetooth gatt-cycle <address> [seconds]\n"
                "  %s bluetooth hold [seconds]\n",
                program, program, program, program, program, program, program,
-               program, program, program, program, program, program);
+               program, program, program, program, program, program, program);
 }
 
 int seconds(const char *text, int fallback) {
@@ -55,6 +57,32 @@ void printWifiStatus(const WifiStatus &status) {
 }
 
 int wifiCommand(const oos::device::Device &device, int argc, char **argv) {
+  if (argc >= 3 && !std::strcmp(argv[2], "enabled")) {
+    oos::device::ServiceProvider services(device);
+    bool enabled = false;
+    if (!services.wifiEnabled(enabled)) {
+      std::fprintf(stderr, "Wi-Fi state query failed: %s\n",
+                   services.lastError().c_str());
+      return 1;
+    }
+    std::printf("wifi_enabled=%d\n", enabled ? 1 : 0);
+    return 0;
+  }
+  if (argc == 4 && !std::strcmp(argv[2], "power")) {
+    const bool enable = !std::strcmp(argv[3], "on");
+    if (!enable && std::strcmp(argv[3], "off")) {
+      usage(argv[0]);
+      return 2;
+    }
+    oos::device::ServiceProvider services(device);
+    if (!services.wifiSetEnabled(enable)) {
+      std::fprintf(stderr, "Wi-Fi power command failed: %s\n",
+                   services.lastError().c_str());
+      return 1;
+    }
+    std::printf("wifi_enabled=%d\n", enable ? 1 : 0);
+    return 0;
+  }
   WifiManager wifi = oos::device::createWifiManager(device);
   if (!oos::device::initializeService(device, wifi)) {
     std::fprintf(stderr, "Wi-Fi initialization failed: %s\n",

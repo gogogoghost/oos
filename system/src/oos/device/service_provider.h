@@ -56,10 +56,13 @@ public:
   bool setVibrationAmplitude(uint8_t amplitude);
 
   bool wifiStatus(network::WifiStatus &status);
+  bool wifiEnabled(bool &enabled);
+  bool wifiSetEnabled(bool enabled);
   bool wifiScan(std::vector<network::WifiAccessPoint> &results, int wait_ms);
   bool wifiListNetworks(std::vector<network::WifiNetwork> &networks);
   bool wifiConnect(const std::string &ssid, network::WifiSecurity security,
                    const std::string &credential, int &network_id);
+  bool wifiSelect(int network_id);
   bool wifiDisconnect();
   bool wifiReconnect();
   bool wifiForget(int network_id);

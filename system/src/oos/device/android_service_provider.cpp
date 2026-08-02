@@ -1,13 +1,26 @@
 #include "oos/device/service_provider.h"
 
 #include "oos/device/services.h"
+#include "oos/platform/android_properties.h"
 
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <dlfcn.h>
+#include <sys/wait.h>
+#include <thread>
+#include <unistd.h>
 #include <utility>
 
 namespace oos::device {
 
 struct ServiceProvider::Impl {
   explicit Impl(const Device &device) : device(device) {}
+
+  ~Impl() {
+    if (legacy_wifi_hal)
+      dlclose(legacy_wifi_hal);
+  }
 
   bool ensureAudio() {
     if (!audio)
@@ -66,6 +79,126 @@ struct ServiceProvider::Impl {
     return false;
   }
 
+  bool wifiEndpointPresent() const {
+    return access(device.services().wifi_control_socket, F_OK) == 0;
+  }
+
+  bool wifiSupplicantRunning() const {
+    char state[PROPERTY_VALUE_MAX] = {};
+    property_get("init.svc.wpa_supplicant", state, "");
+    return std::strcmp(state, "running") == 0;
+  }
+
+  bool waitForWifiState(bool enabled, int timeout_seconds) {
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(timeout_seconds);
+    do {
+      const bool ready = wifiSupplicantRunning() && wifiEndpointPresent();
+      if (ready == enabled)
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    } while (std::chrono::steady_clock::now() < deadline);
+    error = enabled ? "Wi-Fi supplicant did not start"
+                    : "Wi-Fi supplicant did not stop";
+    return false;
+  }
+
+  template <typename Function>
+  bool resolveLegacyWifiFunction(Function &function, const char *name) {
+    function = reinterpret_cast<Function>(dlsym(legacy_wifi_hal, name));
+    if (function)
+      return true;
+    error = std::string("resolve ") + name + ": " + dlerror();
+    return false;
+  }
+
+  bool ensureLegacyWifiHal() {
+    if (legacy_wifi_hal)
+      return true;
+    legacy_wifi_hal =
+        dlopen("/system/lib/libhardware_legacy.so", RTLD_NOW | RTLD_LOCAL);
+    if (!legacy_wifi_hal) {
+      error = std::string("load libhardware_legacy.so: ") + dlerror();
+      return false;
+    }
+    if (resolveLegacyWifiFunction(legacy_wifi_driver_loaded,
+                                  "is_wifi_driver_loaded") &&
+        resolveLegacyWifiFunction(legacy_wifi_load_driver,
+                                  "wifi_load_driver") &&
+        resolveLegacyWifiFunction(legacy_wifi_unload_driver,
+                                  "wifi_unload_driver") &&
+        resolveLegacyWifiFunction(legacy_wifi_start_supplicant,
+                                  "wifi_start_supplicant") &&
+        resolveLegacyWifiFunction(legacy_wifi_stop_supplicant,
+                                  "wifi_stop_supplicant"))
+      return true;
+    dlclose(legacy_wifi_hal);
+    legacy_wifi_hal = nullptr;
+    return false;
+  }
+
+  bool setLegacyWifiEnabled(bool enabled) {
+    if (!ensureLegacyWifiHal())
+      return false;
+    if (enabled) {
+      if (!legacy_wifi_driver_loaded() && legacy_wifi_load_driver() != 0) {
+        error = "wifi_load_driver failed";
+        return false;
+      }
+      if (!wifiSupplicantRunning() && legacy_wifi_start_supplicant(0) != 0) {
+        error = "wifi_start_supplicant failed";
+        return false;
+      }
+      if (!waitForWifiState(true, 12))
+        return false;
+    } else {
+      wifi.reset();
+      property_set("ctl.stop", "dhcpcd_wlan0");
+      if (wifiSupplicantRunning() && legacy_wifi_stop_supplicant(0) != 0) {
+        error = "wifi_stop_supplicant failed";
+        return false;
+      }
+      if (!waitForWifiState(false, 8))
+        return false;
+      if (legacy_wifi_driver_loaded() && legacy_wifi_unload_driver() != 0) {
+        error = "wifi_unload_driver failed";
+        return false;
+      }
+    }
+    error.clear();
+    return true;
+  }
+
+  bool runWifiServiceCommand(bool enabled) {
+    const pid_t child = fork();
+    if (child < 0) {
+      error = "fork svc wifi: " + std::string(std::strerror(errno));
+      return false;
+    }
+    if (child == 0) {
+      if (device.descriptor().android_api >= 26) {
+        execl("/system/bin/cmd", "cmd", "wifi", "set-wifi-enabled",
+              enabled ? "enabled" : "disabled", static_cast<char *>(nullptr));
+      } else {
+        execl("/system/bin/svc", "svc", "wifi", enabled ? "enable" : "disable",
+              static_cast<char *>(nullptr));
+      }
+      _exit(127);
+    }
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0) {
+      if (errno == EINTR)
+        continue;
+      error = "wait for svc wifi: " + std::string(std::strerror(errno));
+      return false;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      error = "svc wifi command failed";
+      return false;
+    }
+    return true;
+  }
+
   bool ensureIp() {
     if (!ip)
       ip = std::make_unique<network::IpManager>("wlan0");
@@ -114,6 +247,12 @@ struct ServiceProvider::Impl {
   std::unique_ptr<network::IpManager> ip;
   std::unique_ptr<network::BluetoothManager> bluetooth;
   std::unique_ptr<oos::modem::ModemManager> modem;
+  void *legacy_wifi_hal = nullptr;
+  int (*legacy_wifi_driver_loaded)() = nullptr;
+  int (*legacy_wifi_load_driver)() = nullptr;
+  int (*legacy_wifi_unload_driver)() = nullptr;
+  int (*legacy_wifi_start_supplicant)(int) = nullptr;
+  int (*legacy_wifi_stop_supplicant)(int) = nullptr;
   std::string error;
 };
 
@@ -252,6 +391,40 @@ bool ServiceProvider::wifiStatus(network::WifiStatus &status) {
          impl_->finish(impl_->wifi->status(status), *impl_->wifi);
 }
 
+bool ServiceProvider::wifiEnabled(bool &enabled) {
+  enabled =
+      impl_->device.services().wifi_lifecycle == WifiLifecycle::LegacyHardware
+          ? impl_->wifiSupplicantRunning() && impl_->wifiEndpointPresent()
+          : impl_->wifiEndpointPresent();
+  impl_->error.clear();
+  return true;
+}
+
+bool ServiceProvider::wifiSetEnabled(bool enabled) {
+  if (impl_->device.services().wifi_lifecycle == WifiLifecycle::LegacyHardware)
+    return impl_->setLegacyWifiEnabled(enabled);
+  if (impl_->wifiEndpointPresent() == enabled) {
+    impl_->error.clear();
+    return true;
+  }
+  if (!enabled)
+    impl_->wifi.reset();
+  if (!impl_->runWifiServiceCommand(enabled))
+    return false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(enabled ? 12 : 8);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (impl_->wifiEndpointPresent() == enabled) {
+      impl_->error.clear();
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  impl_->error = enabled ? "Wi-Fi supplicant did not start"
+                         : "Wi-Fi supplicant did not stop";
+  return false;
+}
+
 bool ServiceProvider::wifiScan(std::vector<network::WifiAccessPoint> &results,
                                int wait_ms) {
   return impl_->ensureWifi() &&
@@ -272,6 +445,11 @@ bool ServiceProvider::wifiConnect(const std::string &ssid,
          impl_->finish(
              impl_->wifi->connect(ssid, security, credential, network_id),
              *impl_->wifi);
+}
+
+bool ServiceProvider::wifiSelect(int network_id) {
+  return impl_->ensureWifi() &&
+         impl_->finish(impl_->wifi->select(network_id), *impl_->wifi);
 }
 
 bool ServiceProvider::wifiDisconnect() {

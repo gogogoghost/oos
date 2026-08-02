@@ -254,6 +254,17 @@ int main(int argc, char **argv) {
                 database->exec("CREATE TABLE sample(id INTEGER PRIMARY KEY);"),
             database ? database->lastError().c_str() : "database open");
 
+  database.reset();
+  success &= check(repository.uninstall("cc.jaxy.oos.test"),
+                   repository.lastError().c_str());
+  records.clear();
+  success &= check(repository.list(records) && records.empty(),
+                   "uninstalled application is absent from registry");
+  success &= check(access(launch.data_directory.c_str(), F_OK) != 0,
+                   "uninstall removes application data");
+  success &= check(access(launch.cache_directory.c_str(), F_OK) != 0,
+                   "uninstall removes extracted executable cache");
+
   std::filesystem::remove_all(root);
   if (success)
     std::fprintf(stderr, "PASS: ZIP registry and app storage\n");

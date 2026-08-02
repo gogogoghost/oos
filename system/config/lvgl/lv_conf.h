@@ -25,13 +25,19 @@
 #define LV_DRAW_SW_CIRCLE_CACHE_SIZE 8
 #define LV_USE_DRAW_SW_COMPLEX_GRADIENTS 0
 
-#define LV_FONT_MONTSERRAT_10 1
-#define LV_FONT_MONTSERRAT_12 1
-#define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_20 1
-#define LV_FONT_MONTSERRAT_36 1
-#define LV_FONT_DEFAULT &lv_font_montserrat_14
+#define LV_FONT_MONTSERRAT_14 0
+#define LV_FONT_UNSCII_8 0
+#define LV_FONT_CUSTOM_DECLARE extern const lv_font_t *oos_lvgl_default_font;
+#define LV_FONT_DEFAULT oos_lvgl_default_font
 #define LV_USE_FONT_COMPRESSED 0
+
+#define LV_USE_FS_STDIO 1
+#define LV_FS_STDIO_LETTER 'A'
+#define LV_FS_STDIO_PATH ""
+#define LV_USE_TINY_TTF 1
+#define LV_TINY_TTF_FILE_SUPPORT 1
+#define LV_TINY_TTF_CACHE_GLYPH_CNT 16
+#define LV_TINY_TTF_CACHE_KERNING_CNT 32
 
 #define LV_USE_THEME_DEFAULT 1
 #define LV_THEME_DEFAULT_DARK 1

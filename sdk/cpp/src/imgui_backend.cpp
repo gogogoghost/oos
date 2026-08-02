@@ -1,6 +1,7 @@
 #include "oos/sdk/ui/imgui_backend.h"
 
 #include "oos/runtime/graphics_host.h"
+#include "oos/sdk/ui/fonts.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -87,6 +88,15 @@ public:
     }
     ImGui::SetCurrentContext(context);
     ImGuiIO &io = ImGui::GetIO();
+    const std::string system_font = fonts::regularPath();
+    if (system_font.empty() ||
+        !io.Fonts->AddFontFromFileTTF(system_font.c_str(), 14.0f)) {
+      error = system_font.empty() ? "no readable system UI font was found"
+                                  : "load ImGui system font failed";
+      ImGui::DestroyContext(context);
+      context = nullptr;
+      return false;
+    }
     io.BackendPlatformName = "oos_input";
     io.BackendRendererName = "oos_graphics_host";
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset |

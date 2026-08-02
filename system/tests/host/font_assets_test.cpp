@@ -23,6 +23,13 @@ bool writeAll(int fd, const char *bytes, size_t size) {
 } // namespace
 
 int main() {
+  oos::resources::FontAssetService platform_fonts;
+  uint64_t platform_size = 0;
+  assert(platform_fonts.fileSize(oos::resources::FontRole::UiProportional,
+                                 platform_size) ==
+         oos::resources::FontAssetStatus::Ok);
+  assert(platform_size > 0);
+
   char root_template[] = "/tmp/oos-font-assets.XXXXXX";
   const char *root = mkdtemp(root_template);
   assert(root);

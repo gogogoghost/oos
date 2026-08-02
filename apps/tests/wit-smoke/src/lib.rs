@@ -118,9 +118,9 @@ fn mocked() {
 
     let status = wifi::get_status().unwrap();
     assert_eq!(status.ssid, "OOS Mock Network");
-    assert_eq!(wifi::scan(1).unwrap().len(), 1);
+    assert_eq!(wifi::scan(1).unwrap().len(), 3);
     assert_eq!(wifi::list_networks().unwrap().len(), 1);
-    assert_eq!(wifi::connect("ssid", wifi::Security::Open, "").unwrap(), 1);
+    assert_eq!(wifi::connect("ssid", wifi::Security::Open, "").unwrap(), 2);
     wifi::disconnect().unwrap();
     wifi::reconnect().unwrap();
     wifi::forget(1).unwrap();
@@ -188,6 +188,7 @@ fn permission_filtered() {
 impl AppLifecycle for App {
     fn init() -> Result<(), ErrorCode> {
         assert_eq!(runtime::abi_version(), oos_app::ABI_VERSION);
+        runtime::set_status_bar_style(0x12_34_56, runtime::StatusBarIconTheme::Dark)?;
         let font = oos_app::font_assets::load(FontRole::UiProportional).unwrap();
         assert!(font.starts_with(b"OTTO"));
         unavailable(oos_app::font_assets::load(FontRole::UiMonospace));
@@ -296,13 +297,11 @@ impl AppLifecycle for App {
                 .unwrap(),
                 "null"
             );
-            assert!(system_services::request(
-                "settings",
-                "get",
-                r#"{"name":"wit-smoke"}"#,
-            )
-            .unwrap()
-            .contains(r#""ok":true"#));
+            assert!(
+                system_services::request("settings", "get", r#"{"name":"wit-smoke"}"#,)
+                    .unwrap()
+                    .contains(r#""ok":true"#)
+            );
             runtime::log(runtime::LogLevel::Info, "system services passed");
             assert_eq!(
                 (descriptor.primary_width, descriptor.primary_height),

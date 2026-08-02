@@ -23,7 +23,12 @@ b2g48 GATT-client protocol exposed by `bluetoothd`.
 The public APIs are:
 
 - `oos::network::WifiManager`: status, scan, saved networks, open/WPA-PSK
-  connection, disconnect/reconnect, forget, and save.
+  connection, select, disconnect/reconnect, forget, and save.
+- `oos::device::ServiceProvider`: device-neutral Wi-Fi radio lifecycle and the
+  manager operations consumed by Settings. Nokia 8110 uses the stock
+  `libhardware_legacy.so` driver/supplicant lifecycle exported for Gecko;
+  Android 10 uses `cmd wifi`. Both wait for the configured supplicant control
+  endpoint before exposing the manager.
 - `oos::network::IpManager`: current IPv4 route/DNS, DHCP, and static IPv4.
 - `oos::network::BluetoothManager`: adapter lifecycle, classic discovery,
   pairing commands, HID/HFP/A2DP profile commands, BLE scanning, and a direct
@@ -69,13 +74,14 @@ production UI must pass credentials through an in-process API instead.
 
 ## Required Daily-Use Surface
 
-The current layer establishes the transport and controller baseline, but it is
-not yet a complete KaiOS connectivity replacement. Production OOS still needs:
+Settings now covers the daily Open/WPA-PSK Wi-Fi lifecycle: radio power,
+scanning, connection, saved-network selection, disconnect, forget, and DHCP.
+The layer is not yet a complete KaiOS connectivity replacement. Production OOS
+still needs:
 
-- Wi-Fi radio and supplicant startup/shutdown, asynchronous
-  association/authentication events, retry policy, captive portal detection,
-  persisted network priority, WPS, enterprise EAP, Passpoint, power saving,
-  roaming, hotspot and tethering;
+- asynchronous association/authentication events, retry policy, captive portal
+  detection, persisted network priority, WPS, enterprise EAP, Passpoint, power
+  saving, roaming, hotspot and tethering;
 - netd resolver programming for per-network DNS and IPv6 provisioning instead
   of relying only on legacy Android properties;
 - interactive Bluetooth PIN and SSP confirmation, durable bond state, local

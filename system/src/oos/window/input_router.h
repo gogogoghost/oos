@@ -28,12 +28,13 @@ class InputRouter {
 public:
   InputRouter(SystemInputTarget &system_ui, ApplicationInputTarget &app);
 
+  void setApplicationTarget(ApplicationInputTarget &app);
   bool dispatch(const input::KeyEvent &event, int64_t monotonic_us);
   const std::string &lastError() const;
 
 private:
   SystemInputTarget &system_ui_;
-  ApplicationInputTarget &app_;
+  ApplicationInputTarget *app_;
   std::string error_;
 };
 

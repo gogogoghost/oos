@@ -4,13 +4,28 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "oos/apps/permissions.h"
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/runtime/native_app_manager.h"
-#include "oos/apps/permissions.h"
+#include "oos/ui/status_bar_appearance.h"
 
 namespace {
+
+class FakeStatusBar final : public oos::ui::StatusBarAppearanceController {
+public:
+  void setStatusBarAppearance(oos::ui::StatusBarAppearance next) override {
+    appearance = next;
+    ++updates;
+  }
+  oos::ui::StatusBarAppearance statusBarAppearance() const override {
+    return appearance;
+  }
+
+  oos::ui::StatusBarAppearance appearance;
+  size_t updates = 0;
+};
 
 class FakeGraphics final : public oos::runtime::GraphicsHost {
 public:
@@ -215,6 +230,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   FakeGraphics graphics;
+  FakeStatusBar status_bar;
   oos::runtime::NativeAppManager apps(graphics);
   oos::runtime::NativeAppLaunchOptions launcher_launch;
   launcher_launch.module_path = argv[1];
@@ -256,10 +272,17 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppLaunchOptions smoke_launch;
   smoke_launch.module_path = argv[2];
   smoke_launch.font_directory = argv[3];
+  smoke_launch.status_bar = &status_bar;
   if (!wit_smoke.load("wit-smoke", smoke_launch) ||
       !wit_smoke.activate("wit-smoke") || !wit_smoke.render(1'500'000)) {
     std::fprintf(stderr, "WIT device API smoke failed: %s\n",
                  wit_smoke.lastError());
+    return 1;
+  }
+  if (status_bar.updates != 1 ||
+      status_bar.appearance !=
+          (oos::ui::StatusBarAppearance{0x123456, true})) {
+    std::fprintf(stderr, "WIT status bar appearance call failed\n");
     return 1;
   }
   wit_smoke.shutdown();
@@ -278,6 +301,7 @@ int main(int argc, char **argv) {
   mock_launch.data_directory = storage_root;
   mock_launch.system_data_root = storage_root;
   mock_launch.font_directory = argv[3];
+  mock_launch.status_bar = &status_bar;
   const std::string internal_media = std::string(storage_root) + "/internal";
   const std::string removable_media = std::string(storage_root) + "/removable";
   if (!std::filesystem::create_directories(internal_media) ||
@@ -288,9 +312,9 @@ int main(int argc, char **argv) {
   mock_launch.internal_media_directory = internal_media.c_str();
   mock_launch.removable_media_directory = removable_media.c_str();
   const std::vector<std::string> mock_permissions = {
-      "audio-capture", "camera",       "power",     "wifi-manage",
-      "bluetooth",     "mobileconnection", "device-storage:sdcard",
-      "system"};
+      "audio-capture",         "camera",    "power",
+      "wifi-manage",           "bluetooth", "mobileconnection",
+      "device-storage:sdcard", "system"};
   mock_launch.service_permission_mask =
       oos::apps::deviceServicePermissionMask(mock_permissions);
   mock_launch.enforce_service_permissions = true;
@@ -315,7 +339,10 @@ int main(int argc, char **argv) {
   denied_smoke.shutdown();
   std::filesystem::remove_all(storage_root);
   std::printf("WAMR WIT local mock and permission filtering passed\n");
-  return graphics.frames == 5 && resident_textures == 3 &&
+  return status_bar.updates == 3 &&
+                 status_bar.appearance ==
+                     (oos::ui::StatusBarAppearance{0x123456, true}) &&
+                 graphics.frames == 5 && resident_textures == 3 &&
                  graphics.textures.empty() && graphics.texture_updates > 0 &&
                  graphics.gles_frames == 3
              ? 0

@@ -14,6 +14,10 @@ namespace oos::apps {
 class AppRepository;
 }
 
+namespace oos::ui {
+class StatusBarAppearanceController;
+}
+
 namespace oos::runtime {
 
 class GraphicsHost;
@@ -25,6 +29,7 @@ struct WasmAppOptions {
   std::string data_directory;
   std::string system_data_root;
   apps::AppRepository *app_repository = nullptr;
+  ui::StatusBarAppearanceController *status_bar = nullptr;
   std::string internal_media_directory = "/data/media/internal";
   std::string removable_media_directory = "/data/media/removable";
   std::string font_directory = "/opt/oos/share/fonts";

@@ -17,12 +17,16 @@ font assets, device discovery, services, and storage, and exports the
 application lifecycle interface. `wit-bindgen` dead-strips unused core-Wasm
 imports, so an application pays only for the capabilities it calls.
 
+`oos_app::set_status_bar_style(rgb, dark_icons)` configures the calling
+application session's immersive status bar. The host restores that style when
+the session returns to the foreground.
+
 `font-assets.load` returns an owned font byte vector for a fixed semantic role.
 It does not expose host paths. Rust egui applications can call
 `oos_egui::install_system_fonts`; the WIT result allocation is moved into egui
-without another Guest copy. `ui-proportional` is guaranteed by the packaged
-OOS runtime. Optional monospace and emoji roles return `unavailable` until a
-device font pack provides them.
+without another Guest copy. `ui-proportional` is guaranteed by the OOS host
+and resolves to its platform system font. Optional monospace and emoji roles
+return `unavailable` until a device font configuration provides them.
 
 Rust applications implement `oos_app::App` and use the generated export macro:
 

@@ -20,6 +20,7 @@ from a non-blocking device status monitor.
 ## Repository Layout
 
 - `apps/launcher`: the production LVGL Launcher application and its assets.
+- `apps/settings`: the production LVGL device and application settings UI.
 - `apps/systemui`: status bar, notifications, lock screen, and global overlays.
 - `apps/tests`: framework integration and WIT regression applications.
 - `sdk`: versioned WIT interfaces and reusable egui/LVGL/ImGui backends.
@@ -106,7 +107,7 @@ The hardware test runners remain device-specific:
 See [docs/device-platform.md](docs/device-platform.md),
 [docs/graphics.md](docs/graphics.md), [docs/input.md](docs/input.md),
 [docs/system-ui.md](docs/system-ui.md), [docs/ui-icons.md](docs/ui-icons.md),
-and the device READMEs for the common
+[docs/settings.md](docs/settings.md), and the device READMEs for the common
 hardware API, system icon policy, and verified platform behavior.
 
 ## Packaging

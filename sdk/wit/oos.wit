@@ -25,6 +25,8 @@ interface types {
 
 /// Process-safe services that every OOS application can import.
 interface runtime {
+  use types.{error-code};
+
   enum log-level {
     debug,
     info,
@@ -32,9 +34,20 @@ interface runtime {
     error,
   }
 
+  enum status-bar-icon-theme {
+    light,
+    dark,
+  }
+
   abi-version: func() -> u32;
   wall-clock-minutes: func() -> u32;
   log: func(level: log-level, message: string);
+  /// Sets this application's retained status-bar appearance. Only the active
+  /// application's value is applied. `background-rgb` is 0x00RRGGBB.
+  set-status-bar-style: func(
+    background-rgb: u32,
+    icons: status-bar-icon-theme,
+  ) -> result<_, error-code>;
 }
 
 /// Retained texture and indexed-triangle drawing for the application surface.

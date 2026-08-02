@@ -462,6 +462,58 @@ bool AppRepository::list(std::vector<AppRecord> &records) {
   }
 }
 
+bool AppRepository::uninstall(const char *app_id) {
+  error_.clear();
+  AppRecord record;
+  if (!resolve(app_id, record))
+    return false;
+  if (!impl_->database.exec("BEGIN IMMEDIATE;")) {
+    error_ = impl_->database.lastError();
+    return false;
+  }
+  bool success = false;
+  do {
+    constexpr const char *tables[] = {
+        "app_permissions", "app_handlers", "app_roles",
+        "app_state",       "app_versions", "applications",
+    };
+    bool rows_removed = true;
+    for (const char *table : tables) {
+      storage::SqliteStatement statement;
+      const std::string sql =
+          std::string("DELETE FROM ") + table + " WHERE app_id=?;";
+      if (!impl_->database.prepare(sql.c_str(), statement) ||
+          !statement.bindText(1, record.manifest.id) ||
+          statement.step() != storage::SqliteStatement::Step::Done) {
+        rows_removed = false;
+        break;
+      }
+    }
+    if (!rows_removed)
+      break;
+    success = impl_->database.exec("COMMIT;");
+  } while (false);
+  if (!success) {
+    impl_->database.exec("ROLLBACK;");
+    error_ = impl_->database.lastError();
+    return false;
+  }
+
+  const std::string package_root =
+      join(join(data_root_, "packages"), record.manifest.id);
+  const std::string cache_root =
+      join(join(data_root_, "cache/aot"), record.package_digest);
+  const std::string user_data = join(
+      join(join(join(data_root_, "users"), "0"), "wasm"), record.manifest.id);
+  if (!storage::removeTree(package_root, error_) ||
+      !storage::removeTree(cache_root, error_) ||
+      !storage::removeTree(user_data, error_)) {
+    error_ = "application registry removed, but cleanup failed: " + error_;
+    return false;
+  }
+  return true;
+}
+
 bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
   AppRecord record;
   if (!resolve(app_id, record))

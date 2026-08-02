@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -29,6 +30,48 @@ std::string temporaryPath(const std::string &path) {
   char pid[32] = {};
   std::snprintf(pid, sizeof(pid), "%lu", static_cast<unsigned long>(getpid()));
   return path + ".tmp." + pid;
+}
+
+bool removeTreeEntry(const std::string &path, std::string &error) {
+  struct stat status = {};
+  if (lstat(path.c_str(), &status) != 0) {
+    if (errno == ENOENT)
+      return true;
+    error = "lstat " + path + ": " + std::strerror(errno);
+    return false;
+  }
+  if (!S_ISDIR(status.st_mode) || S_ISLNK(status.st_mode)) {
+    if (unlink(path.c_str()) == 0 || errno == ENOENT)
+      return true;
+    error = "unlink " + path + ": " + std::strerror(errno);
+    return false;
+  }
+
+  DIR *directory = opendir(path.c_str());
+  if (!directory) {
+    error = "opendir " + path + ": " + std::strerror(errno);
+    return false;
+  }
+  bool success = true;
+  while (dirent *entry = readdir(directory)) {
+    if (std::strcmp(entry->d_name, ".") == 0 ||
+        std::strcmp(entry->d_name, "..") == 0)
+      continue;
+    if (!removeTreeEntry(path + "/" + entry->d_name, error)) {
+      success = false;
+      break;
+    }
+  }
+  if (closedir(directory) != 0 && success) {
+    error = "closedir " + path + ": " + std::strerror(errno);
+    success = false;
+  }
+  if (!success)
+    return false;
+  if (rmdir(path.c_str()) == 0 || errno == ENOENT)
+    return true;
+  error = "rmdir " + path + ": " + std::strerror(errno);
+  return false;
 }
 
 } // namespace
@@ -151,6 +194,14 @@ bool copyFileAtomic(const std::string &source, const std::string &destination,
   if (!readFile(source, bytes, 256 * 1024 * 1024, error))
     return false;
   return writeFileAtomic(destination, bytes.data(), bytes.size(), mode, error);
+}
+
+bool removeTree(const std::string &path, std::string &error) {
+  if (path.empty() || path == "/" || path == "." || path == "..") {
+    error = "refusing to remove an unsafe path";
+    return false;
+  }
+  return removeTreeEntry(path, error);
 }
 
 } // namespace oos::storage

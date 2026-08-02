@@ -2,9 +2,10 @@
 
 ## First-Version Scope
 
-OOS keeps up to three native applications resident in one process through
-WAMR 2.4.4. Exactly one is active and receives input and frame callbacks;
-background instances retain their isolated WASM/UI state without rendering.
+OOS keeps native applications resident in one process through WAMR 2.4.4.
+Exactly one application session is active and receives input and frame
+callbacks; background instances retain their isolated WASM/UI state and
+dedicated compositor layer without rendering.
 The host owns display lifecycle, EGL/GLES, HWC, key devices, clocks, and phone
 services. A guest can only reach interfaces in the versioned
 `oos:platform@0.1.0` WIT package.
@@ -37,10 +38,11 @@ The generated core-Wasm export names are versioned, for example
 `oos:platform/lifecycle@0.1.0#frame`. Applications use generated bindings and
 must not depend on those lowered names directly.
 
-`NativeAppManager` loads, activates, removes, and shuts down a maximum of three
-resident modules. All instances share one process-level WAMR runtime and GPU
-host but have separate linear memory and texture namespaces. The manager runs
-on the OOS event-loop thread because WAMR threads are disabled. A non-zero
+`ApplicationSessionManager` applies the same lifecycle to built-in and WAMR
+applications. Every resident module owns a `WasmApp` and an independent
+compositor `GraphicsHost`, so linear memory, UI state, retained draw state, and
+texture namespaces survive foreground switches without colliding. The manager
+runs on the OOS event-loop thread because WAMR threads are disabled. A non-zero
 return, trap, missing export, invalid pointer, invalid draw range, or resource
 limit violation fails that app call instead of passing untrusted data to GLES.
 
@@ -68,6 +70,14 @@ buffers, depth/stencil state, and one fixed-record command batch per frame for
 game-engine backends. Both paths present the host's retained target, so the
 guest never maps a framebuffer or receives a native GPU handle. See
 [graphics.md](graphics.md) for the complete format and composition contract.
+
+The WIT `runtime` interface also exposes
+`set-status-bar-style(background-rgb, icons)`. The color is strict
+`0x00RRGGBB`; the icon theme is `light` or `dark`. The call updates retained
+session chrome rather than SystemUI directly, so the value is restored on
+activation and cannot leak from a hidden application. This is an additive ABI
+3 import: applications that do not import it remain compatible with the newer
+host.
 
 Limits are part of the interface: 2048-pixel texture dimensions, 16 MiB per
 upload, 65,535 vertices, 196,605 indices, and 4,096 draw commands per
@@ -104,10 +114,11 @@ that allocation without an intermediate host byte vector. It is exposed only
 when a granted permission starts with `device-storage:`.
 
 The separate unprivileged `font-assets` interface maps semantic roles to fixed
-files below `/opt/oos/share/fonts`; it never accepts a path from the Guest.
+platform fonts; it never accepts a path from the Guest.
 Loading allocates the Canonical ABI result once and reads directly into Guest
-linear memory. The packaged `ui-proportional.otf` is shared by applications,
-so framework apps do not need to embed the same font in every ZIP.
+linear memory. The `ui-proportional` role resolves to the same system Roboto
+font used by native OOS UI, so framework apps do not need to embed it in every
+ZIP.
 
 The `system-services` interface is a trusted JSON policy broker for SystemUI.
 It is registered only for applications granted `system`; ordinary WAMR apps do

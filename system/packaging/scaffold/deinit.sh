@@ -55,6 +55,8 @@ fi
 status=0
 unmount_if_mounted "$OOS_ROOTFS/data/media/removable" || status=1
 unmount_if_mounted "$OOS_ROOTFS/data/media/internal" || status=1
+unmount_if_mounted "$OOS_ROOTFS/data/vendor/wifi" || status=1
+unmount_if_mounted "$OOS_ROOTFS/data/misc/wifi" || status=1
 unmount_if_mounted "$OOS_ROOTFS/opt/oos" || status=1
 unmount_if_mounted "$OOS_ROOTFS/data" || status=1
 unmount_if_mounted "$OOS_ROOTFS/apex/com.android.runtime" || status=1

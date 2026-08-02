@@ -82,6 +82,7 @@ bool NativeAppManager::load(const char *id,
   wasm_options.system_data_root =
       options.system_data_root ? options.system_data_root : "";
   wasm_options.app_repository = options.app_repository;
+  wasm_options.status_bar = options.status_bar;
   wasm_options.internal_media_directory =
       options.internal_media_directory ? options.internal_media_directory : "";
   wasm_options.removable_media_directory =

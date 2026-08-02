@@ -1,5 +1,7 @@
 #include "oos/sdk/ui/lvgl_backend.h"
 
+#include "oos/sdk/ui/fonts.h"
+
 #include "oos/runtime/graphics_host.h"
 
 #include <algorithm>
@@ -117,8 +119,14 @@ public:
       error = "LVGL surface dimensions are invalid";
       return false;
     }
-    if (g_lvgl_users == 0)
+    if (g_lvgl_users == 0) {
       lv_init();
+      if (!fonts::initialize()) {
+        error = fonts::lastError();
+        lv_deinit();
+        return false;
+      }
+    }
     ++g_lvgl_users;
     lv_started = true;
 
@@ -190,8 +198,10 @@ public:
     if (lv_started) {
       if (g_lvgl_users > 0)
         --g_lvgl_users;
-      if (g_lvgl_users == 0)
+      if (g_lvgl_users == 0) {
+        fonts::shutdown();
         lv_deinit();
+      }
       if (g_lvgl_users == 0)
         g_last_tick_us = 0;
       lv_started = false;

@@ -14,6 +14,7 @@ bool writeFileAtomic(const std::string &path, const uint8_t *data, size_t size,
                      uint32_t mode, std::string &error);
 bool copyFileAtomic(const std::string &source, const std::string &destination,
                     uint32_t mode, std::string &error);
+bool removeTree(const std::string &path, std::string &error);
 std::string parentPath(const std::string &path);
 
 } // namespace oos::storage

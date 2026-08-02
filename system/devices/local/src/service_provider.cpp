@@ -1,5 +1,6 @@
 #include "oos/device/service_provider.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace oos::device {
@@ -10,6 +11,13 @@ struct ServiceProvider::Impl {
 
   const Device &device;
   std::string error;
+  bool wifi_enabled = true;
+  bool wifi_connected = true;
+  int wifi_network_id = 1;
+  int next_wifi_network_id = 2;
+  std::string wifi_ssid = "OOS Mock Network";
+  std::vector<network::WifiNetwork> wifi_networks = {
+      {1, "OOS Mock Network", "02:00:00:00:00:01", "[CURRENT]"}};
 };
 
 ServiceProvider::ServiceProvider(const Device &device)
@@ -81,33 +89,100 @@ bool ServiceProvider::supportsAmplitudeControl() { return true; }
 bool ServiceProvider::setVibrationAmplitude(uint8_t) { return true; }
 
 bool ServiceProvider::wifiStatus(network::WifiStatus &status) {
-  status = {"COMPLETED", "OOS Mock Network", "02:00:00:00:00:01", "192.0.2.2",
-            1};
+  if (!impl_->wifi_enabled) {
+    impl_->error = "Wi-Fi is disabled";
+    return false;
+  }
+  status = impl_->wifi_connected
+               ? network::WifiStatus{"COMPLETED", impl_->wifi_ssid,
+                                     "02:00:00:00:00:01", "192.0.2.2",
+                                     impl_->wifi_network_id}
+               : network::WifiStatus{"DISCONNECTED", "", "", "", -1};
+  return true;
+}
+
+bool ServiceProvider::wifiEnabled(bool &enabled) {
+  enabled = impl_->wifi_enabled;
+  return true;
+}
+
+bool ServiceProvider::wifiSetEnabled(bool enabled) {
+  impl_->wifi_enabled = enabled;
+  if (!enabled)
+    impl_->wifi_connected = false;
   return true;
 }
 
 bool ServiceProvider::wifiScan(std::vector<network::WifiAccessPoint> &results,
                                int) {
-  results = {{"02:00:00:00:00:01", 2412, -42, "[WPA2-PSK-CCMP][ESS]",
-              "OOS Mock Network"}};
+  if (!impl_->wifi_enabled) {
+    impl_->error = "Wi-Fi is disabled";
+    return false;
+  }
+  results = {
+      {"02:00:00:00:00:01", 2412, -42, "[WPA2-PSK-CCMP][ESS]",
+       "OOS Mock Network"},
+      {"02:00:00:00:00:02", 2437, -58, "[WPA2-PSK-CCMP][ESS]", "Orange Lab"},
+      {"02:00:00:00:00:03", 2462, -71, "[ESS]", "橙子实验室访客网络"}};
   return true;
 }
 
 bool ServiceProvider::wifiListNetworks(
     std::vector<network::WifiNetwork> &networks) {
-  networks = {{1, "OOS Mock Network", "02:00:00:00:00:01", "[CURRENT]"}};
+  networks = impl_->wifi_networks;
   return true;
 }
 
-bool ServiceProvider::wifiConnect(const std::string &, network::WifiSecurity,
-                                  const std::string &, int &network_id) {
-  network_id = 1;
+bool ServiceProvider::wifiConnect(const std::string &ssid,
+                                  network::WifiSecurity, const std::string &,
+                                  int &network_id) {
+  if (!impl_->wifi_enabled)
+    return false;
+  network_id = impl_->next_wifi_network_id++;
+  impl_->wifi_network_id = network_id;
+  impl_->wifi_ssid = ssid;
+  impl_->wifi_connected = true;
+  impl_->wifi_networks.push_back({network_id, ssid, "any", "[CURRENT]"});
   return true;
 }
 
-bool ServiceProvider::wifiDisconnect() { return true; }
-bool ServiceProvider::wifiReconnect() { return true; }
-bool ServiceProvider::wifiForget(int) { return true; }
+bool ServiceProvider::wifiSelect(int network_id) {
+  if (!impl_->wifi_enabled || network_id < 0)
+    return false;
+  const auto network =
+      std::find_if(impl_->wifi_networks.begin(), impl_->wifi_networks.end(),
+                   [&](const network::WifiNetwork &candidate) {
+                     return candidate.id == network_id;
+                   });
+  if (network == impl_->wifi_networks.end())
+    return false;
+  impl_->wifi_network_id = network_id;
+  impl_->wifi_ssid = network->ssid;
+  impl_->wifi_connected = true;
+  return true;
+}
+
+bool ServiceProvider::wifiDisconnect() {
+  impl_->wifi_connected = false;
+  return true;
+}
+bool ServiceProvider::wifiReconnect() {
+  impl_->wifi_connected = impl_->wifi_enabled;
+  return impl_->wifi_enabled;
+}
+bool ServiceProvider::wifiForget(int network_id) {
+  if (impl_->wifi_network_id == network_id) {
+    impl_->wifi_network_id = -1;
+    impl_->wifi_connected = false;
+  }
+  impl_->wifi_networks.erase(
+      std::remove_if(impl_->wifi_networks.begin(), impl_->wifi_networks.end(),
+                     [&](const network::WifiNetwork &network) {
+                       return network.id == network_id;
+                     }),
+      impl_->wifi_networks.end());
+  return true;
+}
 bool ServiceProvider::wifiSaveConfiguration() { return true; }
 
 bool ServiceProvider::ipStatus(network::IpConfiguration &configuration) {

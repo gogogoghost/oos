@@ -26,6 +26,8 @@ class FontAssetService {
 public:
   static constexpr uint64_t kMaximumFontBytes = 4 * 1024 * 1024;
 
+  // The default root falls back to the platform system font. Explicit roots
+  // remain isolated for tests and application-specific font packs.
   explicit FontAssetService(std::string root = "/opt/oos/share/fonts");
 
   FontAssetStatus fileSize(FontRole role, uint64_t &size);

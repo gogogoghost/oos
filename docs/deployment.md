@@ -24,7 +24,6 @@ oos/
 ├── res -> res-1.0.0
 ├── res-1.0.0/
 │   ├── bin/oos
-│   ├── share/fonts/ui-proportional.otf
 │   ├── share/licenses/oos/
 │   ├── manifest.env
 │   ├── SHA256SUMS
@@ -35,6 +34,12 @@ oos/
 `/data/oos` is the persistent root. `init.sh` bind-mounts it at
 `rootfs/data`, mounts the active resource at `rootfs/opt/oos`, and mounts the
 stock `/system`, `/dev`, `/proc`, `/sys`, optional `/vendor`, and Runtime APEX.
+The stock Wi-Fi state directories (`/data/misc/wifi` and
+`/data/vendor/wifi`) are rebound inside the persistent `/data` view so the
+device-specific supplicant control socket remains reachable from the chroot.
+Wi-Fi clients place their unique reply sockets under the already shared
+`/dev/socket` namespace, so the host supplicant can resolve them without an
+additional data-directory bind.
 Internal storage and the first mounted TF-card candidate are exposed under
 `/data/media`; application databases and packages stay on `/data/oos`.
 
@@ -77,12 +82,18 @@ su
 mkdir -p /data/local/tmp/oos-install
 cd /data/local/tmp/oos-install
 tar -xzf ../oos-scaffold-nokia-2780-flip.tgz
-tar -xzf ../oos-res-nokia-2780-flip-1.0.0.tgz
 cd oos
+tar -xzf ../../oos-res-nokia-2780-flip-1.0.0.tgz
 ./activate-res.sh 1.0.0
 ./init.sh
 ./start.sh
 ```
+
+The resource archive contains `res-VERSION` rather than another `oos`
+directory, so it must be extracted from inside the scaffold directory. On
+older systems such as the Nokia 8110 whose stock `tar` cannot invoke `gunzip`,
+remove the gzip layer on the host, push the resulting tar, and use `tar -xf` in
+the same directory.
 
 On a device where `adb shell` is already root, omit `su`. Archive extraction
 must preserve the `res` symbolic link. `start.sh` calls `init.sh` itself, so the

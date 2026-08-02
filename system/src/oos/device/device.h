@@ -49,6 +49,11 @@ enum class CapabilityState : uint8_t {
   Validated,
 };
 
+enum class WifiLifecycle : uint8_t {
+  AndroidFramework,
+  LegacyHardware,
+};
+
 struct DeviceDescriptor {
   const char *id = "";
   const char *manufacturer = "";
@@ -72,6 +77,7 @@ struct ServiceConfiguration {
   // Test backends may expose deterministic WIT service data without starting
   // platform HAL managers. Production device configurations leave this false.
   bool mock_hardware = false;
+  WifiLifecycle wifi_lifecycle = WifiLifecycle::AndroidFramework;
 };
 
 struct DeviceInitOptions {

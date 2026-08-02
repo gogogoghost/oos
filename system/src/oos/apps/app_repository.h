@@ -42,6 +42,7 @@ public:
   bool resolve(const char *app_id, AppRecord &record);
   bool prepareLaunch(const char *app_id, AppLaunch &launch);
   bool list(std::vector<AppRecord> &records);
+  bool uninstall(const char *app_id);
 
   const std::string &dataRoot() const { return data_root_; }
   const std::string &lastError() const { return error_; }

@@ -109,6 +109,7 @@ target_link_libraries(oos PRIVATE
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 
 add_library(oos_nokia_8110_network STATIC
+  "${CMAKE_SOURCE_DIR}/src/oos/network/supplicant_text.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/network/wifi_manager.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/network/ip_manager.cpp"
   "${CMAKE_SOURCE_DIR}/src/oos/network/bluetooth_manager.cpp")
