@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -9,6 +10,7 @@
 #include "oos/input/key_input.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/runtime/native_app_manager.h"
+#include "oos/runtime/wasm_app.h"
 #include "oos/ui/status_bar_appearance.h"
 
 namespace {
@@ -22,9 +24,16 @@ public:
   oos::ui::StatusBarAppearance statusBarAppearance() const override {
     return appearance;
   }
+  bool setSurfaceMode(oos::ui::SurfaceMode next) override {
+    surface_mode = next;
+    ++surface_mode_updates;
+    return true;
+  }
 
   oos::ui::StatusBarAppearance appearance;
+  oos::ui::SurfaceMode surface_mode = oos::ui::SurfaceMode::Normal;
   size_t updates = 0;
+  size_t surface_mode_updates = 0;
 };
 
 class FakeGraphics final : public oos::runtime::GraphicsHost {
@@ -223,9 +232,10 @@ private:
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 4) {
+  if (argc != 7) {
     std::fprintf(stderr,
-                 "usage: %s egui-demo.wasm wit-smoke.wasm font-directory\n",
+                 "usage: %s egui-demo.wasm wit-smoke.wasm thread-smoke.wasm "
+                 "worker-wit-trap.wasm exit-smoke.wasm font-directory\n",
                  argv[0]);
     return 2;
   }
@@ -234,7 +244,7 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppManager apps(graphics);
   oos::runtime::NativeAppLaunchOptions launcher_launch;
   launcher_launch.module_path = argv[1];
-  launcher_launch.font_directory = argv[3];
+  launcher_launch.font_directory = argv[6];
   for (size_t index = 0; index < 3; ++index) {
     char id[16] = {};
     std::snprintf(id, sizeof(id), "app-%zu", index);
@@ -271,7 +281,7 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppManager wit_smoke(graphics, 1);
   oos::runtime::NativeAppLaunchOptions smoke_launch;
   smoke_launch.module_path = argv[2];
-  smoke_launch.font_directory = argv[3];
+  smoke_launch.font_directory = argv[6];
   smoke_launch.status_bar = &status_bar;
   if (!wit_smoke.load("wit-smoke", smoke_launch) ||
       !wit_smoke.activate("wit-smoke") || !wit_smoke.render(1'500'000)) {
@@ -280,15 +290,93 @@ int main(int argc, char **argv) {
     return 1;
   }
   if (status_bar.updates != 1 ||
-      status_bar.appearance !=
-          (oos::ui::StatusBarAppearance{0x123456, true})) {
-    std::fprintf(stderr, "WIT status bar appearance call failed\n");
+      status_bar.appearance != (oos::ui::StatusBarAppearance{0x123456, true}) ||
+      status_bar.surface_mode_updates != 2 ||
+      status_bar.surface_mode != oos::ui::SurfaceMode::Normal) {
+    std::fprintf(stderr, "WIT status bar/surface mode calls failed\n");
     return 1;
   }
   wit_smoke.shutdown();
   std::printf("WAMR WIT device/GLES API imports passed: gles_frames=%zu\n",
               graphics.gles_frames);
+  oos::runtime::NativeAppManager thread_smoke(graphics, 1);
+  oos::runtime::NativeAppLaunchOptions thread_launch;
+  thread_launch.module_path = argv[3];
+  thread_launch.font_directory = argv[6];
+  if (!thread_smoke.load("thread-smoke", thread_launch) ||
+      !thread_smoke.activate("thread-smoke") ||
+      !thread_smoke.render(1'600'000)) {
+    std::fprintf(stderr, "WAMR guest worker smoke failed: %s\n",
+                 thread_smoke.lastError());
+    return 1;
+  }
+  thread_smoke.shutdown();
+  std::printf("WAMR bounded guest worker passed\n");
+  oos::runtime::NativeAppManager affinity_smoke(graphics, 1);
+  oos::runtime::NativeAppLaunchOptions affinity_launch;
+  affinity_launch.module_path = argv[4];
+  affinity_launch.font_directory = argv[6];
+  if (affinity_smoke.load("worker-wit-trap", affinity_launch) ||
+      std::string(affinity_smoke.lastError()).find("guest worker") ==
+          std::string::npos) {
+    std::fprintf(stderr,
+                 "worker WIT thread-affinity trap was not enforced: %s\n",
+                 affinity_smoke.lastError());
+    return 1;
+  }
+  std::printf("WAMR worker WIT thread-affinity trap passed\n");
+  const std::string unbounded_path = "/tmp/oos-unbounded-memory.wasm";
+  const unsigned char unbounded_module[] = {0x00, 0x61, 0x73, 0x6d, 0x01,
+                                            0x00, 0x00, 0x00, 0x05, 0x03,
+                                            0x01, 0x00, 0x01};
+  {
+    std::ofstream output(unbounded_path, std::ios::binary);
+    output.write(reinterpret_cast<const char *>(unbounded_module),
+                 sizeof(unbounded_module));
+  }
+  oos::runtime::NativeAppManager policy_test(graphics, 1);
+  oos::runtime::NativeAppLaunchOptions unbounded_launch;
+  unbounded_launch.module_path = unbounded_path.c_str();
+  if (policy_test.load("unbounded", unbounded_launch) ||
+      std::string(policy_test.lastError()).find("bounded maximum") ==
+          std::string::npos) {
+    std::fprintf(stderr, "unbounded Wasm memory policy was not enforced\n");
+    return 1;
+  }
+  std::filesystem::remove(unbounded_path);
+  const std::string oversized_path = "/tmp/oos-oversized-memory.wasm";
+  const unsigned char oversized_module[] = {0x00, 0x61, 0x73, 0x6d, 0x01,
+                                            0x00, 0x00, 0x00, 0x05, 0x05,
+                                            0x01, 0x01, 0x01, 0x81, 0x08};
+  {
+    std::ofstream output(oversized_path, std::ios::binary);
+    output.write(reinterpret_cast<const char *>(oversized_module),
+                 sizeof(oversized_module));
+  }
+  oos::runtime::NativeAppLaunchOptions oversized_launch;
+  oversized_launch.module_path = oversized_path.c_str();
+  if (policy_test.load("oversized", oversized_launch) ||
+      std::string(policy_test.lastError()).find("64 MiB") ==
+          std::string::npos) {
+    std::fprintf(stderr, "oversized Wasm memory policy was not enforced\n");
+    return 1;
+  }
+  std::filesystem::remove(oversized_path);
+  std::printf("WAMR 64 MiB memory policy passed\n");
   MockDevice mock_device;
+  {
+    oos::runtime::WasmAppOptions exit_options;
+    exit_options.font_directory = argv[6];
+    oos::runtime::WasmApp exit_smoke(graphics, mock_device, exit_options);
+    if (!exit_smoke.load(argv[5]) || !exit_smoke.initialize() ||
+        !exit_smoke.takeExitRequest() || exit_smoke.takeExitRequest()) {
+      std::fprintf(stderr, "deferred WIT exit request failed: %s\n",
+                   exit_smoke.lastError());
+      return 1;
+    }
+    exit_smoke.shutdown();
+  }
+  std::printf("WAMR deferred exit request passed\n");
   oos::runtime::NativeAppManager mock_smoke(graphics, mock_device, 1);
   char storage_template[] = "/tmp/oos-wasm-storage.XXXXXX";
   const char *storage_root = mkdtemp(storage_template);
@@ -300,17 +388,25 @@ int main(int argc, char **argv) {
   mock_launch.module_path = argv[2];
   mock_launch.data_directory = storage_root;
   mock_launch.system_data_root = storage_root;
-  mock_launch.font_directory = argv[3];
+  mock_launch.font_directory = argv[6];
   mock_launch.status_bar = &status_bar;
   const std::string internal_media = std::string(storage_root) + "/internal";
   const std::string removable_media = std::string(storage_root) + "/removable";
+  const std::string packaged_assets = std::string(storage_root) + "/assets";
   if (!std::filesystem::create_directories(internal_media) ||
-      !std::filesystem::create_directories(removable_media)) {
+      !std::filesystem::create_directories(removable_media) ||
+      !std::filesystem::create_directories(packaged_assets)) {
     std::fprintf(stderr, "cannot create WIT media test roots\n");
     return 1;
   }
   mock_launch.internal_media_directory = internal_media.c_str();
   mock_launch.removable_media_directory = removable_media.c_str();
+  const std::string test_asset = packaged_assets + "/test.dat";
+  {
+    std::ofstream output(test_asset, std::ios::binary);
+    output << "test-asset";
+  }
+  mock_launch.asset_directory = packaged_assets.c_str();
   const std::vector<std::string> mock_permissions = {
       "audio-capture",         "camera",    "power",
       "wifi-manage",           "bluetooth", "mobileconnection",

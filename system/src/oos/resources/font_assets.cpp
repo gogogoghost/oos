@@ -20,12 +20,15 @@ const char *fontFileName(FontRole role) {
   case FontRole::UiMonospace:
   case FontRole::Emoji:
     return nullptr;
+  case FontRole::CjkFallback:
+    return "cjk-fallback.ttf";
   }
   return nullptr;
 }
 
 bool validRole(FontRole role) {
-  return static_cast<uint32_t>(role) <= static_cast<uint32_t>(FontRole::Emoji);
+  return static_cast<uint32_t>(role) <=
+         static_cast<uint32_t>(FontRole::CjkFallback);
 }
 
 int openSystemUiFont() {
@@ -33,6 +36,18 @@ int openSystemUiFont() {
       "/system/fonts/Roboto-Regular.ttf",
       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
       "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"};
+  for (const char *candidate : candidates) {
+    const int fd = open(candidate, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd >= 0)
+      return fd;
+  }
+  return -1;
+}
+
+int openSystemCjkFont() {
+  constexpr const char *candidates[] = {
+      "/system/fonts/DroidSansFallback.ttf",
+      "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"};
   for (const char *candidate : candidates) {
     const int fd = open(candidate, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     if (fd >= 0)
@@ -68,6 +83,8 @@ FontAssetStatus FontAssetService::openFont(FontRole role, int &fd,
   if (fd < 0 && role == FontRole::UiProportional && root_ == kDefaultFontRoot) {
     fd = openSystemUiFont();
   }
+  if (fd < 0 && role == FontRole::CjkFallback && root_ == kDefaultFontRoot)
+    fd = openSystemCjkFont();
   if (fd < 0) {
     error_ = std::string("font asset is unavailable: ") + name;
     return FontAssetStatus::Unavailable;

@@ -28,9 +28,24 @@ public:
     return appearance_;
   }
 
+  bool setSurfaceMode(ui::SurfaceMode mode) override {
+    if (!surface_changed_ || !surface_changed_(mode))
+      return false;
+    surface_mode_ = mode;
+    return true;
+  }
+
+  ui::SurfaceMode surfaceMode() const override { return surface_mode_; }
+
+  void setSurfaceCallback(std::function<bool(ui::SurfaceMode)> callback) {
+    surface_changed_ = std::move(callback);
+  }
+
 private:
   ui::StatusBarAppearance appearance_;
   std::function<void(ui::StatusBarAppearance)> changed_;
+  std::function<bool(ui::SurfaceMode)> surface_changed_;
+  ui::SurfaceMode surface_mode_ = ui::SurfaceMode::Normal;
 };
 
 } // namespace
@@ -108,6 +123,18 @@ bool ApplicationSessionManager::registerFactory(std::string id,
         if (impl_->active == stored)
           impl_->appearance_host.applyStatusBarAppearance(value);
       });
+  entry->appearance->setSurfaceCallback([this, stored](ui::SurfaceMode mode) {
+    if (!stored->surface)
+      return false;
+    const bool immersive = mode == ui::SurfaceMode::Immersive;
+    if (!stored->surface->setGeometry(
+            impl_->x, immersive ? 0 : impl_->y, impl_->width,
+            immersive ? impl_->compositor.height() : impl_->height))
+      return false;
+    if (impl_->active == stored)
+      impl_->appearance_host.setStatusBarVisible(!immersive);
+    return true;
+  });
   impl_->entries.push_back(std::move(entry));
   return true;
 }
@@ -142,12 +169,17 @@ bool ApplicationSessionManager::activate(const std::string &id) {
       return false;
     }
   }
-  if (impl_->active && impl_->active != entry)
+  if (impl_->active && impl_->active != entry) {
+    impl_->active->session->onDeactivated();
     impl_->active->surface->setVisible(false);
+  }
   entry->surface->setVisible(true);
   impl_->active = entry;
+  entry->session->onActivated();
   impl_->appearance_host.applyStatusBarAppearance(
       entry->appearance->statusBarAppearance());
+  impl_->appearance_host.setStatusBarVisible(entry->appearance->surfaceMode() !=
+                                             ui::SurfaceMode::Immersive);
   return true;
 }
 
@@ -168,6 +200,41 @@ std::string ApplicationSessionManager::takeLaunchRequest() {
   return impl_->active && impl_->active->session
              ? impl_->active->session->takeLaunchRequest()
              : std::string();
+}
+
+bool ApplicationSessionManager::takeExitRequest() {
+  return impl_->active && impl_->active->session &&
+         impl_->active->session->takeExitRequest();
+}
+
+bool ApplicationSessionManager::destroy(const std::string &id) {
+  impl_->error.clear();
+  Impl::Entry *entry = impl_->find(id);
+  if (!entry || !entry->session) {
+    impl_->error = "application session is not resident: " + id;
+    return false;
+  }
+  if (impl_->active == entry) {
+    impl_->error = "cannot destroy the active application session";
+    return false;
+  }
+  entry->session->shutdown();
+  entry->session.reset();
+  entry->surface.reset();
+  entry->appearance = std::make_unique<StoredStatusBarAppearance>(
+      impl_->default_appearance, [this, entry](ui::StatusBarAppearance value) {
+        if (impl_->active == entry)
+          impl_->appearance_host.applyStatusBarAppearance(value);
+      });
+  entry->appearance->setSurfaceCallback([this, entry](ui::SurfaceMode mode) {
+    if (!entry->surface)
+      return false;
+    const bool immersive = mode == ui::SurfaceMode::Immersive;
+    return entry->surface->setGeometry(
+        impl_->x, immersive ? 0 : impl_->y, impl_->width,
+        immersive ? impl_->compositor.height() : impl_->height);
+  });
+  return true;
 }
 
 void ApplicationSessionManager::shutdown() {

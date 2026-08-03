@@ -6,7 +6,13 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD_DIR="$ROOT_DIR/build/host-wamr-runtime"
 
 "$ROOT_DIR/scripts/fetch-wamr.sh"
+"$ROOT_DIR/scripts/build-media-codecs.sh" local
 "$ROOT_DIR/scripts/build-native-apps.sh"
+"$ROOT_DIR/scripts/test-c-sdk.sh"
+"$ROOT_DIR/scripts/build-c-thread-smoke.sh"
+"$ROOT_DIR/scripts/build-c-worker-wit-trap.sh"
+"$ROOT_DIR/scripts/build-c-exit-smoke.sh"
+"$ROOT_DIR/scripts/build-c-thread-smoke-aot.sh"
 if command -v wasm-tools >/dev/null 2>&1 &&
     [[ -f "$ROOT_DIR/build/native-apps/egui-demo.component.wasm" ]]; then
   "$ROOT_DIR/scripts/verify-wit-interfaces.sh"
@@ -19,6 +25,9 @@ cmake --build "$BUILD_DIR"
 "$BUILD_DIR/oos_wasm_runtime_test" \
   "$ROOT_DIR/build/native-apps/egui-demo.wasm" \
   "$ROOT_DIR/build/native-apps/wit-smoke.wasm" \
+  "$ROOT_DIR/build/native-apps/c-thread-smoke.wasm" \
+  "$ROOT_DIR/build/native-apps/c-worker-wit-trap.wasm" \
+  "$ROOT_DIR/build/native-apps/c-exit-smoke.wasm" \
   "$ROOT_DIR/system/assets/fonts"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
@@ -32,3 +41,5 @@ trap 'rm -rf "$TEST_DIRECTORY"' EXIT
 "$BUILD_DIR/oos_device_storage_test"
 "$BUILD_DIR/oos_font_assets_test"
 "$BUILD_DIR/oos_system_service_test"
+LD_LIBRARY_PATH="$BUILD_DIR/third_party/fluidlite:$ROOT_DIR/build/media-codecs/local/install/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  "$BUILD_DIR/oos_media_core_test"

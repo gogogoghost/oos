@@ -25,7 +25,7 @@ from a non-blocking device status monitor.
 - `apps/tests`: framework integration and WIT regression applications.
 - `sdk`: versioned WIT interfaces and reusable egui/LVGL/ImGui backends.
 - `system/src/oos`: native runtime, compositor, application registry, storage,
-  services, and device-independent hardware contracts.
+  media, services, and device-independent hardware contracts.
 - `system/devices/nokia-2780-flip`: Android 10/HWC2 device implementation.
 - `system/devices/nokia-8110-4g`: Android 6/HWC1 device implementation.
 - `system/devices/local`: SDL/llvmpipe development device.
@@ -60,6 +60,7 @@ Build the native guest and both device targets:
 ```sh
 ./scripts/fetch-wamr.sh
 ./scripts/fetch-ui-frameworks.sh
+./scripts/fetch-media-dependencies.sh
 make system DEVICE=nokia-2780-flip
 make system DEVICE=nokia-8110-4g
 ```
@@ -107,7 +108,7 @@ The hardware test runners remain device-specific:
 See [docs/device-platform.md](docs/device-platform.md),
 [docs/graphics.md](docs/graphics.md), [docs/input.md](docs/input.md),
 [docs/system-ui.md](docs/system-ui.md), [docs/ui-icons.md](docs/ui-icons.md),
-[docs/settings.md](docs/settings.md), and the device READMEs for the common
+[docs/settings.md](docs/settings.md), [docs/media.md](docs/media.md), and the device READMEs for the common
 hardware API, system icon policy, and verified platform behavior.
 
 ## Packaging
@@ -122,7 +123,9 @@ resource directory:
   --device nokia-2780-flip --activate --tgz
 ```
 
-The resource package contains `oos`, shared application fonts, and licenses.
+The resource package contains `oos`, its embedded General MIDI SoundFont, the
+reduced shared media-codec libraries, and their licenses. UI and WAMR
+applications use the phone's system fonts.
 The LVGL SystemUI and boot splash are compiled into `oos`; they are not
 deployed as separate files. The package does not contain a browser engine or
 Web helper processes.

@@ -362,4 +362,9 @@ bool AppStorage::statementFinish(uint32_t statement) {
   return false;
 }
 
+void AppStorage::closeSessionStatements() {
+  statements_.clear();
+  next_statement_ = 1;
+}
+
 } // namespace oos::storage

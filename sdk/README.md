@@ -47,6 +47,19 @@ Other languages should generate guest bindings from `sdk/wit/oos.wit` and target
 the `app` world. The runtime contract contains no Rust-specific types, WASI,
 EGL, framebuffer, Binder, evdev, file descriptor, or HAL object.
 
+The checked-in C bindings under `c/generated` are reproduced by
+`scripts/generate-c-sdk.sh`. `scripts/build-c-app.sh OUTPUT SOURCE...` supplies a
+freestanding thread-safe allocator, bounded 64 MiB shared linear memory, and
+the WAMR pthread import shape without enabling WASI. C applications implement
+the four generated lifecycle exports. `c/lvgl/oos_lvgl_backend` is the guest
+LVGL 9 adapter: it uploads RGB565 dirty rectangles and returns draw records so
+an app can combine its UI and framebuffer in one submission.
+
+The host permits one guest worker in addition to the lifecycle thread. Worker
+code is pure guest code; every OOS WIT service enforces lifecycle-thread
+affinity and traps a worker call. Core Wasm must encode a memory maximum no
+larger than 64 MiB. ARMv7 AOT is capped and checked again at instantiation.
+
 The Rust crates in `sdk/rust` are libraries and intentionally do not own a
 workspace or lock file. Each application locks its complete dependency graph in
 its own directory and can use these crates through a path dependency.
@@ -57,8 +70,9 @@ Component Model artifact for runtimes that support components. WAMR 2.4.4 does
 not itself load component binaries.
 
 Framework adapters belong under `sdk/`, not in an individual application.
-The Rust egui adapter lives in `rust/oos-egui`; the process-local LVGL and Dear
-ImGui backends live in `cpp`. Applications under `apps/` link only the adapter
+The Rust egui adapter lives in `rust/oos-egui`; the guest LVGL C adapter lives
+in `c/lvgl`; process-local LVGL and Dear ImGui backends live in `cpp`.
+Applications under `apps/` link only the adapter
 they use. Future iced and GPU-backed LVGL adapters can emit the same
 texture/mesh records. Software LVGL/J2ME ports can upload strided RGB565 dirty
 rectangles.

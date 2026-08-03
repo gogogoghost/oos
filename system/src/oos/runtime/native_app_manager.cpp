@@ -90,6 +90,8 @@ bool NativeAppManager::load(const char *id,
                                         : "";
   wasm_options.font_directory =
       options.font_directory ? options.font_directory : "";
+  wasm_options.asset_directory =
+      options.asset_directory ? options.asset_directory : "";
   wasm_options.service_permission_mask = options.service_permission_mask;
   wasm_options.enforce_service_permissions =
       options.enforce_service_permissions;

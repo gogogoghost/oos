@@ -15,6 +15,8 @@ namespace oos::apps {
 namespace {
 
 constexpr size_t kMaximumManifestBytes = 256 * 1024;
+constexpr size_t kMaximumAssetBytes = 64 * 1024 * 1024;
+constexpr const char kAssetPrefix[] = "assets/";
 
 std::string join(const std::string &left, const std::string &right) {
   return left + (left.empty() || left.back() == '/' ? "" : "/") + right;
@@ -275,6 +277,16 @@ bool AppRepository::install(const char *package_path,
   if (!archive.find(kAotModulePath) && !archive.find(kWasmModulePath)) {
     error_ = "application package has no entry.aot or entry.wasm";
     return false;
+  }
+  for (const ZipEntry &entry : archive.entries()) {
+    if (entry.name.rfind(kAssetPrefix, 0) != 0 ||
+        entry.name.size() == sizeof(kAssetPrefix) - 1)
+      continue;
+    std::vector<uint8_t> verified;
+    if (!archive.readEntry(entry, verified, kMaximumAssetBytes)) {
+      error_ = "validate packaged asset: " + archive.lastError();
+      return false;
+    }
   }
   const std::string digest = contentDigest(package_path, error_);
   if (digest.empty())
@@ -561,6 +573,31 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
       return false;
   }
 
+  const std::string asset_directory = join(cache_directory, "assets");
+  if (!storage::ensureDirectory(asset_directory, 0700, error_))
+    return false;
+  for (const ZipEntry &entry : archive.entries()) {
+    if (entry.name.rfind(kAssetPrefix, 0) != 0 ||
+        entry.name.size() == sizeof(kAssetPrefix) - 1 ||
+        entry.name.back() == '/')
+      continue;
+    const std::string relative = entry.name.substr(sizeof(kAssetPrefix) - 1);
+    const std::string destination = join(asset_directory, relative);
+    struct stat asset_status = {};
+    if (stat(destination.c_str(), &asset_status) == 0 &&
+        S_ISREG(asset_status.st_mode) &&
+        static_cast<uint64_t>(asset_status.st_size) == entry.uncompressed_size)
+      continue;
+    std::vector<uint8_t> bytes;
+    if (!archive.readEntry(entry, bytes, kMaximumAssetBytes) ||
+        !storage::writeFileAtomic(destination, bytes.data(), bytes.size(), 0400,
+                                  error_)) {
+      if (error_.empty())
+        error_ = archive.lastError();
+      return false;
+    }
+  }
+
   const std::string data_directory = join(
       join(join(join(data_root_, "users"), "0"), "wasm"), record.manifest.id);
   if (!storage::ensureDirectory(data_directory, 0700, error_))
@@ -570,6 +607,7 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
   launch.entrypoint = entrypoint;
   launch.data_directory = data_directory;
   launch.cache_directory = cache_directory;
+  launch.asset_directory = asset_directory;
   return true;
 }
 

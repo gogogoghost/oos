@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 namespace oos::hardware {
@@ -83,7 +85,176 @@ public:
   AAudioStream *stream = nullptr;
 };
 
+class AAudioPcmOutput final : public PcmOutput {
+public:
+  ~AAudioPcmOutput() override {
+    if (stream_) {
+      AAudioStream_requestStop(stream_);
+      AAudioStream_close(stream_);
+    }
+  }
+
+  bool open(const PcmOutputConfig &config, AudioStreamInfo &info) {
+    if (config.sample_rate < 8000 || config.sample_rate > 192000 ||
+        config.channel_count < 1 || config.channel_count > 2 ||
+        config.capacity_frames < 256 || config.capacity_frames > 65536) {
+      error_ = "invalid PCM output configuration";
+      return false;
+    }
+    AAudioStreamBuilder *builder = nullptr;
+    aaudio_result_t result = AAudio_createStreamBuilder(&builder);
+    if (result != AAUDIO_OK) {
+      error_ = aaudioError("create PCM builder failed", result);
+      return false;
+    }
+    AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
+    AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
+    AAudioStreamBuilder_setPerformanceMode(builder,
+                                           AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
+    AAudioStreamBuilder_setSampleRate(builder, config.sample_rate);
+    AAudioStreamBuilder_setChannelCount(builder, config.channel_count);
+    AAudioStreamBuilder_setUsage(builder, toAAudioUsage(config.usage));
+    AAudioStreamBuilder_setContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
+    result = AAudioStreamBuilder_openStream(builder, &stream_);
+    AAudioStreamBuilder_delete(builder);
+    if (result != AAUDIO_OK) {
+      error_ = aaudioError("open PCM stream failed", result);
+      stream_ = nullptr;
+      return false;
+    }
+    capacity_frames_ = config.capacity_frames;
+    AAudioStream_setBufferSizeInFrames(stream_, capacity_frames_);
+    result = AAudioStream_requestStart(stream_);
+    if (result != AAUDIO_OK) {
+      error_ = aaudioError("start PCM stream failed", result);
+      return false;
+    }
+    info = {AAudioStream_getSampleRate(stream_),
+            AAudioStream_getChannelCount(stream_),
+            AAudioStream_getDeviceId(stream_), 0};
+    channels_ = info.channel_count;
+    return true;
+  }
+
+  bool write(const int16_t *samples, int64_t frames,
+             int64_t &accepted_frames) override {
+    accepted_frames = 0;
+    if (!stream_ || !samples || frames <= 0) {
+      error_ = "invalid PCM write";
+      return false;
+    }
+    const int64_t queued =
+        std::max<int64_t>(0, AAudioStream_getFramesWritten(stream_) -
+                                 AAudioStream_getFramesRead(stream_));
+    const int64_t writable = std::min<int64_t>(
+        frames, std::max<int64_t>(0, capacity_frames_ - queued));
+    if (writable == 0)
+      return true;
+    const int16_t *source = samples;
+    if (volume_ != 1.0F) {
+      scaled_.resize(static_cast<size_t>(writable) * channels_);
+      for (size_t index = 0; index < scaled_.size(); ++index) {
+        const float value = static_cast<float>(samples[index]) * volume_;
+        scaled_[index] = static_cast<int16_t>(
+            std::max(-32768.0F, std::min(32767.0F, value)));
+      }
+      source = scaled_.data();
+    }
+    const aaudio_result_t written =
+        AAudioStream_write(stream_, source, writable, 0);
+    if (written < 0) {
+      error_ = aaudioError("write PCM stream failed", written);
+      return false;
+    }
+    accepted_frames = written;
+    return true;
+  }
+
+  bool setVolume(float volume) override {
+    if (volume < 0.0F || volume > 1.0F) {
+      error_ = "PCM volume is outside 0..1";
+      return false;
+    }
+    volume_ = volume;
+    return true;
+  }
+
+  bool pause() override {
+    const aaudio_result_t result = AAudioStream_requestPause(stream_);
+    if (result != AAUDIO_OK) {
+      error_ = aaudioError("pause PCM stream failed", result);
+      return false;
+    }
+    paused_ = true;
+    return true;
+  }
+
+  bool resume() override {
+    const aaudio_result_t result = AAudioStream_requestStart(stream_);
+    if (result != AAUDIO_OK) {
+      error_ = aaudioError("resume PCM stream failed", result);
+      return false;
+    }
+    paused_ = false;
+    return true;
+  }
+
+  bool flush() override {
+    const bool restart = !paused_;
+    aaudio_result_t result = AAudioStream_requestPause(stream_);
+    if (result == AAUDIO_OK)
+      result = AAudioStream_requestFlush(stream_);
+    if (result == AAUDIO_OK && restart)
+      result = AAudioStream_requestStart(stream_);
+    if (result != AAUDIO_OK) {
+      error_ = aaudioError("flush PCM stream failed", result);
+      return false;
+    }
+    return true;
+  }
+
+  PcmOutputStatus status() const override {
+    if (!stream_)
+      return {};
+    const int64_t written = AAudioStream_getFramesWritten(stream_);
+    const int64_t read = AAudioStream_getFramesRead(stream_);
+    return {{AAudioStream_getSampleRate(stream_),
+             AAudioStream_getChannelCount(stream_),
+             AAudioStream_getDeviceId(stream_), written},
+            std::max<int64_t>(0, written - read),
+            read,
+            AAudioStream_getXRunCount(stream_),
+            paused_};
+  }
+
+  const std::string &lastError() const override { return error_; }
+
+private:
+  AAudioStream *stream_ = nullptr;
+  int32_t capacity_frames_ = 0;
+  int32_t channels_ = 0;
+  float volume_ = 1.0F;
+  bool paused_ = false;
+  std::vector<int16_t> scaled_;
+  std::string error_;
+};
+
 } // namespace
+
+bool AudioManager::openPcmOutput(const PcmOutputConfig &config,
+                                 std::unique_ptr<PcmOutput> &output,
+                                 AudioStreamInfo &info) {
+  output.reset();
+  error_.clear();
+  auto candidate = std::make_unique<AAudioPcmOutput>();
+  if (!candidate->open(config, info)) {
+    error_ = candidate->lastError();
+    return false;
+  }
+  output = std::move(candidate);
+  return true;
+}
 
 bool AudioManager::playTone(double frequency_hz, int duration_ms, float volume,
                             AudioUsage usage, AudioStreamInfo &info) {

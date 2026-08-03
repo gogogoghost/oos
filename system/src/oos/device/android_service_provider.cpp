@@ -3,10 +3,12 @@
 #include "oos/device/services.h"
 #include "oos/platform/android_properties.h"
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <dlfcn.h>
+#include <mutex>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -237,8 +239,28 @@ struct ServiceProvider::Impl {
     return false;
   }
 
+  struct PcmSlot {
+    std::unique_ptr<hardware::PcmOutput> output;
+    bool app_paused = false;
+    bool focus_paused = false;
+  };
+
+  PcmSlot *pcmSlot(uint32_t handle) {
+    if (handle == 0 || handle > pcm_outputs.size() ||
+        !pcm_outputs[handle - 1].output) {
+      pcm_error = "PCM stream handle is invalid";
+      return nullptr;
+    }
+    return &pcm_outputs[handle - 1];
+  }
+
   const Device &device;
   std::unique_ptr<hardware::AudioManager> audio;
+  std::mutex audio_mutex;
+  mutable std::mutex pcm_mutex;
+  std::array<PcmSlot, 8> pcm_outputs;
+  bool audio_focused = true;
+  std::string pcm_error;
   std::unique_ptr<hardware::CodecManager> codec;
   std::unique_ptr<hardware::CameraManager> camera;
   std::unique_ptr<hardware::PowerManager> power;
@@ -264,14 +286,150 @@ ServiceProvider::~ServiceProvider() = default;
 bool ServiceProvider::playTone(double frequency_hz, int duration_ms,
                                float volume, hardware::AudioUsage usage,
                                hardware::AudioStreamInfo &info) {
+  std::lock_guard<std::mutex> lock(impl_->audio_mutex);
   return impl_->ensureAudio() &&
          impl_->finish(impl_->audio->playTone(frequency_hz, duration_ms, volume,
                                               usage, info),
                        *impl_->audio);
 }
 
+bool ServiceProvider::pcmOpen(const hardware::PcmOutputConfig &config,
+                              uint32_t &handle,
+                              hardware::AudioStreamInfo &info) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  std::lock_guard<std::mutex> audio_lock(impl_->audio_mutex);
+  handle = 0;
+  if (!impl_->ensureAudio())
+    return false;
+  for (size_t index = 0; index < impl_->pcm_outputs.size(); ++index) {
+    auto &slot = impl_->pcm_outputs[index];
+    if (slot.output)
+      continue;
+    if (!impl_->audio->openPcmOutput(config, slot.output, info)) {
+      impl_->pcm_error = impl_->audio->lastError();
+      return false;
+    }
+    slot.app_paused = false;
+    slot.focus_paused = !impl_->audio_focused;
+    if (slot.focus_paused && !slot.output->pause()) {
+      impl_->pcm_error = slot.output->lastError();
+      slot = {};
+      return false;
+    }
+    handle = static_cast<uint32_t>(index + 1);
+    impl_->pcm_error.clear();
+    return true;
+  }
+  impl_->pcm_error = "PCM stream limit reached";
+  return false;
+}
+
+bool ServiceProvider::pcmWrite(uint32_t handle, const int16_t *samples,
+                               int64_t frames, int64_t &accepted_frames) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  auto *slot = impl_->pcmSlot(handle);
+  if (!slot)
+    return false;
+  hardware::PcmOutput *output = slot->output.get();
+  if (output->write(samples, frames, accepted_frames)) {
+    impl_->pcm_error.clear();
+    return true;
+  }
+  impl_->pcm_error = output->lastError();
+  return false;
+}
+
+bool ServiceProvider::pcmSetVolume(uint32_t handle, float volume) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  auto *slot = impl_->pcmSlot(handle);
+  if (!slot)
+    return false;
+  hardware::PcmOutput *output = slot->output.get();
+  const bool success = output->setVolume(volume);
+  impl_->pcm_error = success ? std::string() : output->lastError();
+  return success;
+}
+
+bool ServiceProvider::pcmPause(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  auto *slot = impl_->pcmSlot(handle);
+  if (!slot)
+    return false;
+  slot->app_paused = true;
+  const bool success = slot->output->pause();
+  impl_->pcm_error = success ? std::string() : slot->output->lastError();
+  return success;
+}
+
+bool ServiceProvider::pcmResume(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  auto *slot = impl_->pcmSlot(handle);
+  if (!slot)
+    return false;
+  slot->app_paused = false;
+  const bool success = slot->focus_paused || slot->output->resume();
+  impl_->pcm_error = success ? std::string() : slot->output->lastError();
+  return success;
+}
+
+bool ServiceProvider::pcmFlush(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  auto *slot = impl_->pcmSlot(handle);
+  if (!slot)
+    return false;
+  hardware::PcmOutput *output = slot->output.get();
+  const bool success = output->flush();
+  impl_->pcm_error = success ? std::string() : output->lastError();
+  return success;
+}
+
+bool ServiceProvider::pcmStatus(uint32_t handle,
+                                hardware::PcmOutputStatus &status) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  auto *slot = impl_->pcmSlot(handle);
+  if (!slot)
+    return false;
+  hardware::PcmOutput *output = slot->output.get();
+  status = output->status();
+  impl_->pcm_error.clear();
+  return true;
+}
+
+bool ServiceProvider::pcmClose(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  if (!impl_->pcmSlot(handle))
+    return false;
+  impl_->pcm_outputs[handle - 1] = {};
+  impl_->pcm_error.clear();
+  return true;
+}
+
+void ServiceProvider::setAudioFocused(bool focused) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  impl_->audio_focused = focused;
+  for (auto &slot : impl_->pcm_outputs) {
+    if (!slot.output)
+      continue;
+    if (!focused) {
+      if (!slot.focus_paused && slot.output->pause())
+        slot.focus_paused = true;
+    } else if (slot.focus_paused) {
+      if (!slot.app_paused)
+        slot.output->resume();
+      slot.focus_paused = false;
+    }
+  }
+}
+
+void ServiceProvider::closeAllPcm() {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  for (auto &slot : impl_->pcm_outputs)
+    slot = {};
+}
+
 bool ServiceProvider::recordWav(const std::string &path, int duration_ms,
                                 hardware::RecordingResult &result) {
+  std::lock_guard<std::mutex> lock(impl_->audio_mutex);
   return impl_->ensureAudio() &&
          impl_->finish(impl_->audio->recordWav(path, duration_ms, result),
                        *impl_->audio);
@@ -593,6 +751,9 @@ bool ServiceProvider::testH264RoundTrip(int width, int height, int frame_count,
                        *impl_->codec);
 }
 
-const std::string &ServiceProvider::lastError() const { return impl_->error; }
+std::string ServiceProvider::lastError() const {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  return impl_->pcm_error.empty() ? impl_->error : impl_->pcm_error;
+}
 
 } // namespace oos::device

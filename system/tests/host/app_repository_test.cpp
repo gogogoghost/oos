@@ -1,5 +1,6 @@
 #include "oos/apps/app_manifest.h"
 #include "oos/apps/app_repository.h"
+#include "oos/resources/package_assets.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/sqlite.h"
 
@@ -226,6 +227,20 @@ int main(int argc, char **argv) {
   success &= check(!launch.entrypoint.empty(), "native entrypoint is resolved");
   success &= check(launch.entrypoint == argv[2],
                    "package entry is accepted and selected");
+  oos::resources::PackageAssetService assets(launch.asset_directory);
+  uint32_t asset_handle = 0;
+  uint64_t asset_size = 0;
+  success &= check(assets.open("audio/test.dat", asset_handle, asset_size) &&
+                       asset_size == 19,
+                   assets.lastError().c_str());
+  std::vector<uint8_t> asset_bytes;
+  success &= check(assets.read(asset_handle, 4, 8, asset_bytes) &&
+                       std::string(asset_bytes.begin(), asset_bytes.end()) ==
+                           "packaged",
+                   assets.lastError().c_str());
+  success &= check(assets.close(asset_handle), assets.lastError().c_str());
+  success &= check(!assets.open("../entry.aot", asset_handle, asset_size),
+                   "asset traversal must be rejected");
   success &= check(launch.data_directory.find(
                        "users/0/wasm/cc.jaxy.oos.test") != std::string::npos,
                    "per-app data directory");

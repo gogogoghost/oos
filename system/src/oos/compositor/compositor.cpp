@@ -265,6 +265,24 @@ void LayerSurface::setVisible(bool visible) {
 
 bool LayerSurface::visible() const { return impl_->visible; }
 
+bool LayerSurface::setGeometry(int32_t x, int32_t y, uint32_t width,
+                               uint32_t height) {
+  if (x < 0 || y < 0 || width == 0 || height == 0 ||
+      static_cast<uint64_t>(x) + width > compositor_.width() ||
+      static_cast<uint64_t>(y) + height > compositor_.height())
+    return false;
+  auto &config = impl_->config;
+  if (config.x == x && config.y == y && config.width == width &&
+      config.height == height)
+    return true;
+  config.x = x;
+  config.y = y;
+  config.width = width;
+  config.height = height;
+  clearFrame();
+  return true;
+}
+
 void LayerSurface::clearFrame() {
   impl_->vertices.clear();
   impl_->indices.clear();

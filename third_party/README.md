@@ -14,6 +14,22 @@ The native system UI and development-tool UI backends are:
 - `imgui`: pinned Dear ImGui 1.92.9b, exposed through the same OOS graphics
   host for diagnostics and native tools.
 
+The system media service uses:
+
+- `miniaudio`: decoder-only integration for the portable WAV, MP3, and FLAC
+  baseline. Device output remains behind the OOS PCM sink.
+- `fluidlite`: lightweight LGPL SoundFont 2 synthesizer used for standard MIDI.
+  OOS carries a small patch that maps immutable sample data directly from the
+  embedded SoundFont instead of allocating a second copy.
+- `tinysoundfont`: supplies the zlib-licensed TinyMidiLoader parser (`tml.h`).
+  The TinySoundFont synthesizer itself is not linked.
+- `generaluser-gs`: GeneralUser GS 2.0.3 SoundFont, embedded into the OOS ELF
+  and used as the system General MIDI bank.
+- `sonivox`: Android's portable embedded MIDI engine and compact 22 kHz
+  wavetable, retained for XMF and legacy phone ringtone formats.
+- `FFmpeg`: an LGPL shared build restricted to AAC, AMR-NB/WB, Vorbis and Opus
+  audio plus AAC/AMR/MOV/Ogg demuxing. Each target has an isolated build tree.
+
 OOS system icons use the Font Awesome 5 Free font bundled in the pinned LVGL
 checkout. Packaging copies its complete upstream license alongside the LVGL
 license. Do not introduce icons from another library into SystemUI; see
@@ -22,6 +38,9 @@ license. Do not introduce icons from another library into SystemUI; see
 Fetch and revision-check both UI frameworks with
 `scripts/fetch-ui-frameworks.sh`. Neither checkout is copied into the main
 repository.
+
+Fetch the media dependencies with `scripts/fetch-media-dependencies.sh`.
+Build the reduced codec libraries with `scripts/build-media-codecs.sh TARGET`.
 
 The Nokia 2780 Flip build also uses Android 10-era AOSP headers and hardware
 interfaces from these local trees:

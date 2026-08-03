@@ -29,6 +29,18 @@ public:
 
   bool playTone(double frequency_hz, int duration_ms, float volume,
                 hardware::AudioUsage usage, hardware::AudioStreamInfo &info);
+  bool pcmOpen(const hardware::PcmOutputConfig &config, uint32_t &handle,
+               hardware::AudioStreamInfo &info);
+  bool pcmWrite(uint32_t handle, const int16_t *samples, int64_t frames,
+                int64_t &accepted_frames);
+  bool pcmSetVolume(uint32_t handle, float volume);
+  bool pcmPause(uint32_t handle);
+  bool pcmResume(uint32_t handle);
+  bool pcmFlush(uint32_t handle);
+  bool pcmStatus(uint32_t handle, hardware::PcmOutputStatus &status);
+  bool pcmClose(uint32_t handle);
+  void setAudioFocused(bool focused);
+  void closeAllPcm();
   bool recordWav(const std::string &path, int duration_ms,
                  hardware::RecordingResult &result);
 
@@ -100,7 +112,7 @@ public:
   bool testH264RoundTrip(int width, int height, int frame_count,
                          hardware::CodecResult &result, int timeout_ms);
 
-  const std::string &lastError() const;
+  std::string lastError() const;
 
 private:
   struct Impl;

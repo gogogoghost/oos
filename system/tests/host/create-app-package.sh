@@ -11,6 +11,9 @@ mode=${2:-aot}
 staging=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-package.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 entries=(manifest.json)
+mkdir -p "$staging/assets/audio"
+printf 'OOS packaged asset\n' > "$staging/assets/audio/test.dat"
+entries+=(assets/audio/test.dat)
 if [[ $mode == aot || $mode == both ]]; then
   printf '\0aot-test-module\n' > "$staging/entry.aot"
   entries+=(entry.aot)

@@ -48,6 +48,7 @@ public:
   bool statementColumnBlob(uint32_t statement, uint32_t column,
                            std::vector<uint8_t> &value);
   bool statementFinish(uint32_t statement);
+  void closeSessionStatements();
 
   const std::string &dataDirectory() const { return data_directory_; }
   const std::string &lastError() const { return error_; }

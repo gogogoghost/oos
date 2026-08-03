@@ -59,6 +59,7 @@ fi
 if [[ $GENERATE_HIDL -eq 1 ]]; then
   "$ROOT_DIR/scripts/generate-hidl-headers.sh"
 fi
+"$ROOT_DIR/scripts/build-media-codecs.sh" "$DEVICE"
 BUILD_DIR="$ROOT_DIR/build/android-$DEVICE"
 CMAKE_FRESH=()
 if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then

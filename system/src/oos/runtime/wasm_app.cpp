@@ -2,9 +2,11 @@
 
 #include <wasm_export.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -13,6 +15,7 @@
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -21,7 +24,10 @@
 #include "oos/apps/zip_archive.h"
 #include "oos/device/device.h"
 #include "oos/device/service_provider.h"
+#include "oos/media/audio_format.h"
+#include "oos/media/media_service.h"
 #include "oos/resources/font_assets.h"
+#include "oos/resources/package_assets.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
@@ -53,6 +59,7 @@ constexpr const char *kStorageInterface = "oos:platform/storage@0.1.0";
 constexpr const char *kDeviceStorageInterface =
     "oos:platform/device-storage@0.1.0";
 constexpr const char *kFontAssetsInterface = "oos:platform/font-assets@0.1.0";
+constexpr const char *kAssetsInterface = "oos:platform/assets@0.1.0";
 constexpr const char *kSystemServicesInterface =
     "oos:platform/system-services@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
@@ -113,19 +120,33 @@ struct AppHostContext {
   GraphicsHost *graphics = nullptr;
   device::Device *device = nullptr;
   std::unique_ptr<device::ServiceProvider> *services = nullptr;
+  std::unique_ptr<media::MediaService> *media_service = nullptr;
   storage::AppStorage *storage = nullptr;
   storage::DeviceStorageService *device_storage = nullptr;
   resources::FontAssetService *font_assets = nullptr;
+  resources::PackageAssetService *assets = nullptr;
   services::SystemServiceHub *system_services = nullptr;
   ui::StatusBarAppearanceController *status_bar = nullptr;
   const std::string *app_id = nullptr;
+  const std::string *asset_directory = nullptr;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
+  std::thread::id lifecycle_thread;
+  bool *exit_requested = nullptr;
+  bool *audio_focused = nullptr;
+  std::vector<std::string> wake_locks;
 };
 
 AppHostContext *hostFor(wasm_exec_env_t environment) {
   wasm_module_inst_t instance = wasm_runtime_get_module_inst(environment);
-  return static_cast<AppHostContext *>(wasm_runtime_get_custom_data(instance));
+  auto *host =
+      static_cast<AppHostContext *>(wasm_runtime_get_custom_data(instance));
+  if (host && host->lifecycle_thread != std::this_thread::get_id()) {
+    wasm_runtime_set_exception(instance,
+                               "OOS WIT service called from a guest worker");
+    return nullptr;
+  }
+  return host;
 }
 
 GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
@@ -198,6 +219,11 @@ resources::FontAssetService *fontAssetsFor(wasm_exec_env_t environment) {
   return host ? host->font_assets : nullptr;
 }
 
+resources::PackageAssetService *assetsFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->assets : nullptr;
+}
+
 device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
   if (!host || !host->device || !host->services ||
@@ -207,6 +233,20 @@ device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
   if (!*host->services)
     *host->services = std::make_unique<device::ServiceProvider>(*host->device);
   return host->services->get();
+}
+
+media::MediaService *mediaFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  device::ServiceProvider *services = servicesFor(environment);
+  if (!host || !services || !host->media_service || !host->asset_directory)
+    return nullptr;
+  if (!*host->media_service) {
+    *host->media_service = std::make_unique<media::MediaService>(
+        *services, *host->asset_directory);
+    (*host->media_service)
+        ->setFocused(!host->audio_focused || *host->audio_focused);
+  }
+  return host->media_service->get();
 }
 
 services::SystemServiceHub *systemServicesFor(wasm_exec_env_t environment) {
@@ -236,6 +276,14 @@ bool writeResult(wasm_exec_env_t environment, uint32_t result_offset,
 
 uint32_t nativeAbiVersion(wasm_exec_env_t) { return OOS_WASM_ABI_VERSION; }
 
+void nativeRequestExit(wasm_exec_env_t environment, uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  if (host && host->exit_requested)
+    *host->exit_requested = true;
+  writeResult(environment, result_offset, host && host->exit_requested,
+              WitError::Unavailable);
+}
+
 void nativeSetStatusBarStyle(wasm_exec_env_t environment,
                              uint32_t background_rgb, uint32_t icon_theme,
                              uint32_t result_offset) {
@@ -245,6 +293,18 @@ void nativeSetStatusBarStyle(wasm_exec_env_t environment,
     host->status_bar->setStatusBarAppearance({background_rgb, icon_theme == 1});
   }
   writeResult(environment, result_offset, valid && host && host->status_bar,
+              valid ? WitError::Unavailable : WitError::InvalidArgument);
+}
+
+void nativeSetSurfaceMode(wasm_exec_env_t environment, uint32_t mode,
+                          uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  const bool valid = mode <= 1;
+  const bool success =
+      valid && host && host->status_bar &&
+      host->status_bar->setSurfaceMode(mode == 0 ? ui::SurfaceMode::Normal
+                                                 : ui::SurfaceMode::Immersive);
+  writeResult(environment, result_offset, success,
               valid ? WitError::Unavailable : WitError::InvalidArgument);
 }
 
@@ -277,6 +337,8 @@ uint32_t nativeSupportedTextureFormats(wasm_exec_env_t environment) {
 }
 
 void nativeGraphicsLimits(wasm_exec_env_t environment, uint32_t result_offset) {
+  if (!hostFor(environment))
+    return;
   uint32_t *result =
       appMutableArray<uint32_t>(environment, result_offset, 5, 5);
   if (!result) {
@@ -290,7 +352,9 @@ void nativeGraphicsLimits(wasm_exec_env_t environment, uint32_t result_offset) {
   result[4] = OOS_GFX_MAX_DRAW_COMMANDS;
 }
 
-uint32_t nativeWallClockMinutes(wasm_exec_env_t) {
+uint32_t nativeWallClockMinutes(wasm_exec_env_t environment) {
+  if (!hostFor(environment))
+    return 0;
   const time_t now = std::time(nullptr);
   tm local = {};
   if (!localtime_r(&now, &local))
@@ -300,6 +364,8 @@ uint32_t nativeWallClockMinutes(wasm_exec_env_t) {
 
 void nativeLog(wasm_exec_env_t environment, uint32_t level, uint32_t offset,
                uint32_t length) {
+  if (!hostFor(environment))
+    return;
   if (length > kMaxLogBytes)
     return;
   const char *message =
@@ -1122,6 +1188,92 @@ bool writeBytesResult(wasm_exec_env_t environment, uint32_t result_offset,
   return true;
 }
 
+void nativeAssetOpen(wasm_exec_env_t environment, uint32_t path_offset,
+                     uint32_t path_length, uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 24, 24);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 24);
+  std::string path;
+  resources::PackageAssetService *service = assetsFor(environment);
+  uint32_t handle = 0;
+  uint64_t size = 0;
+  if (!service ||
+      !guestString(environment, path_offset, path_length, path, 4096) ||
+      !service->open(path, handle, size)) {
+    result[0] = 1;
+    result[8] = static_cast<uint8_t>(service ? WitError::InvalidArgument
+                                             : WitError::Unavailable);
+    return;
+  }
+  storeCanonical(result, 8, handle);
+  storeCanonical(result, 16, size);
+}
+
+void nativeAssetRead(wasm_exec_env_t environment, uint32_t handle,
+                     uint64_t offset, uint32_t maximum_bytes,
+                     uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 12);
+  resources::PackageAssetService *service = assetsFor(environment);
+  uint32_t size = 0;
+  if (!service || !service->readSize(handle, offset, maximum_bytes, size)) {
+    result[0] = 1;
+    result[4] =
+        static_cast<uint8_t>(service ? WitError::Io : WitError::Unavailable);
+    return;
+  }
+  const uint32_t pointer = size ? guestRealloc(environment, 0, 0, 1, size) : 1;
+  uint8_t *destination =
+      size ? appMutableArray<uint8_t>(
+                 environment, pointer, size,
+                 resources::PackageAssetService::kMaximumReadBytes)
+           : reinterpret_cast<uint8_t *>(1);
+  if (!pointer || !destination) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to allocate packaged asset result");
+    return;
+  }
+  uint32_t bytes_read = 0;
+  if (!service->readInto(handle, offset, size ? destination : nullptr, size,
+                         bytes_read) ||
+      bytes_read != size) {
+    if (size)
+      guestRealloc(environment, pointer, size, 1, 0);
+    result = appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+    if (!result) {
+      trapInvalidReturnArea(environment);
+      return;
+    }
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Io);
+    return;
+  }
+  result = appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[0] = 0;
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, size);
+}
+
+void nativeAssetClose(wasm_exec_env_t environment, uint32_t handle,
+                      uint32_t result_offset) {
+  resources::PackageAssetService *service = assetsFor(environment);
+  writeResult(environment, result_offset, service && service->close(handle),
+              service ? WitError::InvalidArgument : WitError::Unavailable);
+}
+
 bool databaseArguments(wasm_exec_env_t environment, uint32_t database_offset,
                        uint32_t database_length, uint32_t sql_offset,
                        uint32_t sql_length, std::string &database,
@@ -1352,6 +1504,272 @@ void nativeAudioPlayTone(wasm_exec_env_t environment, double frequency_hz,
   storeCanonical<int64_t>(result, 24, info.frames_transferred);
 }
 
+void nativeAudioSupportedFormats(wasm_exec_env_t environment,
+                                 uint32_t result_offset) {
+  if (!hostFor(environment))
+    return;
+  constexpr uint32_t kRecordSize = 20;
+  const auto &formats = media::supportedAudioFormats();
+  uint8_t *result = appMutableArray<uint8_t>(environment, result_offset, 8, 8);
+  if (!result || formats.size() > 64) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 8);
+  const uint32_t count = static_cast<uint32_t>(formats.size());
+  const uint32_t bytes = count * kRecordSize;
+  const uint32_t pointer =
+      count ? guestRealloc(environment, 0, 0, 4, bytes) : 4;
+  uint8_t *records = count ? appMutableArray<uint8_t>(environment, pointer,
+                                                      bytes, 64 * kRecordSize)
+                           : reinterpret_cast<uint8_t *>(1);
+  if (!pointer || !records) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower audio format capabilities");
+    return;
+  }
+  if (count)
+    std::memset(records, 0, bytes);
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *record = records + index * kRecordSize;
+    if (!lowerStringAt(environment, formats[index].mime_type, record, 0) ||
+        !lowerStringAt(environment, formats[index].extensions, record, 8)) {
+      wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                                 "failed to lower audio format strings");
+      return;
+    }
+    record[16] = static_cast<uint8_t>(formats[index].decoder);
+    record[17] = formats[index].streaming;
+    record[18] = formats[index].seekable;
+  }
+  storeCanonical(result, 0, pointer);
+  storeCanonical(result, 4, count);
+}
+
+void nativePcmCapabilities(wasm_exec_env_t environment,
+                           uint32_t result_offset) {
+  if (!hostFor(environment))
+    return;
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 5, 5);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  result[0] = 8000;
+  result[1] = 48000;
+  result[2] = 0x3;
+  result[3] = 256;
+  result[4] = 65536;
+}
+
+void nativePcmOpen(wasm_exec_env_t environment, uint32_t sample_rate,
+                   uint32_t channels, uint32_t capacity_frames, uint32_t usage,
+                   uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 40);
+  if (!result)
+    return;
+  if (sample_rate > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      channels > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      capacity_frames >
+          static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+      usage > static_cast<uint32_t>(hardware::AudioUsage::Notification)) {
+    failServiceResult(result, 8, WitError::InvalidArgument);
+    return;
+  }
+  const hardware::PcmOutputConfig config = {
+      static_cast<int>(sample_rate), static_cast<int>(channels),
+      static_cast<int>(capacity_frames),
+      static_cast<hardware::AudioUsage>(usage)};
+  uint32_t handle = 0;
+  hardware::AudioStreamInfo info;
+  if (!servicesFor(environment)->pcmOpen(config, handle, info)) {
+    failServiceResult(result, 8);
+    return;
+  }
+  storeCanonical(result, 8, handle);
+  storeCanonical<int32_t>(result, 16, info.sample_rate);
+  storeCanonical<int32_t>(result, 20, info.channel_count);
+  storeCanonical<int32_t>(result, 24, info.device_id);
+  storeCanonical<int64_t>(result, 32, info.frames_transferred);
+}
+
+void nativePcmWrite(wasm_exec_env_t environment, uint32_t handle,
+                    uint32_t samples_offset, uint32_t sample_count,
+                    uint32_t result_offset) {
+  hardware::PcmOutputStatus status;
+  device::ServiceProvider *services = servicesFor(environment);
+  const int16_t *samples = appArray<int16_t>(environment, samples_offset,
+                                             sample_count, 2 * 1024 * 1024);
+  if (!services || !samples || !services->pcmStatus(handle, status) ||
+      status.stream.channel_count <= 0 ||
+      sample_count % static_cast<uint32_t>(status.stream.channel_count) != 0) {
+    writeWideResult<uint64_t>(environment, result_offset, false, 0,
+                              WitError::InvalidArgument);
+    return;
+  }
+  int64_t accepted = 0;
+  const int64_t frames = sample_count / status.stream.channel_count;
+  const bool success = services->pcmWrite(handle, samples, frames, accepted);
+  writeWideResult<uint64_t>(
+      environment, result_offset, success,
+      static_cast<uint64_t>(std::max<int64_t>(0, accepted)));
+}
+
+void nativePcmSetVolume(wasm_exec_env_t environment, uint32_t handle,
+                        float volume, uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  const bool valid = std::isfinite(volume) && volume >= 0.0F && volume <= 1.0F;
+  writeResult(environment, result_offset,
+              valid && services && services->pcmSetVolume(handle, volume),
+              valid ? WitError::Io : WitError::InvalidArgument);
+}
+
+void nativePcmPause(wasm_exec_env_t environment, uint32_t handle,
+                    uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->pcmPause(handle), WitError::Io);
+}
+
+void nativePcmResume(wasm_exec_env_t environment, uint32_t handle,
+                     uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->pcmResume(handle), WitError::Io);
+}
+
+void nativePcmFlush(wasm_exec_env_t environment, uint32_t handle,
+                    uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->pcmFlush(handle), WitError::Io);
+}
+
+void nativePcmStatus(wasm_exec_env_t environment, uint32_t handle,
+                     uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 56);
+  if (!result)
+    return;
+  hardware::PcmOutputStatus status;
+  if (!servicesFor(environment)->pcmStatus(handle, status)) {
+    failServiceResult(result, 8);
+    return;
+  }
+  storeCanonical<int32_t>(result, 8, status.stream.sample_rate);
+  storeCanonical<int32_t>(result, 12, status.stream.channel_count);
+  storeCanonical<int32_t>(result, 16, status.stream.device_id);
+  storeCanonical<int64_t>(result, 24, status.stream.frames_transferred);
+  storeCanonical<int64_t>(result, 32, status.queued_frames);
+  storeCanonical<int64_t>(result, 40, status.consumed_frames);
+  storeCanonical<int32_t>(result, 48, status.underruns);
+  result[52] = status.paused;
+}
+
+void nativePcmClose(wasm_exec_env_t environment, uint32_t handle,
+                    uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->pcmClose(handle), WitError::Io);
+}
+
+void nativePlayerOpenAsset(wasm_exec_env_t environment, uint32_t path_offset,
+                           uint32_t path_length, uint32_t usage,
+                           uint32_t result_offset) {
+  std::string path;
+  uint32_t handle = 0;
+  media::MediaService *media = mediaFor(environment);
+  const bool valid =
+      usage <= static_cast<uint32_t>(hardware::AudioUsage::Notification) &&
+      guestString(environment, path_offset, path_length, path, 1024);
+  const bool success =
+      valid && media &&
+      media->openAsset(path, static_cast<hardware::AudioUsage>(usage), handle);
+  writeU32Result(environment, result_offset, success, handle,
+                 valid ? WitError::Io : WitError::InvalidArgument);
+}
+
+void nativePlayerPlay(wasm_exec_env_t environment, uint32_t handle,
+                      uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  writeResult(environment, result_offset, media && media->play(handle),
+              WitError::Io);
+}
+
+void nativePlayerPause(wasm_exec_env_t environment, uint32_t handle,
+                       uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  writeResult(environment, result_offset, media && media->pause(handle),
+              WitError::Io);
+}
+
+void nativePlayerSeek(wasm_exec_env_t environment, uint32_t handle,
+                      uint64_t position_ms, uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  writeResult(environment, result_offset,
+              media && media->seek(handle, position_ms), WitError::Io);
+}
+
+void nativePlayerSetVolume(wasm_exec_env_t environment, uint32_t handle,
+                           float volume, uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  const bool valid = std::isfinite(volume) && volume >= 0.0F && volume <= 1.0F;
+  writeResult(environment, result_offset,
+              valid && media && media->setVolume(handle, volume),
+              valid ? WitError::Io : WitError::InvalidArgument);
+}
+
+void nativePlayerSetLooping(wasm_exec_env_t environment, uint32_t handle,
+                            uint32_t looping, uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  writeResult(environment, result_offset,
+              looping <= 1 && media && media->setLooping(handle, looping != 0),
+              looping <= 1 ? WitError::Io : WitError::InvalidArgument);
+}
+
+void nativePlayerStatus(wasm_exec_env_t environment, uint32_t handle,
+                        uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 40);
+  if (!result)
+    return;
+  media::PlayerStatus status;
+  media::MediaService *media = mediaFor(environment);
+  if (!media || !media->status(handle, status)) {
+    failServiceResult(result, 8);
+    return;
+  }
+  result[8] = static_cast<uint8_t>(status.state);
+  storeCanonical<uint64_t>(result, 16, status.position_ms);
+  storeCanonical<uint64_t>(result, 24, status.duration_ms);
+  storeCanonical<int32_t>(result, 32, status.underruns);
+}
+
+void nativePlayerClose(wasm_exec_env_t environment, uint32_t handle,
+                       uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  writeResult(environment, result_offset, media && media->close(handle),
+              WitError::Io);
+}
+
+void nativeAudioLastError(wasm_exec_env_t environment, uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  const std::string *message = nullptr;
+  if (host && host->media_service && *host->media_service &&
+      !(*host->media_service)->lastError().empty()) {
+    message = &(*host->media_service)->lastError();
+  }
+  device::ServiceProvider *services = servicesFor(environment);
+  const std::string fallback = !services ? "service unavailable"
+                               : services->lastError().empty()
+                                   ? "service ready"
+                                   : services->lastError();
+  const std::string &value = message ? *message : fallback;
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+  if (!result || !lowerString(environment, value.c_str(), result[0], result[1]))
+    trapInvalidReturnArea(environment);
+}
+
 void nativeAudioRecord(wasm_exec_env_t environment, uint32_t path_offset,
                        uint32_t path_length, uint32_t duration_ms,
                        uint32_t result_offset) {
@@ -1505,8 +1923,11 @@ void nativePowerAcquireWakeLock(wasm_exec_env_t environment,
   std::string name;
   const bool arguments =
       guestString(environment, name_offset, name_length, name, 128);
-  writeResult(environment, result_offset,
-              services && arguments && services->acquireWakeLock(name),
+  const bool success = services && arguments && services->acquireWakeLock(name);
+  AppHostContext *host = hostFor(environment);
+  if (success && host)
+    host->wake_locks.push_back(name);
+  writeResult(environment, result_offset, success,
               !services   ? serviceAccessError(environment)
               : arguments ? WitError::Io
                           : WitError::InvalidArgument);
@@ -1519,8 +1940,15 @@ void nativePowerReleaseWakeLock(wasm_exec_env_t environment,
   std::string name;
   const bool arguments =
       guestString(environment, name_offset, name_length, name, 128);
-  writeResult(environment, result_offset,
-              services && arguments && services->releaseWakeLock(name),
+  const bool success = services && arguments && services->releaseWakeLock(name);
+  AppHostContext *host = hostFor(environment);
+  if (success && host) {
+    const auto found =
+        std::find(host->wake_locks.begin(), host->wake_locks.end(), name);
+    if (found != host->wake_locks.end())
+      host->wake_locks.erase(found);
+  }
+  writeResult(environment, result_offset, success,
               !services   ? serviceAccessError(environment)
               : arguments ? WitError::Io
                           : WitError::InvalidArgument);
@@ -2209,6 +2637,10 @@ NativeSymbol kRuntimeSymbols[] = {
     {"log", reinterpret_cast<void *>(nativeLog), "(iii)", nullptr},
     {"set-status-bar-style", reinterpret_cast<void *>(nativeSetStatusBarStyle),
      "(iii)", nullptr},
+    {"set-surface-mode", reinterpret_cast<void *>(nativeSetSurfaceMode), "(ii)",
+     nullptr},
+    {"request-exit", reinterpret_cast<void *>(nativeRequestExit), "(i)",
+     nullptr},
 };
 
 NativeSymbol kGraphicsSymbols[] = {
@@ -2261,11 +2693,47 @@ NativeSymbol kDeviceSymbols[] = {
 };
 
 NativeSymbol kAudioSymbols[] = {
+    {"supported-formats", reinterpret_cast<void *>(nativeAudioSupportedFormats),
+     "(i)", nullptr},
+    {"get-pcm-capabilities", reinterpret_cast<void *>(nativePcmCapabilities),
+     "(i)", nullptr},
+    {"pcm-open", reinterpret_cast<void *>(nativePcmOpen), "(iiiii)",
+     reinterpret_cast<void *>(8)},
+    {"pcm-write", reinterpret_cast<void *>(nativePcmWrite), "(iiii)",
+     reinterpret_cast<void *>(8)},
+    {"pcm-set-volume", reinterpret_cast<void *>(nativePcmSetVolume), "(ifi)",
+     reinterpret_cast<void *>(1)},
+    {"pcm-pause", reinterpret_cast<void *>(nativePcmPause), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"pcm-resume", reinterpret_cast<void *>(nativePcmResume), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"pcm-flush", reinterpret_cast<void *>(nativePcmFlush), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"pcm-status", reinterpret_cast<void *>(nativePcmStatus), "(ii)",
+     reinterpret_cast<void *>(8)},
+    {"pcm-close", reinterpret_cast<void *>(nativePcmClose), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"player-open-asset", reinterpret_cast<void *>(nativePlayerOpenAsset),
+     "(iiii)", reinterpret_cast<void *>(4)},
+    {"player-play", reinterpret_cast<void *>(nativePlayerPlay), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"player-pause", reinterpret_cast<void *>(nativePlayerPause), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"player-seek", reinterpret_cast<void *>(nativePlayerSeek), "(iIi)",
+     reinterpret_cast<void *>(1)},
+    {"player-set-volume", reinterpret_cast<void *>(nativePlayerSetVolume),
+     "(ifi)", reinterpret_cast<void *>(1)},
+    {"player-set-looping", reinterpret_cast<void *>(nativePlayerSetLooping),
+     "(iii)", reinterpret_cast<void *>(1)},
+    {"player-status", reinterpret_cast<void *>(nativePlayerStatus), "(ii)",
+     reinterpret_cast<void *>(8)},
+    {"player-close", reinterpret_cast<void *>(nativePlayerClose), "(ii)",
+     reinterpret_cast<void *>(1)},
     {"play-tone", reinterpret_cast<void *>(nativeAudioPlayTone), "(Fifii)",
      reinterpret_cast<void *>(8)},
     {"record-wav", reinterpret_cast<void *>(nativeAudioRecord), "(iiii)",
      serviceAttachment(8, WasmServicePermission::AudioCapture)},
-    {"last-error", reinterpret_cast<void *>(nativeServiceMessage), "(i)",
+    {"last-error", reinterpret_cast<void *>(nativeAudioLastError), "(i)",
      nullptr},
 };
 
@@ -2456,6 +2924,12 @@ NativeSymbol kFontAssetsSymbols[] = {
     {"load", reinterpret_cast<void *>(nativeFontLoad), "(ii)", nullptr},
 };
 
+NativeSymbol kAssetsSymbols[] = {
+    {"open", reinterpret_cast<void *>(nativeAssetOpen), "(iii)", nullptr},
+    {"read", reinterpret_cast<void *>(nativeAssetRead), "(iIii)", nullptr},
+    {"close", reinterpret_cast<void *>(nativeAssetClose), "(ii)", nullptr},
+};
+
 NativeSymbol kSystemServicesSymbols[] = {
     {"request", reinterpret_cast<void *>(nativeSystemRequest), "(iiiiiii)",
      serviceAttachment(4, WasmServicePermission::System)},
@@ -2491,6 +2965,8 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kDeviceStorageSymbols))},
     {kFontAssetsInterface, kFontAssetsSymbols,
      static_cast<uint32_t>(std::size(kFontAssetsSymbols))},
+    {kAssetsInterface, kAssetsSymbols,
+     static_cast<uint32_t>(std::size(kAssetsSymbols))},
     {kSystemServicesInterface, kSystemServicesSymbols,
      static_cast<uint32_t>(std::size(kSystemServicesSymbols))},
 };
@@ -2505,6 +2981,8 @@ bool acquireRuntime(std::string &error) {
     arguments.native_symbols = kRuntimeSymbols;
     arguments.n_native_symbols =
         static_cast<uint32_t>(std::size(kRuntimeSymbols));
+    // WAMR counts guest-created workers separately from the lifecycle thread.
+    arguments.max_thread_num = 1;
     if (!wasm_runtime_full_init(&arguments)) {
       error = "WAMR initialization failed";
       return false;
@@ -2852,6 +3330,55 @@ private:
   size_t size_ = 0;
 };
 
+bool readUleb(const uint8_t *&cursor, const uint8_t *end, uint32_t &value) {
+  value = 0;
+  for (unsigned shift = 0; shift < 35 && cursor < end; shift += 7) {
+    const uint8_t byte = *cursor++;
+    if (shift == 28 && (byte & 0xf0) != 0)
+      return false;
+    value |= static_cast<uint32_t>(byte & 0x7f) << shift;
+    if ((byte & 0x80) == 0)
+      return true;
+  }
+  return false;
+}
+
+bool validateCoreMemoryPolicy(const uint8_t *bytes, size_t size,
+                              std::string &error) {
+  constexpr uint32_t kMaximumPages = 1024; // 64 MiB
+  if (size < 8 || std::memcmp(bytes, "\0asm", 4) != 0)
+    return true; // AOT memory is capped and verified after instantiation.
+  const uint8_t *cursor = bytes + 8;
+  const uint8_t *end = bytes + size;
+  while (cursor < end) {
+    const uint8_t section_id = *cursor++;
+    uint32_t section_size = 0;
+    if (!readUleb(cursor, end, section_size) ||
+        static_cast<size_t>(end - cursor) < section_size) {
+      error = "malformed core Wasm section";
+      return false;
+    }
+    const uint8_t *section_end = cursor + section_size;
+    if (section_id == 5) {
+      uint32_t count = 0, flags = 0, initial = 0, maximum = 0;
+      if (!readUleb(cursor, section_end, count) || count != 1 ||
+          !readUleb(cursor, section_end, flags) ||
+          (flags & ~uint32_t{3}) != 0 ||
+          !readUleb(cursor, section_end, initial) || (flags & 1) == 0 ||
+          !readUleb(cursor, section_end, maximum) || initial > maximum ||
+          maximum > kMaximumPages) {
+        error =
+            "Wasm memory must declare one bounded maximum of at most 64 MiB";
+        return false;
+      }
+      return true;
+    }
+    cursor = section_end;
+  }
+  error = "core Wasm module has no defined linear memory";
+  return false;
+}
+
 } // namespace
 
 class WasmApp::Impl {
@@ -2872,6 +3399,10 @@ public:
       font_assets = std::make_unique<resources::FontAssetService>(
           this->options.font_directory);
     }
+    if (!this->options.asset_directory.empty()) {
+      assets = std::make_unique<resources::PackageAssetService>(
+          this->options.asset_directory);
+    }
     if (!this->options.system_data_root.empty() &&
         apps::hasDeviceServicePermission(
             this->options.service_permission_mask,
@@ -2882,14 +3413,20 @@ public:
     host = {&this->graphics,
             device,
             &services,
+            &media_service,
             app_storage.get(),
             device_storage.get(),
             font_assets.get(),
+            assets.get(),
             system_services.get(),
             this->options.status_bar,
             &this->options.app_id,
+            &this->options.asset_directory,
             this->options.service_permission_mask,
-            this->options.enforce_service_permissions};
+            this->options.enforce_service_permissions,
+            std::this_thread::get_id(),
+            &exit_requested,
+            &audio_focused};
   }
 
   ~Impl() { shutdown(); }
@@ -2953,9 +3490,22 @@ public:
       wasm_runtime_unload(module);
       module = nullptr;
     }
+    media_service.reset();
+    if (services) {
+      for (const auto &name : host.wake_locks)
+        services->releaseWakeLock(name);
+      host.wake_locks.clear();
+      services->closeAllPcm();
+    }
+    services.reset();
+    if (assets)
+      assets->closeAll();
+    if (app_storage)
+      app_storage->closeSessionStatements();
     graphics.reset();
     module_bytes.reset();
     initialized = false;
+    exit_requested = false;
     if (runtime_initialized) {
       releaseRuntime();
       runtime_initialized = false;
@@ -2964,9 +3514,11 @@ public:
 
   NamespacedGraphicsHost graphics;
   std::unique_ptr<device::ServiceProvider> services;
+  std::unique_ptr<media::MediaService> media_service;
   std::unique_ptr<storage::AppStorage> app_storage;
   std::unique_ptr<storage::DeviceStorageService> device_storage;
   std::unique_ptr<resources::FontAssetService> font_assets;
+  std::unique_ptr<resources::PackageAssetService> assets;
   std::unique_ptr<services::SystemServiceHub> system_services;
   AppHostContext host;
   WasmAppOptions options;
@@ -2977,6 +3529,8 @@ public:
   std::string error;
   bool runtime_initialized = false;
   bool initialized = false;
+  bool exit_requested = false;
+  bool audio_focused = true;
 };
 
 WasmApp::WasmApp(GraphicsHost &graphics, WasmAppOptions options)
@@ -3008,6 +3562,9 @@ bool WasmApp::load(const char *path) {
       !impl_->module_bytes.open(path, impl_->error)) {
     return false;
   }
+  if (!validateCoreMemoryPolicy(impl_->module_bytes.data(),
+                                impl_->module_bytes.size(), impl_->error))
+    return false;
   std::array<char, kErrorBufferSize> error_buffer{};
   impl_->module =
       wasm_runtime_load(impl_->module_bytes.data(), impl_->module_bytes.size(),
@@ -3016,12 +3573,29 @@ bool WasmApp::load(const char *path) {
     impl_->error = std::string("load WASM module: ") + error_buffer.data();
     return false;
   }
-  impl_->instance = wasm_runtime_instantiate(
-      impl_->module, impl_->options.stack_size, impl_->options.heap_size,
-      error_buffer.data(), error_buffer.size());
+  constexpr uint32_t kMaximumMemoryPages = 1024;
+  const InstantiationArgs arguments = {
+      impl_->options.stack_size, impl_->options.heap_size, kMaximumMemoryPages};
+  impl_->instance = wasm_runtime_instantiate_ex(
+      impl_->module, &arguments, error_buffer.data(), error_buffer.size());
   if (!impl_->instance) {
     impl_->error =
         std::string("instantiate WASM module: ") + error_buffer.data();
+    return false;
+  }
+  wasm_memory_inst_t memory = wasm_runtime_get_default_memory(impl_->instance);
+  const uint64_t bytes_per_page =
+      memory ? wasm_memory_get_bytes_per_page(memory) : 0;
+  const uint64_t current_pages =
+      memory ? wasm_memory_get_cur_page_count(memory) : 0;
+  const uint64_t maximum_pages =
+      memory ? wasm_memory_get_max_page_count(memory) : 0;
+  constexpr uint64_t kMaximumMemoryBytes = 64ULL * 1024 * 1024;
+  if (!memory || bytes_per_page == 0 || current_pages > maximum_pages ||
+      maximum_pages > kMaximumMemoryBytes / bytes_per_page) {
+    wasm_runtime_deinstantiate(impl_->instance);
+    impl_->instance = nullptr;
+    impl_->error = "WASM instance memory exceeds the 64 MiB policy";
     return false;
   }
   wasm_runtime_set_custom_data(impl_->instance, &impl_->host);
@@ -3069,6 +3643,20 @@ bool WasmApp::render(int64_t monotonic_us) {
 }
 
 void WasmApp::shutdown() { impl_->shutdown(); }
+
+bool WasmApp::takeExitRequest() {
+  const bool requested = impl_->exit_requested;
+  impl_->exit_requested = false;
+  return requested;
+}
+
+void WasmApp::setAudioFocused(bool focused) {
+  impl_->audio_focused = focused;
+  if (impl_->media_service)
+    impl_->media_service->setFocused(focused);
+  if (impl_->services)
+    impl_->services->setAudioFocused(focused);
+}
 
 const char *WasmApp::lastError() const { return impl_->error.c_str(); }
 

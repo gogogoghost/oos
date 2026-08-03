@@ -29,6 +29,10 @@ int main() {
                                  platform_size) ==
          oos::resources::FontAssetStatus::Ok);
   assert(platform_size > 0);
+  assert(platform_fonts.fileSize(oos::resources::FontRole::CjkFallback,
+                                 platform_size) ==
+         oos::resources::FontAssetStatus::Ok);
+  assert(platform_size > 0);
 
   char root_template[] = "/tmp/oos-font-assets.XXXXXX";
   const char *root = mkdtemp(root_template);

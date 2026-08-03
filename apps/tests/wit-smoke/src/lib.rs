@@ -1,6 +1,6 @@
 use oos_app::bindings::oos::platform::{
-    audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime, system_services,
-    vibrator, wifi,
+    assets, audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime,
+    system_services, vibrator, wifi,
 };
 use oos_app::{
     gles2, App as AppLifecycle, ErrorCode, FontRole, KeyEvent, ShaderStage, TextureFormat,
@@ -81,6 +81,40 @@ fn graphics_smoke() {
 }
 
 fn mocked() {
+    let asset = assets::open("test.dat").unwrap();
+    assert_eq!(asset.size, 10);
+    assert_eq!(assets::read(asset.handle, 5, 3).unwrap(), b"ass");
+    assets::close(asset.handle).unwrap();
+    let formats = audio::supported_formats();
+    assert!(formats.iter().any(|format| format.mime_type == "audio/wav"));
+    assert!(formats
+        .iter()
+        .any(|format| format.mime_type == "audio/mpeg"));
+    assert!(formats
+        .iter()
+        .any(|format| format.mime_type == "audio/flac"));
+    let pcm_capabilities = audio::get_pcm_capabilities();
+    assert_eq!(pcm_capabilities.minimum_sample_rate, 8_000);
+    assert_eq!(pcm_capabilities.maximum_sample_rate, 48_000);
+    assert_eq!(pcm_capabilities.supported_channel_mask, 0x3);
+    assert!(pcm_capabilities.minimum_capacity_frames <= 512);
+    assert!(pcm_capabilities.maximum_capacity_frames >= 512);
+    let pcm = audio::pcm_open(16_000, 1, 512, audio::Usage::Media).unwrap();
+    assert_eq!(pcm.audio_stream.sample_rate, 16_000);
+    assert_eq!(audio::pcm_write(pcm.handle, &[0_i16; 64]).unwrap(), 64);
+    audio::pcm_set_volume(pcm.handle, 0.5).unwrap();
+    audio::pcm_pause(pcm.handle).unwrap();
+    assert!(audio::pcm_status(pcm.handle).unwrap().paused);
+    audio::pcm_flush(pcm.handle).unwrap();
+    audio::pcm_resume(pcm.handle).unwrap();
+    audio::pcm_close(pcm.handle).unwrap();
+    let player = audio::player_open_asset("test.dat", audio::Usage::Media).unwrap();
+    audio::player_set_volume(player, 0.75).unwrap();
+    audio::player_set_looping(player, false).unwrap();
+    audio::player_play(player).unwrap();
+    let _ = audio::player_status(player).unwrap();
+    audio::player_pause(player).unwrap();
+    audio::player_close(player).unwrap();
     let tone = audio::play_tone(440.0, 10, 0.1, audio::Usage::Media).unwrap();
     assert_eq!(tone.sample_rate, 48_000);
     assert!(audio::record_wav("recording.wav", 10)
@@ -189,6 +223,8 @@ impl AppLifecycle for App {
     fn init() -> Result<(), ErrorCode> {
         assert_eq!(runtime::abi_version(), oos_app::ABI_VERSION);
         runtime::set_status_bar_style(0x12_34_56, runtime::StatusBarIconTheme::Dark)?;
+        runtime::set_surface_mode(runtime::SurfaceMode::Immersive)?;
+        runtime::set_surface_mode(runtime::SurfaceMode::Normal)?;
         let font = oos_app::font_assets::load(FontRole::UiProportional).unwrap();
         assert!(font.starts_with(b"OTTO"));
         unavailable(oos_app::font_assets::load(FontRole::UiMonospace));
@@ -320,6 +356,8 @@ impl AppLifecycle for App {
             device::CapabilityState::Unsupported
         ));
 
+        unavailable(assets::open("test.dat"));
+        assert!(audio::supported_formats().len() >= 9);
         unavailable(audio::play_tone(440.0, 1, 0.1, audio::Usage::Media));
         unavailable(audio::record_wav("recording.wav", 1));
         assert_eq!(audio::last_error(), "service unavailable");

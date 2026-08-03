@@ -23,7 +23,8 @@ interface types {
   }
 }
 
-/// Process-safe services that every OOS application can import.
+/// Lifecycle-thread services that every OOS application can import. Only
+/// immutable ABI discovery is legal from a guest worker.
 interface runtime {
   use types.{error-code};
 
@@ -39,6 +40,11 @@ interface runtime {
     dark,
   }
 
+  enum surface-mode {
+    normal,
+    immersive,
+  }
+
   abi-version: func() -> u32;
   wall-clock-minutes: func() -> u32;
   log: func(level: log-level, message: string);
@@ -48,6 +54,11 @@ interface runtime {
     background-rgb: u32,
     icons: status-bar-icon-theme,
   ) -> result<_, error-code>;
+  /// Changes the application layer between status-bar-safe and physical-screen
+  /// geometry. The new size is visible immediately through graphics.
+  set-surface-mode: func(mode: surface-mode) -> result<_, error-code>;
+  /// Requests destruction after the current host or lifecycle call returns.
+  request-exit: func() -> result<_, error-code>;
 }
 
 /// Retained texture and indexed-triangle drawing for the application surface.
@@ -377,6 +388,21 @@ interface device {
 interface audio {
   use types.{error-code};
 
+  enum decoder-kind {
+    built-in,
+    platform,
+  }
+
+  /// One format that this OOS build can actually decode. MIME type is the
+  /// stable identifier; the comma-separated extensions are discovery hints.
+  record format-support {
+    mime-type: string,
+    extensions: string,
+    decoder: decoder-kind,
+    streaming: bool,
+    seekable: bool,
+  }
+
   enum usage {
     media,
     voice,
@@ -398,6 +424,72 @@ interface audio {
     rms: f64,
     path: string,
   }
+
+  record opened-pcm {
+    handle: u32,
+    audio-stream: stream-info,
+  }
+
+  record pcm-capabilities {
+    minimum-sample-rate: u32,
+    maximum-sample-rate: u32,
+    supported-channel-mask: u32,
+    minimum-capacity-frames: u32,
+    maximum-capacity-frames: u32,
+  }
+
+  record pcm-stream-status {
+    audio-stream: stream-info,
+    queued-frames: s64,
+    consumed-frames: s64,
+    underruns: s32,
+    paused: bool,
+  }
+
+  enum player-state {
+    preparing,
+    ready,
+    playing,
+    paused,
+    ended,
+    failed,
+  }
+
+  record playback-status {
+    state: player-state,
+    position-ms: u64,
+    duration-ms: u64,
+    underruns: s32,
+  }
+
+  supported-formats: func() -> list<format-support>;
+  get-pcm-capabilities: func() -> pcm-capabilities;
+
+  /// Opens a persistent, bounded signed-S16 interleaved output stream.
+  pcm-open: func(
+    sample-rate: u32,
+    channel-count: u32,
+    capacity-frames: u32,
+    usage: usage,
+  ) -> result<opened-pcm, error-code>;
+  /// Non-blocking write. The result is the number of whole frames accepted.
+  pcm-write: func(handle: u32, samples: list<s16>) -> result<u64, error-code>;
+  pcm-set-volume: func(handle: u32, volume: f32) -> result<_, error-code>;
+  pcm-pause: func(handle: u32) -> result<_, error-code>;
+  pcm-resume: func(handle: u32) -> result<_, error-code>;
+  pcm-flush: func(handle: u32) -> result<_, error-code>;
+  pcm-status: func(handle: u32) -> result<pcm-stream-status, error-code>;
+  pcm-close: func(handle: u32) -> result<_, error-code>;
+
+  /// Creates an asynchronous player for a file under the package's assets/.
+  player-open-asset: func(path: string, usage: usage) -> result<u32, error-code>;
+  player-play: func(handle: u32) -> result<_, error-code>;
+  player-pause: func(handle: u32) -> result<_, error-code>;
+  player-seek: func(handle: u32, position-ms: u64) -> result<_, error-code>;
+  player-set-volume: func(handle: u32, volume: f32) -> result<_, error-code>;
+  player-set-looping: func(handle: u32, looping: bool) -> result<_, error-code>;
+  player-status: func(handle: u32) -> result<playback-status, error-code>;
+  player-close: func(handle: u32) -> result<_, error-code>;
 
   play-tone: func(
     frequency-hz: f64,
@@ -793,9 +885,25 @@ interface font-assets {
     ui-proportional,
     ui-monospace,
     emoji,
+    cjk-fallback,
   }
 
   load: func(role: font-role) -> result<list<u8>, error-code>;
+}
+
+/// Read-only files stored below the calling application's package `assets/`
+/// directory. Handles and returned bytes are scoped to one application session.
+interface assets {
+  use types.{error-code};
+
+  record opened-asset {
+    handle: u32,
+    size: u64,
+  }
+
+  open: func(path: string) -> result<opened-asset, error-code>;
+  read: func(handle: u32, offset: u64, maximum-bytes: u32) -> result<list<u8>, error-code>;
+  close: func(handle: u32) -> result<_, error-code>;
 }
 
 // Trusted policy and state broker for SystemUI. Payloads use JSON because the
@@ -850,6 +958,7 @@ world app {
   import storage;
   import device-storage;
   import font-assets;
+  import assets;
   import system-services;
 
   export lifecycle;

@@ -20,8 +20,9 @@ set(WAMR_BUILD_FAST_JIT 0)
 set(WAMR_BUILD_JIT 0)
 set(WAMR_BUILD_LIBC_BUILTIN 0)
 set(WAMR_BUILD_LIBC_WASI 0)
-set(WAMR_BUILD_LIB_PTHREAD 0)
+set(WAMR_BUILD_LIB_PTHREAD 1)
 set(WAMR_BUILD_LIB_WASI_THREADS 0)
+set(WAMR_BUILD_SHARED_MEMORY 1)
 set(WAMR_BUILD_MULTI_MODULE 0)
 set(WAMR_BUILD_BULK_MEMORY 1)
 set(WAMR_BUILD_REF_TYPES 1)
@@ -33,14 +34,31 @@ target_include_directories(oos_wamr_host PUBLIC
   "${WAMR_ROOT_DIR}/core/iwasm/include")
 target_link_libraries(oos_wamr_host PUBLIC dl m pthread)
 
+include("${OOS_SYSTEM_ROOT}/cmake/Sonivox.cmake")
+oos_add_sonivox(oos_sonivox_host
+  "${OOS_REPO_ROOT}/third_party/sonivox/arm-wt-22k")
+include("${OOS_SYSTEM_ROOT}/cmake/FluidLite.cmake")
+oos_add_fluidlite("${OOS_REPO_ROOT}/third_party/fluidlite")
+include("${OOS_SYSTEM_ROOT}/cmake/FFmpeg.cmake")
+oos_add_ffmpeg(oos_ffmpeg_host
+  "${OOS_REPO_ROOT}/build/media-codecs/local/install")
+
 add_executable(oos_wasm_runtime_test
   wasm_runtime_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/audio_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/audio_format.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/ffmpeg_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/media_service.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/midi_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/soundfont_midi_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/native_app_manager.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/wasm_app.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/resources/font_assets.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/resources/package_assets.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/services/system_service.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/device_storage.cpp"
@@ -49,9 +67,37 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp"
   "${OOS_SYSTEM_ROOT}/devices/local/src/service_provider.cpp")
 target_include_directories(oos_wasm_runtime_test PRIVATE
-  "${OOS_SYSTEM_ROOT}/src")
+  "${OOS_SYSTEM_ROOT}/src"
+  "${OOS_REPO_ROOT}/third_party/miniaudio"
+  "${OOS_REPO_ROOT}/third_party/tinysoundfont")
+include("${OOS_SYSTEM_ROOT}/cmake/EmbeddedSoundFont.cmake")
+oos_embed_gm_soundfont(oos_wasm_runtime_test
+  "${OOS_REPO_ROOT}/third_party/generaluser-gs/GeneralUser-GS.sf2")
+set_source_files_properties(
+  "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c"
+  PROPERTIES COMPILE_OPTIONS "-Wno-unused-function;-Wno-unused-variable")
 target_link_libraries(oos_wasm_runtime_test PRIVATE
-  oos_wamr_host ${CMAKE_DL_LIBS} z)
+  oos_wamr_host oos_sonivox_host oos_ffmpeg_host fluidlite ${CMAKE_DL_LIBS} z)
+
+add_executable(oos_media_core_test
+  media_core_test.cpp
+  "${OOS_SYSTEM_ROOT}/src/oos/media/audio_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/audio_format.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/ffmpeg_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/midi_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/soundfont_midi_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c")
+target_include_directories(oos_media_core_test PRIVATE
+  "${OOS_SYSTEM_ROOT}/src"
+  "${OOS_REPO_ROOT}/third_party/miniaudio"
+  "${OOS_REPO_ROOT}/third_party/tinysoundfont")
+set_source_files_properties(
+  "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c"
+  PROPERTIES COMPILE_OPTIONS "-Wno-unused-function;-Wno-unused-variable")
+oos_embed_gm_soundfont(oos_media_core_test
+  "${OOS_REPO_ROOT}/third_party/generaluser-gs/GeneralUser-GS.sf2")
+target_link_libraries(oos_media_core_test PRIVATE
+  oos_sonivox_host oos_ffmpeg_host fluidlite)
 
 add_executable(oos_app_repository_test
   app_repository_test.cpp
@@ -59,6 +105,7 @@ add_executable(oos_app_repository_test
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/resources/package_assets.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/app_storage.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp")

@@ -43,6 +43,7 @@ public:
   void setLocked(bool locked);
   bool locked() const;
   void applyStatusBarAppearance(ui::StatusBarAppearance appearance) override;
+  void setStatusBarVisible(bool visible) override;
 
   const std::string &lastError() const override;
 

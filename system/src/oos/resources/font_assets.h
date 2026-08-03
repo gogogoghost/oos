@@ -10,6 +10,7 @@ enum class FontRole : uint32_t {
   UiProportional = 0,
   UiMonospace = 1,
   Emoji = 2,
+  CjkFallback = 3,
 };
 
 enum class FontAssetStatus {
@@ -24,7 +25,7 @@ enum class FontAssetStatus {
 // roles map to fixed files, so applications cannot traverse the host rootfs.
 class FontAssetService {
 public:
-  static constexpr uint64_t kMaximumFontBytes = 4 * 1024 * 1024;
+  static constexpr uint64_t kMaximumFontBytes = 32 * 1024 * 1024;
 
   // The default root falls back to the platform system font. Explicit roots
   // remain isolated for tests and application-specific font packs.

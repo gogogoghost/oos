@@ -42,14 +42,27 @@ must not depend on those lowered names directly.
 applications. Every resident module owns a `WasmApp` and an independent
 compositor `GraphicsHost`, so linear memory, UI state, retained draw state, and
 texture namespaces survive foreground switches without colliding. The manager
-runs on the OOS event-loop thread because WAMR threads are disabled. A non-zero
+and every WIT import run on the OOS event-loop thread. A non-zero
 return, trap, missing export, invalid pointer, invalid draw range, or resource
 limit violation fails that app call instead of passing untrusted data to GLES.
 
 Each instance gets a 128 KiB execution stack. WAMR's optional host-managed heap
 is disabled; allocation through the generated WIT bindings uses the module's
 own linear memory and exported `cabi_realloc`. Resource policy therefore stays
-under OOS control instead of being requested by application manifests.
+under OOS control instead of being requested by application manifests. Core
+Wasm modules must declare one memory maximum no larger than 64 MiB; unbounded
+or oversized core modules are rejected before WAMR loads them. Instantiation
+also applies WAMR's 1,024-page cap and verifies the resulting byte size, so the
+same 64 MiB policy covers AOT-only packages.
+
+WAMR shared memory, thread manager, and lib-pthread are enabled for one bounded
+guest worker in addition to the lifecycle thread. C guests reserve a 256 KiB
+linear-memory auxiliary stack region, split into explicit 128 KiB main and
+worker stacks. The worker may execute guest code and atomics only. Every
+OOS WIT import compares the current host thread to the session lifecycle thread
+and traps misuse; only immutable ABI-version discovery is thread-safe.
+WAMR joins cluster threads during instance teardown before OOS releases host
+resources.
 
 ## WIT Interface Package
 
@@ -75,9 +88,11 @@ The WIT `runtime` interface also exposes
 `set-status-bar-style(background-rgb, icons)`. The color is strict
 `0x00RRGGBB`; the icon theme is `light` or `dark`. The call updates retained
 session chrome rather than SystemUI directly, so the value is restored on
-activation and cannot leak from a hidden application. This is an additive ABI
-3 import: applications that do not import it remain compatible with the newer
-host.
+activation and cannot leak from a hidden application.
+`set-surface-mode(normal|immersive)` changes the retained compositor layer
+between status-safe geometry and the complete physical display. The status bar
+is hidden in immersive mode, `graphics.surface-size` changes synchronously, and
+the mode is restored with the resident session. These interfaces use ABI 5.
 
 Limits are part of the interface: 2048-pixel texture dimensions, 16 MiB per
 upload, 65,535 vertices, 196,605 indices, and 4,096 draw commands per
@@ -106,6 +121,12 @@ permission mask are carried into every runtime instance.
 The KaiOS 2.5 application-owned DataStore adapter uses this same host storage
 implementation for Web applications; it is an API-shape adapter, not a second
 database service.
+
+The `audio` interface reports the running build's real decoder set by canonical
+MIME type. It provides asynchronous managed playback, legacy MIDI/ringtone
+synthesis, modern/phone codec decoding, and bounded PCM streams as described in
+[media.md](media.md). Applications must query this list
+instead of inferring support from the phone model or Android API level.
 
 The separate `device-storage` interface reads and writes user-visible internal
 or removable media. WAMR writes directly from validated guest linear memory;
@@ -159,8 +180,9 @@ Module files are loaded with writable private `mmap` rather than copied into
 anonymous malloc memory. Unmodified AOT pages stay file-backed and reclaimable;
 multiple instances of the same module also share those physical pages.
 
-WASI, libc imports, threads, SIMD, cross-module imports/dependency linking,
-and direct dynamic library access are disabled. Independent app instances do
+WASI, SIMD, cross-module imports/dependency linking, and direct dynamic library
+access are disabled. The only libc-shaped imports are WAMR's pthread contract;
+the C SDK supplies its allocator inside the guest. Independent app instances do
 not import from each other. Service providers must be narrow OOS capabilities
 associated with an application manifest. WAMR memory safety does not replace
 that permission layer.
@@ -187,8 +209,9 @@ only invalidated rectangles, and presents one GPU-composited quad. The
 process-local Dear ImGui backend translates textures, vertices, `u16` indices,
 texture IDs, and clip rectangles directly into the same host records. Both
 backends are device-independent and therefore run unchanged on the 2780,
-8110, and local target. A future guest LVGL or ImGui adapter can lower those
-same records through WIT. Engines that need custom shaders use the
+8110, and local target. The C guest LVGL adapter lowers partial RGB565 updates
+through WIT and exposes its quad rather than forcing a second submit. Engines
+that need custom shaders use the
 batched GLES2 interface while the host continues to own composition.
 
 ## Build And Test
@@ -207,7 +230,9 @@ The host integration test loads three egui demo instances through
 `NativeAppManager`, verifies the resident limit, switches input/rendering to
 the active instance, and checks texture cleanup. It then loads a generated WIT
 smoke guest that imports every device-service interface and validates
-Canonical ABI error lifting. The interface verifier rejects legacy `oos_*`
+Canonical ABI error lifting. It also executes a C shared-memory pthread guest,
+checks its worker join, rejects an unbounded-memory module, and compiles that
+same guest to ARMv7 AOT. The interface verifier rejects legacy `oos_*`
 imports and checks both core-Wasm and component lifecycle exports. The Android
 build also emits `oos_test_nokia_2780_wasm_multi_app`; it cycles three
 independent Launcher states on the physical display for suspend/resume and

@@ -11,7 +11,9 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
+#include <deque>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -118,6 +120,245 @@ SLDataFormat_PCM pcmFormat(int sample_rate) {
           SL_BYTEORDER_LITTLEENDIAN};
 }
 
+SLDataFormat_PCM pcmOutputFormat(int sample_rate, int channels) {
+  return {SL_DATAFORMAT_PCM,
+          static_cast<SLuint32>(channels),
+          static_cast<SLuint32>(sample_rate * 1000),
+          SL_PCMSAMPLEFORMAT_FIXED_16,
+          SL_PCMSAMPLEFORMAT_FIXED_16,
+          channels == 1 ? SL_SPEAKER_FRONT_CENTER
+                        : static_cast<SLuint32>(SL_SPEAKER_FRONT_LEFT |
+                                                SL_SPEAKER_FRONT_RIGHT),
+          SL_BYTEORDER_LITTLEENDIAN};
+}
+
+class OpenSlPcmOutput final : public PcmOutput {
+public:
+  ~OpenSlPcmOutput() override {
+    if (play_)
+      (*play_)->SetPlayState(play_, SL_PLAYSTATE_STOPPED);
+    if (queue_)
+      (*queue_)->Clear(queue_);
+  }
+
+  bool open(const PcmOutputConfig &config, AudioStreamInfo &info) {
+    if (config.sample_rate < 8000 || config.sample_rate > 192000 ||
+        config.channel_count < 1 || config.channel_count > 2 ||
+        config.capacity_frames < 256 || config.capacity_frames > 65536) {
+      error_ = "invalid PCM output configuration";
+      return false;
+    }
+    if (!createEngine(engine_, engine_interface_, error_))
+      return false;
+    SLresult result =
+        (*engine_interface_)
+            ->CreateOutputMix(engine_interface_, output_mix_.out(), 0, nullptr,
+                              nullptr);
+    if (result == SL_RESULT_SUCCESS)
+      result =
+          (*output_mix_.get())->Realize(output_mix_.get(), SL_BOOLEAN_FALSE);
+    if (result != SL_RESULT_SUCCESS) {
+      error_ = slError("create PCM output mix failed", result);
+      return false;
+    }
+
+    SLDataLocator_AndroidSimpleBufferQueue queue_locator = {
+        SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, kQueueBuffers};
+    SLDataFormat_PCM format =
+        pcmOutputFormat(config.sample_rate, config.channel_count);
+    SLDataSource source = {&queue_locator, &format};
+    SLDataLocator_OutputMix output_locator = {SL_DATALOCATOR_OUTPUTMIX,
+                                              output_mix_.get()};
+    SLDataSink sink = {&output_locator, nullptr};
+    const SLInterfaceID interfaces[] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
+                                        SL_IID_ANDROIDCONFIGURATION};
+    const SLboolean required[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
+    result = (*engine_interface_)
+                 ->CreateAudioPlayer(engine_interface_, player_.out(), &source,
+                                     &sink, 2, interfaces, required);
+    if (result != SL_RESULT_SUCCESS) {
+      error_ = slError("create PCM player failed", result);
+      return false;
+    }
+    SLAndroidConfigurationItf configuration = nullptr;
+    result = (*player_.get())
+                 ->GetInterface(player_.get(), SL_IID_ANDROIDCONFIGURATION,
+                                &configuration);
+    const SLint32 android_stream = streamType(config.usage);
+    if (result == SL_RESULT_SUCCESS)
+      result = (*configuration)
+                   ->SetConfiguration(configuration, SL_ANDROID_KEY_STREAM_TYPE,
+                                      &android_stream, sizeof(android_stream));
+    if (result == SL_RESULT_SUCCESS)
+      result = (*player_.get())->Realize(player_.get(), SL_BOOLEAN_FALSE);
+    if (result == SL_RESULT_SUCCESS)
+      result =
+          (*player_.get())->GetInterface(player_.get(), SL_IID_PLAY, &play_);
+    if (result == SL_RESULT_SUCCESS)
+      result = (*player_.get())
+                   ->GetInterface(player_.get(),
+                                  SL_IID_ANDROIDSIMPLEBUFFERQUEUE, &queue_);
+    if (result == SL_RESULT_SUCCESS)
+      result = (*queue_)->RegisterCallback(queue_, callback, this);
+    if (result == SL_RESULT_SUCCESS)
+      result = (*play_)->SetPlayState(play_, SL_PLAYSTATE_PLAYING);
+    if (result != SL_RESULT_SUCCESS) {
+      error_ = slError("initialize PCM player failed", result);
+      return false;
+    }
+    sample_rate_ = config.sample_rate;
+    channels_ = config.channel_count;
+    capacity_frames_ = config.capacity_frames;
+    info = {sample_rate_, channels_, 0, 0};
+    return true;
+  }
+
+  bool write(const int16_t *samples, int64_t frames,
+             int64_t &accepted_frames) override {
+    accepted_frames = 0;
+    if (!samples || frames <= 0 || !queue_) {
+      error_ = "invalid PCM write";
+      return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (buffers_.size() >= kQueueBuffers)
+      return true;
+    const int64_t writable = std::min<int64_t>(
+        std::min<int64_t>(frames, kMaxWriteFrames),
+        std::max<int64_t>(0, capacity_frames_ - queued_frames_));
+    if (writable == 0)
+      return true;
+    if (starvation_armed_ && !paused_) {
+      ++underruns_;
+      starvation_armed_ = false;
+    }
+    Buffer buffer;
+    buffer.frames = writable;
+    buffer.samples.resize(static_cast<size_t>(writable) * channels_);
+    for (size_t index = 0; index < buffer.samples.size(); ++index) {
+      const float value = static_cast<float>(samples[index]) * volume_;
+      buffer.samples[index] =
+          static_cast<int16_t>(std::max(-32768.0F, std::min(32767.0F, value)));
+    }
+    buffers_.push_back(std::move(buffer));
+    Buffer &stored = buffers_.back();
+    const SLresult result = (*queue_)->Enqueue(
+        queue_, stored.samples.data(), stored.samples.size() * sizeof(int16_t));
+    if (result != SL_RESULT_SUCCESS) {
+      buffers_.pop_back();
+      error_ = slError("enqueue PCM frames failed", result);
+      return false;
+    }
+    accepted_frames = writable;
+    queued_frames_ += writable;
+    written_frames_ += writable;
+    return true;
+  }
+
+  bool setVolume(float volume) override {
+    if (volume < 0.0F || volume > 1.0F) {
+      error_ = "PCM volume is outside 0..1";
+      return false;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    volume_ = volume;
+    return true;
+  }
+
+  bool pause() override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const SLresult result = (*play_)->SetPlayState(play_, SL_PLAYSTATE_PAUSED);
+    if (result != SL_RESULT_SUCCESS) {
+      error_ = slError("pause PCM stream failed", result);
+      return false;
+    }
+    paused_ = true;
+    return true;
+  }
+
+  bool resume() override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const SLresult result = (*play_)->SetPlayState(play_, SL_PLAYSTATE_PLAYING);
+    if (result != SL_RESULT_SUCCESS) {
+      error_ = slError("resume PCM stream failed", result);
+      return false;
+    }
+    paused_ = false;
+    return true;
+  }
+
+  bool flush() override {
+    SLresult result = (*play_)->SetPlayState(play_, SL_PLAYSTATE_STOPPED);
+    if (result == SL_RESULT_SUCCESS)
+      result = (*queue_)->Clear(queue_);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      buffers_.clear();
+      queued_frames_ = 0;
+      starvation_armed_ = false;
+    }
+    if (result == SL_RESULT_SUCCESS && !paused_)
+      result = (*play_)->SetPlayState(play_, SL_PLAYSTATE_PLAYING);
+    if (result != SL_RESULT_SUCCESS) {
+      error_ = slError("flush PCM stream failed", result);
+      return false;
+    }
+    return true;
+  }
+
+  PcmOutputStatus status() const override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return {{sample_rate_, channels_, 0, written_frames_},
+            queued_frames_,
+            consumed_frames_,
+            underruns_,
+            paused_};
+  }
+
+  const std::string &lastError() const override { return error_; }
+
+private:
+  struct Buffer {
+    std::vector<int16_t> samples;
+    int64_t frames = 0;
+  };
+
+  static void callback(SLAndroidSimpleBufferQueueItf, void *context) {
+    auto &output = *static_cast<OpenSlPcmOutput *>(context);
+    std::lock_guard<std::mutex> lock(output.mutex_);
+    if (output.buffers_.empty()) {
+      ++output.underruns_;
+      return;
+    }
+    output.consumed_frames_ += output.buffers_.front().frames;
+    output.queued_frames_ -= output.buffers_.front().frames;
+    output.buffers_.pop_front();
+    output.starvation_armed_ = output.buffers_.empty();
+  }
+
+  static constexpr size_t kQueueBuffers = 4;
+  static constexpr int64_t kMaxWriteFrames = 2048;
+  OpenSlObject engine_;
+  OpenSlObject output_mix_;
+  OpenSlObject player_;
+  SLEngineItf engine_interface_ = nullptr;
+  SLPlayItf play_ = nullptr;
+  SLAndroidSimpleBufferQueueItf queue_ = nullptr;
+  mutable std::mutex mutex_;
+  std::deque<Buffer> buffers_;
+  int sample_rate_ = 0;
+  int channels_ = 0;
+  int64_t capacity_frames_ = 0;
+  int64_t queued_frames_ = 0;
+  int64_t written_frames_ = 0;
+  int64_t consumed_frames_ = 0;
+  int32_t underruns_ = 0;
+  float volume_ = 1.0F;
+  bool paused_ = false;
+  bool starvation_armed_ = false;
+  std::string error_;
+};
+
 void writeLittleEndian16(std::FILE *file, uint16_t value) {
   const std::array<uint8_t, 2> bytes = {static_cast<uint8_t>(value),
                                         static_cast<uint8_t>(value >> 8)};
@@ -151,6 +392,20 @@ bool writeWavHeader(std::FILE *file, int sample_rate, int channels,
 }
 
 } // namespace
+
+bool AudioManager::openPcmOutput(const PcmOutputConfig &config,
+                                 std::unique_ptr<PcmOutput> &output,
+                                 AudioStreamInfo &info) {
+  output.reset();
+  error_.clear();
+  auto candidate = std::make_unique<OpenSlPcmOutput>();
+  if (!candidate->open(config, info)) {
+    error_ = candidate->lastError();
+    return false;
+  }
+  output = std::move(candidate);
+  return true;
+}
 
 bool AudioManager::playTone(double frequency_hz, int duration_ms, float volume,
                             AudioUsage usage, AudioStreamInfo &info) {

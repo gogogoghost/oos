@@ -13,8 +13,11 @@ public:
 
   virtual bool initialize() = 0;
   virtual void shutdown() = 0;
+  virtual void onActivated() {}
+  virtual void onDeactivated() {}
   virtual bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) = 0;
   virtual std::string takeLaunchRequest() = 0;
+  virtual bool takeExitRequest() = 0;
 };
 
 } // namespace oos::runtime

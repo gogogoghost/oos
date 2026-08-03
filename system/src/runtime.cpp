@@ -61,6 +61,7 @@ public:
     return app_.frame(monotonic_us, next_delay_ms);
   }
   std::string takeLaunchRequest() override { return app_.takeLaunchRequest(); }
+  bool takeExitRequest() override { return false; }
   const char *lastError() const override { return app_.lastError(); }
 
 private:
@@ -86,6 +87,7 @@ public:
     return app_.frame(monotonic_us, next_delay_ms);
   }
   std::string takeLaunchRequest() override { return app_.takeLaunchRequest(); }
+  bool takeExitRequest() override { return false; }
   const char *lastError() const override { return app_.lastError(); }
 
 private:
@@ -110,6 +112,8 @@ public:
     return app_.load(module_path_.c_str()) && app_.initialize();
   }
   void shutdown() override { app_.shutdown(); }
+  void onActivated() override { app_.setAudioFocused(true); }
+  void onDeactivated() override { app_.setAudioFocused(false); }
   bool dispatchKey(const KeyEvent &event, int64_t monotonic_us) override {
     return app_.dispatchKey(event, monotonic_us);
   }
@@ -118,6 +122,7 @@ public:
     return app_.render(monotonic_us);
   }
   std::string takeLaunchRequest() override { return {}; }
+  bool takeExitRequest() override { return app_.takeExitRequest(); }
   const char *lastError() const override { return app_.lastError(); }
 
 private:
@@ -182,6 +187,7 @@ bool prepareWasmSession(oos::apps::AppRepository &repository,
   config.options.data_directory = launch.data_directory;
   config.options.system_data_root = data_root;
   config.options.app_repository = &repository;
+  config.options.asset_directory = launch.asset_directory;
   config.options.service_permission_mask =
       oos::apps::deviceServicePermissionMask(
           launch.app.manifest.requested_permissions);
@@ -488,6 +494,16 @@ int run(int argc, char **argv) {
         break;
       }
       runtime_id = launch_request;
+    }
+    if (sessions.takeExitRequest()) {
+      const std::string closing_id = runtime_id;
+      if (closing_id == kLauncherId || !sessions.activate(kLauncherId) ||
+          !sessions.destroy(closing_id)) {
+        std::fprintf(stderr, "close application %s failed: %s\n",
+                     closing_id.c_str(), sessions.lastError());
+        break;
+      }
+      runtime_id = kLauncherId;
     }
     const int64_t frame_time = monotonicMicros();
     uint32_t system_ui_delay_ms = 1000;

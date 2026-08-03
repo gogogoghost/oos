@@ -69,6 +69,14 @@ WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
 LVGL_LICENSE="$ROOT_DIR/third_party/lvgl/LICENCE.txt"
 FONT_AWESOME_LICENSE="$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt"
 IMGUI_LICENSE="$ROOT_DIR/third_party/imgui/LICENSE.txt"
+MINIAUDIO_LICENSE="$ROOT_DIR/third_party/miniaudio/LICENSE"
+FFMPEG_LICENSE="$ROOT_DIR/third_party/ffmpeg/COPYING.LGPLv2.1"
+SONIVOX_NOTICE="$ROOT_DIR/third_party/sonivox/NOTICE"
+FLUIDLITE_LICENSE="$ROOT_DIR/third_party/fluidlite/LICENSE"
+TML_LICENSE="$ROOT_DIR/system/licenses/TinyMidiLoader-Zlib.txt"
+GENERALUSER_GS_LICENSE="$ROOT_DIR/third_party/generaluser-gs/documentation/LICENSE.txt"
+MEDIA_CODEC_LIB="$ROOT_DIR/build/media-codecs/$DEVICE/install/lib"
+FLUIDLITE_LIB="$ROOT_DIR/build/android-$DEVICE/third_party/fluidlite"
 
 package_require_file "$OOS_BINARY"
 if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
@@ -78,6 +86,14 @@ package_require_file "$WAMR_LICENSE"
 package_require_file "$LVGL_LICENSE"
 package_require_file "$FONT_AWESOME_LICENSE"
 package_require_file "$IMGUI_LICENSE"
+package_require_file "$MINIAUDIO_LICENSE"
+package_require_file "$FFMPEG_LICENSE"
+package_require_file "$SONIVOX_NOTICE"
+package_require_file "$FLUIDLITE_LICENSE"
+package_require_file "$TML_LICENSE"
+package_require_file "$GENERALUSER_GS_LICENSE"
+package_require_file "$MEDIA_CODEC_LIB/libavformat.so"
+package_require_file "$FLUIDLITE_LIB/libfluidlite.so"
 
 STAGING_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/oos-res.XXXXXX")
 cleanup() {
@@ -103,6 +119,22 @@ install -m 0644 "$FONT_AWESOME_LICENSE" \
   "$STAGING/share/licenses/oos/FontAwesome5.txt"
 install -m 0644 "$IMGUI_LICENSE" \
   "$STAGING/share/licenses/oos/DearImGui.txt"
+install -m 0644 "$MINIAUDIO_LICENSE" \
+  "$STAGING/share/licenses/oos/miniaudio.txt"
+install -m 0644 "$FFMPEG_LICENSE" \
+  "$STAGING/share/licenses/oos/FFmpeg-LGPL-2.1.txt"
+install -m 0644 "$SONIVOX_NOTICE" \
+  "$STAGING/share/licenses/oos/Sonivox-NOTICE.txt"
+install -m 0644 "$FLUIDLITE_LICENSE" \
+  "$STAGING/share/licenses/oos/FluidLite-LGPL-2.1.txt"
+install -m 0644 "$TML_LICENSE" \
+  "$STAGING/share/licenses/oos/TinyMidiLoader-Zlib.txt"
+install -m 0644 "$GENERALUSER_GS_LICENSE" \
+  "$STAGING/share/licenses/oos/GeneralUser-GS.txt"
+cp -a "$FLUIDLITE_LIB/libfluidlite.so"* "$STAGING/lib/"
+for library in avformat avcodec swresample avutil; do
+  cp -a "$MEDIA_CODEC_LIB/lib${library}.so"* "$STAGING/lib/"
+done
 
 package_verify_elf_dependencies "$STAGING" "$SYSTEM_DIR"
 
@@ -121,6 +153,10 @@ if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
   "$STRIP_TOOL" --strip-unneeded \
     "$STAGING/lib/$(basename "$DEVICE_RUNTIME_LIBRARY")"
 fi
+find "$STAGING/lib" -type f -name 'libav*.so*' -exec \
+  "$STRIP_TOOL" --strip-unneeded {} +
+find "$STAGING/lib" -type f -name 'libfluidlite.so*' -exec \
+  "$STRIP_TOOL" --strip-unneeded {} +
 
 printf '%s\n' \
   "format=2" \
@@ -132,6 +168,11 @@ printf '%s\n' \
   "native_app_runtime=${WAMR_VERSION}" \
   "native_app_execution=interpreter,aot" \
   "native_app_interface=oos-wit-0.1.0-core" \
+  "media_miniaudio=${MINIAUDIO_VERSION}" \
+  "media_ffmpeg=${FFMPEG_VERSION}" \
+  "media_sonivox=${SONIVOX_VERSION}" \
+  "media_fluidlite=${FLUIDLITE_VERSION}" \
+  "media_generaluser_gs=${GENERALUSER_GS_VERSION}" \
   "system_font=/system/fonts/Roboto-Regular.ttf" \
   "system_font_fallback=/system/fonts/DroidSansFallback.ttf" \
   "system_icons=font-awesome-5-free" \

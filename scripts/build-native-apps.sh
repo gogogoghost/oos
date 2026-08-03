@@ -7,6 +7,7 @@ TARGET=wasm32-unknown-unknown
 DEMO_DIR="$ROOT_DIR/apps/tests/egui-demo"
 SMOKE_DIR="$ROOT_DIR/apps/tests/wit-smoke"
 APPS_TARGET_DIR="$ROOT_DIR/build/cargo"
+export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=--max-memory=67108864"
 
 CARGO_TARGET_DIR="$APPS_TARGET_DIR" cargo build \
   --manifest-path "$DEMO_DIR/Cargo.toml" \

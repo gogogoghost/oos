@@ -59,11 +59,42 @@ endif()
 
 set(OOS_LVGL_DIR "${THIRD_PARTY_DIR}/lvgl")
 set(OOS_IMGUI_DIR "${THIRD_PARTY_DIR}/imgui")
+set(OOS_MINIAUDIO_DIR "${THIRD_PARTY_DIR}/miniaudio")
+set(OOS_SONIVOX_DIR "${THIRD_PARTY_DIR}/sonivox/arm-wt-22k")
+set(OOS_FLUIDLITE_DIR "${THIRD_PARTY_DIR}/fluidlite")
+set(OOS_TINYSOUNDFONT_DIR "${THIRD_PARTY_DIR}/tinysoundfont")
+set(OOS_GM_SOUNDFONT_FILE
+    "${THIRD_PARTY_DIR}/generaluser-gs/GeneralUser-GS.sf2")
 if(NOT EXISTS "${OOS_LVGL_DIR}/src/lv_init.c" OR
-   NOT EXISTS "${OOS_IMGUI_DIR}/imgui.cpp")
+   NOT EXISTS "${OOS_IMGUI_DIR}/imgui.cpp" OR
+   NOT EXISTS "${OOS_MINIAUDIO_DIR}/miniaudio.h" OR
+   NOT EXISTS "${OOS_SONIVOX_DIR}/lib_src/wt_22khz.c" OR
+   NOT EXISTS "${OOS_FLUIDLITE_DIR}/src/fluid_synth.c" OR
+   NOT EXISTS "${OOS_TINYSOUNDFONT_DIR}/tml.h" OR
+   NOT EXISTS "${OOS_GM_SOUNDFONT_FILE}")
   message(FATAL_ERROR
-    "LVGL or Dear ImGui is missing. Run scripts/fetch-ui-frameworks.sh first.")
+    "A UI or media dependency is missing. Run scripts/fetch-ui-frameworks.sh "
+    "and scripts/fetch-media-dependencies.sh first.")
 endif()
+
+include(cmake/Sonivox.cmake)
+oos_add_sonivox(oos_sonivox "${OOS_SONIVOX_DIR}")
+include(cmake/FluidLite.cmake)
+oos_add_fluidlite("${OOS_FLUIDLITE_DIR}")
+set(OOS_MEDIA_CODEC_TARGET local)
+if(BUILD_NOKIA_2780_FLIP)
+  set(OOS_MEDIA_CODEC_TARGET nokia-2780-flip)
+elseif(BUILD_NOKIA_8110_4G)
+  set(OOS_MEDIA_CODEC_TARGET nokia-8110-4g)
+endif()
+set(OOS_FFMPEG_PREFIX
+  "${OOS_REPO_ROOT}/build/media-codecs/${OOS_MEDIA_CODEC_TARGET}/install")
+if(NOT EXISTS "${OOS_FFMPEG_PREFIX}/lib/libavformat.so")
+  message(FATAL_ERROR
+    "Media codecs are missing. Run scripts/build-media-codecs.sh ${OOS_MEDIA_CODEC_TARGET}.")
+endif()
+include(cmake/FFmpeg.cmake)
+oos_add_ffmpeg(oos_ffmpeg "${OOS_FFMPEG_PREFIX}")
 
 set(LV_BUILD_CONF_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/config/lvgl/lv_conf.h" CACHE FILEPATH "" FORCE)
@@ -108,6 +139,28 @@ add_library(oos_device_api STATIC src/oos/device/device.cpp)
 target_include_directories(oos_device_api PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
+add_library(oos_media STATIC
+  src/oos/media/audio_decoder.cpp
+  src/oos/media/audio_format.cpp
+  src/oos/media/ffmpeg_decoder.cpp
+  src/oos/media/midi_decoder.cpp
+  src/oos/media/soundfont_midi_decoder.cpp
+  src/oos/media/miniaudio_decoder.c)
+target_include_directories(oos_media PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(oos_media SYSTEM PRIVATE "${OOS_MINIAUDIO_DIR}")
+target_include_directories(oos_media SYSTEM PRIVATE "${OOS_TINYSOUNDFONT_DIR}")
+target_compile_options(oos_media PRIVATE
+  $<$<COMPILE_LANGUAGE:C>:-Wno-unused-function;-Wno-unused-variable>)
+target_link_libraries(oos_media PUBLIC oos_sonivox oos_ffmpeg fluidlite)
+include(cmake/EmbeddedSoundFont.cmake)
+oos_embed_gm_soundfont(oos_media "${OOS_GM_SOUNDFONT_FILE}")
+add_library(oos::media ALIAS oos_media)
+if(BUILD_LOCAL)
+  add_executable(oos_test_media_core tests/host/media_core_test.cpp)
+  target_link_libraries(oos_test_media_core PRIVATE oos_media)
+endif()
+
 add_library(oos_gles_executor STATIC src/oos/runtime/gles_executor.cpp)
 target_include_directories(oos_gles_executor PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -147,7 +200,8 @@ target_include_directories(oos_device_storage PUBLIC
 target_link_libraries(oos_device_storage PUBLIC oos_app_model)
 
 add_library(oos_font_assets STATIC
-  src/oos/resources/font_assets.cpp)
+  src/oos/resources/font_assets.cpp
+  src/oos/resources/package_assets.cpp)
 target_include_directories(oos_font_assets PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -164,13 +218,14 @@ target_include_directories(oos_system_settings PUBLIC
 target_link_libraries(oos_system_settings PUBLIC oos_app_model)
 
 add_library(oos_wasm_runtime STATIC
+  src/oos/media/media_service.cpp
   src/oos/runtime/native_app_manager.cpp
   src/oos/runtime/wasm_app.cpp)
 target_include_directories(oos_wasm_runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_wasm_runtime PUBLIC
   oos_wamr oos_input oos_app_model oos_device_storage oos_font_assets
-  oos_system_services)
+  oos_system_services oos_media)
 target_link_libraries(oos_window PUBLIC
   oos_input)
 

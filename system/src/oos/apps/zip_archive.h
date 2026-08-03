@@ -28,13 +28,13 @@ public:
   const ZipEntry *find(const char *name) const;
   bool read(const char *name, std::vector<uint8_t> &output,
             size_t maximum_bytes = 64 * 1024 * 1024) const;
+  bool readEntry(const ZipEntry &entry, std::vector<uint8_t> &output,
+                 size_t maximum_bytes = 64 * 1024 * 1024) const;
 
   const std::vector<ZipEntry> &entries() const { return entries_; }
   const std::string &lastError() const { return error_; }
 
 private:
-  bool readEntry(const ZipEntry &entry, std::vector<uint8_t> &output,
-                 size_t maximum_bytes) const;
   bool fail(const std::string &message) const;
 
   int fd_ = -1;

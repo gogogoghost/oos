@@ -11,8 +11,10 @@ An application ZIP has this layout:
 ```text
 application.zip
 ├── manifest.json
-├── entry.wasm
-└── entry.aot          # optional, preferred when present
+├── entry.wasm         # optional when entry.aot is present
+├── entry.aot          # optional, preferred when present
+└── assets/            # optional read-only application files
+    └── ...
 ```
 
 An application must contain `entry.wasm`, `entry.aot`, or both. OOS prefers
@@ -55,12 +57,14 @@ Create a deterministic package with:
   --manifest apps/tests/egui-demo/manifest.json \
   --wasm build/native-apps/egui-demo.wasm \
   --aot build/native-apps/egui-demo.aot \
+  --assets path/to/assets \
   --output application.zip
 ```
 
 The ZIP reader validates central-directory records and CRCs, bounds expanded
-size and entry count, and rejects encryption, ZIP64, absolute paths, and parent
-traversal.
+size and entry count, and rejects encryption, ZIP64, absolute paths, parent
+traversal, and duplicate entries. Packaged assets are CRC-validated at install,
+then exposed read-only through the `assets` WIT interface.
 
 ## Registry And Launch
 
@@ -72,8 +76,10 @@ The canonical package is stored at:
 
 `/data/system/app-registry.sqlite3` records the active version, package digest,
 permissions, roles, handlers, and lifecycle state. Launch preparation extracts
-the preferred fixed entry to `/data/cache/aot/<content-key>/`; the ZIP remains
-the installed source of truth.
+the preferred fixed entry and validated `assets/` tree to
+`/data/cache/aot/<content-key>/`; the ZIP remains the installed source of truth.
+The content-key cache prevents stale files from another package revision being
+reused.
 
 The registry schema version is 3. Schema-1 and schema-2 registries are migrated
 transactionally. Only their OOS/WAMR records are retained; obsolete runtime,
@@ -81,12 +87,13 @@ entrypoint, and per-app memory columns are removed.
 
 ## Runtime Memory Policy
 
-Memory limits are not package metadata. OOS currently gives every application
-a 128 KiB WAMR execution stack. The WAMR host-managed heap is disabled because
-WIT data exchange uses the guest's exported `cabi_realloc`; application memory
-comes from its normal Wasm linear memory. Central policy prevents packages from
-reserving several extra MiB for every resident application. A future system
-resource policy can vary these limits without changing the package format.
+Memory limits are not package metadata. OOS gives every application a 128 KiB
+WAMR execution stack. C threaded guests reserve a 256 KiB auxiliary stack
+region split between the lifecycle thread and one worker. The WAMR host-managed
+heap is disabled because WIT data exchange uses the guest's exported
+`cabi_realloc`; application memory comes from its normal Wasm linear memory.
+Core modules must declare a maximum and all core/AOT instances are limited to
+64 MiB.
 
 ## Application Sessions
 
@@ -103,10 +110,13 @@ foreground session receives input and frame callbacks. Session switching never
 branches on a particular application ID; built-in and package IDs are entries
 in the same factory registry.
 
-OOS currently keeps every started session resident until shutdown. It does not
-silently evict an application because doing so would violate exact state
-restoration. A future memory policy must pair eviction with an explicit
-suspend/serialize contract rather than treating reconstruction as restoration.
+OOS keeps a background session resident unless the application explicitly calls
+`runtime.request-exit`. That request is consumed only after the lifecycle call
+returns; OOS activates Launcher, invokes `shutdown()` once, and destroys the
+session and all host resources. It does not silently evict an application
+because doing so would violate exact state restoration. A future memory policy
+must pair eviction with an explicit suspend/serialize contract rather than
+treating reconstruction as restoration.
 
 The command-line operations are:
 

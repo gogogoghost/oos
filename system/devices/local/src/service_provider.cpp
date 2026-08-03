@@ -1,6 +1,8 @@
 #include "oos/device/service_provider.h"
 
 #include <algorithm>
+#include <array>
+#include <mutex>
 #include <utility>
 
 namespace oos::device {
@@ -18,6 +20,17 @@ struct ServiceProvider::Impl {
   std::string wifi_ssid = "OOS Mock Network";
   std::vector<network::WifiNetwork> wifi_networks = {
       {1, "OOS Mock Network", "02:00:00:00:00:01", "[CURRENT]"}};
+  struct Pcm {
+    hardware::PcmOutputConfig config;
+    int64_t written = 0;
+    float volume = 1.0F;
+    bool app_paused = false;
+    bool focus_paused = false;
+    bool open = false;
+  };
+  std::array<Pcm, 8> pcm_outputs;
+  mutable std::mutex pcm_mutex;
+  bool audio_focused = true;
 };
 
 ServiceProvider::ServiceProvider(const Device &device)
@@ -30,6 +43,111 @@ bool ServiceProvider::playTone(double, int duration_ms, float,
                                hardware::AudioStreamInfo &info) {
   info = {48000, 2, 1, static_cast<int64_t>(duration_ms) * 48};
   return true;
+}
+
+bool ServiceProvider::pcmOpen(const hardware::PcmOutputConfig &config,
+                              uint32_t &handle,
+                              hardware::AudioStreamInfo &info) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  handle = 0;
+  if (config.sample_rate < 8000 || config.channel_count < 1 ||
+      config.channel_count > 2 || config.capacity_frames < 256)
+    return false;
+  for (size_t index = 0; index < impl_->pcm_outputs.size(); ++index) {
+    auto &stream = impl_->pcm_outputs[index];
+    if (stream.open)
+      continue;
+    stream = {config, 0, 1.0F, false, !impl_->audio_focused, true};
+    handle = static_cast<uint32_t>(index + 1);
+    info = {config.sample_rate, config.channel_count, 1, 0};
+    return true;
+  }
+  return false;
+}
+
+bool ServiceProvider::pcmWrite(uint32_t handle, const int16_t *samples,
+                               int64_t frames, int64_t &accepted_frames) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  accepted_frames = 0;
+  if (handle == 0 || handle > impl_->pcm_outputs.size() || !samples ||
+      frames <= 0 || !impl_->pcm_outputs[handle - 1].open)
+    return false;
+  auto &stream = impl_->pcm_outputs[handle - 1];
+  accepted_frames = std::min<int64_t>(frames, stream.config.capacity_frames);
+  stream.written += accepted_frames;
+  return true;
+}
+
+bool ServiceProvider::pcmSetVolume(uint32_t handle, float volume) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  if (handle == 0 || handle > impl_->pcm_outputs.size() || volume < 0.0F ||
+      volume > 1.0F || !impl_->pcm_outputs[handle - 1].open)
+    return false;
+  impl_->pcm_outputs[handle - 1].volume = volume;
+  return true;
+}
+
+bool ServiceProvider::pcmPause(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  if (handle == 0 || handle > impl_->pcm_outputs.size() ||
+      !impl_->pcm_outputs[handle - 1].open)
+    return false;
+  impl_->pcm_outputs[handle - 1].app_paused = true;
+  return true;
+}
+
+bool ServiceProvider::pcmResume(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  if (handle == 0 || handle > impl_->pcm_outputs.size() ||
+      !impl_->pcm_outputs[handle - 1].open)
+    return false;
+  impl_->pcm_outputs[handle - 1].app_paused = false;
+  return true;
+}
+
+bool ServiceProvider::pcmFlush(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  return handle != 0 && handle <= impl_->pcm_outputs.size() &&
+         impl_->pcm_outputs[handle - 1].open;
+}
+
+bool ServiceProvider::pcmStatus(uint32_t handle,
+                                hardware::PcmOutputStatus &status) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  if (handle == 0 || handle > impl_->pcm_outputs.size() ||
+      !impl_->pcm_outputs[handle - 1].open)
+    return false;
+  const auto &stream = impl_->pcm_outputs[handle - 1];
+  status = {{stream.config.sample_rate, stream.config.channel_count, 1,
+             stream.written},
+            0,
+            stream.written,
+            0,
+            stream.app_paused || stream.focus_paused};
+  return true;
+}
+
+bool ServiceProvider::pcmClose(uint32_t handle) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  if (handle == 0 || handle > impl_->pcm_outputs.size() ||
+      !impl_->pcm_outputs[handle - 1].open)
+    return false;
+  impl_->pcm_outputs[handle - 1] = {};
+  return true;
+}
+
+void ServiceProvider::setAudioFocused(bool focused) {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  impl_->audio_focused = focused;
+  for (auto &stream : impl_->pcm_outputs)
+    if (stream.open)
+      stream.focus_paused = !focused;
+}
+
+void ServiceProvider::closeAllPcm() {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  for (auto &stream : impl_->pcm_outputs)
+    stream = {};
 }
 
 bool ServiceProvider::recordWav(const std::string &path, int duration_ms,
@@ -296,6 +414,9 @@ bool ServiceProvider::testH264RoundTrip(int width, int height, int frame_count,
   return true;
 }
 
-const std::string &ServiceProvider::lastError() const { return impl_->error; }
+std::string ServiceProvider::lastError() const {
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  return impl_->error;
+}
 
 } // namespace oos::device

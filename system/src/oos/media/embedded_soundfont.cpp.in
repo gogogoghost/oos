@@ -1,0 +1,27 @@
+#include "oos/media/embedded_soundfont.h"
+
+extern "C" {
+extern const unsigned char oos_gm_soundfont_start[];
+extern const unsigned char oos_gm_soundfont_end[];
+}
+
+asm(".pushsection .rodata.oos_gm_soundfont,\"a\"\n"
+    ".balign 16\n"
+    ".global oos_gm_soundfont_start\n"
+    ".hidden oos_gm_soundfont_start\n"
+    "oos_gm_soundfont_start:\n"
+    ".incbin \"@OOS_GM_SOUNDFONT_FILE@\"\n"
+    ".global oos_gm_soundfont_end\n"
+    ".hidden oos_gm_soundfont_end\n"
+    "oos_gm_soundfont_end:\n"
+    ".popsection\n");
+
+namespace oos::media {
+
+const uint8_t *embeddedGmSoundFontData() { return oos_gm_soundfont_start; }
+
+size_t embeddedGmSoundFontSize() {
+  return static_cast<size_t>(oos_gm_soundfont_end - oos_gm_soundfont_start);
+}
+
+} // namespace oos::media

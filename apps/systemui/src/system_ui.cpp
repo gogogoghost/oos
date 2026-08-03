@@ -484,6 +484,10 @@ void SystemUi::applyStatusBarAppearance(ui::StatusBarAppearance appearance) {
   impl_->setStatusBarAppearance(appearance);
 }
 
+void SystemUi::setStatusBarVisible(bool visible) {
+  impl_->status_surface.setVisible(visible);
+}
+
 const std::string &SystemUi::lastError() const { return impl_->error; }
 
 } // namespace oos::apps::systemui

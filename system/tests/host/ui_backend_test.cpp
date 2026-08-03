@@ -140,10 +140,12 @@ public:
   oos::ui::StatusBarAppearance statusBarAppearance() const override {
     return appearance;
   }
+  void setStatusBarVisible(bool value) override { visible = value; }
 
   oos::ui::StatusBarAppearance appearance;
   int apply_count = 0;
   int set_count = 0;
+  bool visible = true;
 };
 
 class FakeApplicationSession final : public oos::runtime::ApplicationSession {
@@ -163,6 +165,7 @@ public:
     return initialized;
   }
   std::string takeLaunchRequest() override { return {}; }
+  bool takeExitRequest() override { return false; }
   bool dispatchKey(const oos::input::KeyEvent &, int64_t) override {
     ++key_count;
     return initialized;
@@ -250,13 +253,17 @@ void testApplicationSessions() {
       compositor, 0, 22, 240, 298, status_bar, {0x010203, false});
   FakeApplicationSession *first = nullptr;
   FakeApplicationSession *second = nullptr;
+  oos::runtime::GraphicsHost *first_surface = nullptr;
+  oos::ui::StatusBarAppearanceController *first_appearance = nullptr;
   assert(sessions.registerFactory(
       "cc.jaxy.test.first",
-      [&](oos::runtime::GraphicsHost &,
+      [&](oos::runtime::GraphicsHost &surface,
           oos::ui::StatusBarAppearanceController &appearance) {
         auto session = std::make_unique<FakeApplicationSession>(
             appearance, oos::ui::StatusBarAppearance{0x112233, false});
         first = session.get();
+        first_surface = &surface;
+        first_appearance = &appearance;
         return session;
       }));
   assert(sessions.registerFactory(
@@ -270,6 +277,11 @@ void testApplicationSessions() {
       }));
   assert(sessions.activate("cc.jaxy.test.first"));
   assert(first && sessions.residentCount() == 1);
+  assert(first_surface->height() == 298);
+  assert(first_appearance->setSurfaceMode(oos::ui::SurfaceMode::Immersive));
+  assert(first_surface->height() == 320 && !status_bar.visible);
+  assert(first_appearance->setSurfaceMode(oos::ui::SurfaceMode::Normal));
+  assert(first_surface->height() == 298 && status_bar.visible);
   assert(status_bar.appearance ==
          (oos::ui::StatusBarAppearance{0x112233, false}));
   const oos::input::KeyEvent key = {
@@ -298,6 +310,11 @@ void testApplicationSessions() {
   assert(sessions.dispatchKey(key, 1200));
   assert(first->key_count == 2);
   assert(std::string(sessions.activeId()) == "cc.jaxy.test.first");
+  assert(sessions.activate("cc.jaxy.test.second"));
+  assert(sessions.destroy("cc.jaxy.test.first"));
+  assert(sessions.residentCount() == 1);
+  assert(sessions.activate("cc.jaxy.test.first"));
+  assert(first && first->key_count == 0);
   sessions.shutdown();
   assert(sessions.residentCount() == 0);
 }

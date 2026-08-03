@@ -1,0 +1,95 @@
+diff --git a/include/fluidlite/sfont.h b/include/fluidlite/sfont.h
+index 1d5120b..58fc741 100644
+--- a/include/fluidlite/sfont.h
++++ b/include/fluidlite/sfont.h
+@@ -132,6 +132,13 @@ struct _fluid_fileapi_t {
+ 
+   /** @return returns current file offset or #FLUID_FAILED on error */
+   long (*ftell)(void* handle);
++
++  /**
++   * Optionally maps an immutable range without copying it. The returned bytes
++   * must remain valid for the lifetime of the loaded SoundFont. A NULL
++   * callback keeps the ordinary allocate-and-read behavior.
++   */
++  const void *(*map)(void* handle, long offset, int count);
+ };
+ 
+ FLUIDSYNTH_API void fluid_init_default_fileapi(fluid_fileapi_t* fileapi);
+diff --git a/src/fluid_defsfont.c b/src/fluid_defsfont.c
+index c5aeefb..0606bad 100644
+--- a/src/fluid_defsfont.c
++++ b/src/fluid_defsfont.c
+@@ -163,7 +163,8 @@ static const fluid_fileapi_t default_fileapi =
+   safe_fread,
+   safe_fseek,
+   default_fclose,
+-  default_ftell
++  default_ftell,
++  NULL
+ };
+ 
+ static fluid_fileapi_t* fluid_default_fileapi = (fluid_fileapi_t*)&default_fileapi;
+@@ -176,6 +177,7 @@ void fluid_init_default_fileapi(fluid_fileapi_t* fileapi) {
+   fileapi->fseek = safe_fseek;
+   fileapi->fclose = default_fclose;
+   fileapi->ftell = default_ftell;
++  fileapi->map = NULL;
+ }
+ 
+ void fluid_set_default_fileapi(fluid_fileapi_t* fileapi) {
+@@ -365,6 +367,7 @@ fluid_defsfont_t* new_fluid_defsfont()
+   sfont->samplesize = 0;
+   sfont->sample = NULL;
+   sfont->sampledata = NULL;
++  sfont->owns_sampledata = 0;
+   sfont->preset = NULL;
+ 
+   return sfont;
+@@ -399,7 +402,7 @@ int delete_fluid_defsfont(fluid_defsfont_t* sfont)
+     delete_fluid_list(sfont->sample);
+   }
+ 
+-  if (sfont->sampledata != NULL) {
++  if (sfont->sampledata != NULL && sfont->owns_sampledata) {
+     FLUID_FREE(sfont->sampledata);
+   }
+ 
+@@ -565,14 +568,19 @@ fluid_defsfont_load_sampledata(fluid_defsfont_t* sfont, fluid_fileapi_t* fapi)
+     FLUID_LOG(FLUID_ERR, "Failed to seek position in data file");
+     return FLUID_FAILED;
+   }
+-  sfont->sampledata = (short*) FLUID_MALLOC(sfont->samplesize);
++  sfont->sampledata = fapi->map == NULL ? NULL :
++    (short*) fapi->map(fd, sfont->samplepos, sfont->samplesize);
+   if (sfont->sampledata == NULL) {
+-    FLUID_LOG(FLUID_ERR, "Out of memory");
+-    return FLUID_FAILED;
+-  }
+-  if (fapi->fread(sfont->sampledata, sfont->samplesize, fd) == FLUID_FAILED) {
+-    FLUID_LOG(FLUID_ERR, "Failed to read sample data");
+-    return FLUID_FAILED;
++    sfont->sampledata = (short*) FLUID_MALLOC(sfont->samplesize);
++    if (sfont->sampledata == NULL) {
++      FLUID_LOG(FLUID_ERR, "Out of memory");
++      return FLUID_FAILED;
++    }
++    sfont->owns_sampledata = 1;
++    if (fapi->fread(sfont->sampledata, sfont->samplesize, fd) == FLUID_FAILED) {
++      FLUID_LOG(FLUID_ERR, "Failed to read sample data");
++      return FLUID_FAILED;
++    }
+   }
+   fapi->fclose(fd);
+ 
+diff --git a/src/fluid_defsfont.h b/src/fluid_defsfont.h
+index d823339..633b07b 100644
+--- a/src/fluid_defsfont.h
++++ b/src/fluid_defsfont.h
+@@ -475,5 +475,6 @@ struct _fluid_defsfont_t
+   unsigned int samplepos;   /* the position in the file at which the sample data starts */
+   unsigned int samplesize;  /* the size of the sample data */
+   short* sampledata;        /* the sample data, loaded in ram */
++  int owns_sampledata;      /* non-zero when sampledata must be freed */
+   fluid_list_t* sample;      /* the samples in this soundfont */
+   fluid_defpreset_t* preset; /* the presets of this soundfont */

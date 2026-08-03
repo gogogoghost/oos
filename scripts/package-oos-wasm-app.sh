@@ -7,10 +7,11 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 MANIFEST=
 WASM=
 AOT=
+ASSETS=
 OUTPUT=
 
 usage() {
-  echo "usage: $0 --manifest FILE [--wasm FILE] [--aot FILE] --output APPLICATION.zip" >&2
+  echo "usage: $0 --manifest FILE [--wasm FILE] [--aot FILE] [--assets DIR] --output APPLICATION.zip" >&2
   echo "       at least one of --wasm or --aot is required" >&2
 }
 
@@ -19,6 +20,7 @@ while [[ $# -gt 0 ]]; do
     --manifest) MANIFEST=${2:-}; shift 2 ;;
     --wasm) WASM=${2:-}; shift 2 ;;
     --aot) AOT=${2:-}; shift 2 ;;
+    --assets) ASSETS=${2:-}; shift 2 ;;
     --output) OUTPUT=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
@@ -35,6 +37,10 @@ if [[ -n "$WASM" && ! -f "$WASM" ]]; then
 fi
 if [[ -n "$AOT" && ! -f "$AOT" ]]; then
   echo "AOT module does not exist: $AOT" >&2
+  exit 1
+fi
+if [[ -n "$ASSETS" && ! -d "$ASSETS" ]]; then
+  echo "Asset directory does not exist: $ASSETS" >&2
   exit 1
 fi
 command -v zip >/dev/null || {
@@ -55,6 +61,14 @@ fi
 if [[ -n "$AOT" ]]; then
   install -m 0644 "$AOT" "$STAGING/entry.aot"
   entries+=(entry.aot)
+fi
+if [[ -n "$ASSETS" ]]; then
+  mkdir -p "$STAGING/assets"
+  cp -a "$ASSETS/." "$STAGING/assets/"
+  while IFS= read -r -d '' asset; do
+    relative=${asset#"$STAGING/"}
+    entries+=("$relative")
+  done < <(find "$STAGING/assets" -type f -print0 | sort -z)
 fi
 PACKAGE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT_DIR" log -1 --format=%ct)}
 for entry in "${entries[@]}"; do
