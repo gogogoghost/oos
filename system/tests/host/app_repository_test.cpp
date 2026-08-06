@@ -227,6 +227,10 @@ int main(int argc, char **argv) {
   success &= check(!launch.entrypoint.empty(), "native entrypoint is resolved");
   success &= check(launch.entrypoint == argv[2],
                    "package entry is accepted and selected");
+  success &= check(
+      access((launch.module_directory + "/compiler.wasm").c_str(), R_OK) == 0 &&
+          access((launch.module_directory + "/runtime.aot").c_str(), R_OK) == 0,
+      "packaged child modules are validated and materialized");
   oos::resources::PackageAssetService assets(launch.asset_directory);
   uint32_t asset_handle = 0;
   uint64_t asset_size = 0;

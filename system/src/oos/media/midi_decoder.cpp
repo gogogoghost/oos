@@ -47,6 +47,11 @@ public:
       return 0;
     const int available = decoder.file_size - offset;
     const int requested = std::min(size, available);
+    if (decoder.memory) {
+      std::memcpy(buffer, decoder.memory + offset,
+                  static_cast<size_t>(requested));
+      return requested;
+    }
     ssize_t count;
     do {
       count = pread(decoder.fd, buffer, static_cast<size_t>(requested), offset);
@@ -71,6 +76,7 @@ public:
     if (fd >= 0)
       ::close(fd);
     fd = -1;
+    memory = nullptr;
     file_size = 0;
     duration_frames = 0;
     config = nullptr;
@@ -78,6 +84,7 @@ public:
   }
 
   int fd = -1;
+  const uint8_t *memory = nullptr;
   int file_size = 0;
   EAS_DATA_HANDLE eas = nullptr;
   EAS_HANDLE stream = nullptr;
@@ -147,6 +154,56 @@ bool MidiDecoder::openFile(const std::string &path) {
     impl_->duration_frames =
         static_cast<uint64_t>(duration_ms) * impl_->config->sampleRate / 1000;
   }
+  impl_->format = {static_cast<uint32_t>(impl_->config->sampleRate),
+                   static_cast<uint32_t>(impl_->config->numChannels)};
+  return true;
+}
+
+bool MidiDecoder::open(const uint8_t *encoded, size_t encoded_bytes,
+                       bool standard_midi) {
+  impl_->close();
+  impl_->error.clear();
+  if (!encoded || encoded_bytes == 0 ||
+      encoded_bytes > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    impl_->error = "MIDI byte source size is invalid";
+    return false;
+  }
+  if (standard_midi) {
+    impl_->soundfont = std::make_unique<SoundFontMidiDecoder>();
+    if (impl_->soundfont->open(encoded, encoded_bytes))
+      return true;
+    impl_->error = impl_->soundfont->lastError();
+    impl_->close();
+    return false;
+  }
+  impl_->memory = encoded;
+  impl_->file_size = static_cast<int>(encoded_bytes);
+  EAS_RESULT result = EAS_Init(&impl_->eas);
+  if (result == EAS_SUCCESS) {
+    impl_->locator = {impl_.get(), Impl::readAt, Impl::size};
+    result = EAS_OpenFile(impl_->eas, &impl_->locator, &impl_->stream);
+  }
+  if (result == EAS_SUCCESS)
+    result = EAS_Prepare(impl_->eas, impl_->stream);
+  if (result != EAS_SUCCESS) {
+    impl_->error = easError("prepare MIDI byte source", result);
+    impl_->close();
+    return false;
+  }
+  impl_->config = EAS_Config();
+  if (!impl_->config || impl_->config->sampleRate <= 0 ||
+      impl_->config->numChannels <= 0 || impl_->config->numChannels > 2 ||
+      impl_->config->mixBufferSize <= 0) {
+    impl_->error = "MIDI synthesizer configuration is invalid";
+    impl_->close();
+    return false;
+  }
+  EAS_I32 duration_ms = 0;
+  if (EAS_ParseMetaData(impl_->eas, impl_->stream, &duration_ms) ==
+          EAS_SUCCESS &&
+      duration_ms > 0)
+    impl_->duration_frames =
+        static_cast<uint64_t>(duration_ms) * impl_->config->sampleRate / 1000;
   impl_->format = {static_cast<uint32_t>(impl_->config->sampleRate),
                    static_cast<uint32_t>(impl_->config->numChannels)};
   return true;

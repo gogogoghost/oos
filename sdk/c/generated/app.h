@@ -427,11 +427,28 @@ typedef uint8_t oos_platform_audio_player_state_t;
 #define OOS_PLATFORM_AUDIO_PLAYER_STATE_ENDED 4
 #define OOS_PLATFORM_AUDIO_PLAYER_STATE_FAILED 5
 
+typedef uint8_t oos_platform_audio_media_failure_t;
+
+#define OOS_PLATFORM_AUDIO_MEDIA_FAILURE_NONE 0
+#define OOS_PLATFORM_AUDIO_MEDIA_FAILURE_UNSUPPORTED_FORMAT 1
+#define OOS_PLATFORM_AUDIO_MEDIA_FAILURE_MALFORMED_DATA 2
+#define OOS_PLATFORM_AUDIO_MEDIA_FAILURE_RESOURCE_EXHAUSTION 3
+#define OOS_PLATFORM_AUDIO_MEDIA_FAILURE_IO 4
+#define OOS_PLATFORM_AUDIO_MEDIA_FAILURE_DECODER 5
+
+typedef struct oos_platform_audio_source_limits_t {
+  uint64_t   maximum_source_bytes;
+  uint64_t   maximum_session_bytes;
+  uint32_t   maximum_sources;
+  uint32_t   maximum_players;
+} oos_platform_audio_source_limits_t;
+
 typedef struct oos_platform_audio_playback_status_t {
   oos_platform_audio_player_state_t   state;
   uint64_t   position_ms;
   uint64_t   duration_ms;
   int32_t   underruns;
+  oos_platform_audio_media_failure_t   failure;
 } oos_platform_audio_playback_status_t;
 
 typedef struct {
@@ -1108,6 +1125,30 @@ typedef struct {
   } val;
 } oos_platform_system_services_result_string_error_code_t;
 
+typedef oos_platform_types_error_code_t oos_platform_subruntime_error_code_t;
+
+typedef struct oos_platform_subruntime_limits_t {
+  uint32_t   maximum_instances;
+  uint32_t   minimum_stack_bytes;
+  uint32_t   maximum_stack_bytes;
+  uint64_t   maximum_memory_bytes;
+} oos_platform_subruntime_limits_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    uint32_t ok;
+    oos_platform_subruntime_error_code_t err;
+  } val;
+} oos_platform_subruntime_result_u32_error_code_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_subruntime_error_code_t err;
+  } val;
+} oos_platform_subruntime_result_void_error_code_t;
+
 typedef oos_platform_types_error_code_t exports_oos_platform_lifecycle_error_code_t;
 
 typedef uint8_t exports_oos_platform_lifecycle_key_action_t;
@@ -1129,9 +1170,24 @@ typedef struct {
   } val;
 } exports_oos_platform_lifecycle_result_void_error_code_t;
 
+typedef struct {
+  bool is_err;
+  union {
+    uint32_t ok;
+    exports_oos_platform_lifecycle_error_code_t err;
+  } val;
+} exports_oos_platform_lifecycle_result_u32_error_code_t;
+
 // Imported Functions from `oos:platform/runtime@0.1.0`
 extern uint32_t oos_platform_runtime_abi_version(void);
 extern uint32_t oos_platform_runtime_wall_clock_minutes(void);
+// Monotonic boot-relative time. Legal from the guest worker.
+extern uint64_t oos_platform_runtime_monotonic_time_us(void);
+// Unix epoch time with millisecond precision. Legal from the guest worker.
+extern int64_t oos_platform_runtime_wall_clock_time_ms(void);
+// Wakes the lifecycle thread after publishing work to a shared command
+// queue. Legal from the guest worker and coalesced by the host.
+extern void oos_platform_runtime_wake_main_thread(void);
 extern void oos_platform_runtime_log(oos_platform_runtime_log_level_t level, app_string_t *message);
 // Sets this application's retained status-bar appearance. Only the active
 // application's value is applied. `background-rgb` is 0x00RRGGBB.
@@ -1175,6 +1231,7 @@ extern oos_platform_device_capability_state_t oos_platform_device_get_capability
 // Imported Functions from `oos:platform/audio@0.1.0`
 extern void oos_platform_audio_supported_formats(oos_platform_audio_list_format_support_t *ret);
 extern void oos_platform_audio_get_pcm_capabilities(oos_platform_audio_pcm_capabilities_t *ret);
+extern void oos_platform_audio_get_source_limits(oos_platform_audio_source_limits_t *ret);
 // Opens a persistent, bounded signed-S16 interleaved output stream.
 extern bool oos_platform_audio_pcm_open(uint32_t sample_rate, uint32_t channel_count, uint32_t capacity_frames, oos_platform_audio_usage_t usage, oos_platform_audio_opened_pcm_t *ret, oos_platform_audio_error_code_t *err);
 // Non-blocking write. The result is the number of whole frames accepted.
@@ -1187,6 +1244,11 @@ extern bool oos_platform_audio_pcm_status(uint32_t handle, oos_platform_audio_pc
 extern bool oos_platform_audio_pcm_close(uint32_t handle, oos_platform_audio_error_code_t *err);
 // Creates an asynchronous player for a file under the package's assets/.
 extern bool oos_platform_audio_player_open_asset(app_string_t *path, oos_platform_audio_usage_t usage, uint32_t *ret, oos_platform_audio_error_code_t *err);
+// Copies guest-owned encoded media once into an immutable, session-owned
+// source. Empty MIME and locator strings request bounded content sniffing.
+extern bool oos_platform_audio_source_create(app_list_u8_t *bytes, app_string_t *mime_type, app_string_t *locator_hint, uint32_t *ret, oos_platform_audio_error_code_t *err);
+extern bool oos_platform_audio_source_close(uint32_t handle, oos_platform_audio_error_code_t *err);
+extern bool oos_platform_audio_player_open_source(uint32_t source, oos_platform_audio_usage_t usage, uint32_t *ret, oos_platform_audio_error_code_t *err);
 extern bool oos_platform_audio_player_play(uint32_t handle, oos_platform_audio_error_code_t *err);
 extern bool oos_platform_audio_player_pause(uint32_t handle, oos_platform_audio_error_code_t *err);
 extern bool oos_platform_audio_player_seek(uint32_t handle, uint64_t position_ms, oos_platform_audio_error_code_t *err);
@@ -1306,10 +1368,20 @@ extern bool oos_platform_assets_close(uint32_t handle, oos_platform_assets_error
 // Imported Functions from `oos:platform/system-services@0.1.0`
 extern bool oos_platform_system_services_request(app_string_t *service, app_string_t *operation, app_string_t *payload, app_string_t *ret, oos_platform_system_services_error_code_t *err);
 
+// Imported Functions from `oos:platform/subruntime@0.1.0`
+extern void oos_platform_subruntime_get_limits(oos_platform_subruntime_limits_t *ret);
+// `module` is a simple name resolved as modules/<name>.aot, then .wasm.
+extern bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t worker_stack_bytes, uint64_t memory_limit_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err);
+extern bool oos_platform_subruntime_initialize(uint32_t handle, oos_platform_subruntime_error_code_t *err);
+extern bool oos_platform_subruntime_event(uint32_t handle, uint32_t code, uint32_t action, uint64_t monotonic_time_us, oos_platform_subruntime_error_code_t *err);
+extern bool oos_platform_subruntime_frame(uint32_t handle, uint64_t monotonic_time_us, uint32_t *ret, oos_platform_subruntime_error_code_t *err);
+extern bool oos_platform_subruntime_destroy(uint32_t handle, oos_platform_subruntime_error_code_t *err);
+extern void oos_platform_subruntime_last_error(app_string_t *ret);
+
 // Exported Functions from `oos:platform/lifecycle@0.1.0`
 bool exports_oos_platform_lifecycle_init(exports_oos_platform_lifecycle_error_code_t *err);
 void exports_oos_platform_lifecycle_event(exports_oos_platform_lifecycle_key_event_t *event);
-bool exports_oos_platform_lifecycle_frame(uint64_t monotonic_time_us, exports_oos_platform_lifecycle_error_code_t *err);
+bool exports_oos_platform_lifecycle_frame(uint64_t monotonic_time_us, uint32_t *ret, exports_oos_platform_lifecycle_error_code_t *err);
 void exports_oos_platform_lifecycle_shutdown(void);
 
 // Helper Functions
@@ -1478,7 +1550,13 @@ void oos_platform_assets_result_void_error_code_free(oos_platform_assets_result_
 
 void oos_platform_system_services_result_string_error_code_free(oos_platform_system_services_result_string_error_code_t *ptr);
 
+void oos_platform_subruntime_result_u32_error_code_free(oos_platform_subruntime_result_u32_error_code_t *ptr);
+
+void oos_platform_subruntime_result_void_error_code_free(oos_platform_subruntime_result_void_error_code_t *ptr);
+
 void exports_oos_platform_lifecycle_result_void_error_code_free(exports_oos_platform_lifecycle_result_void_error_code_t *ptr);
+
+void exports_oos_platform_lifecycle_result_u32_error_code_free(exports_oos_platform_lifecycle_result_u32_error_code_t *ptr);
 
 // Sets the string `ret` to reference the input string `s` without copying it
 void app_string_set(app_string_t *ret, const char*s);

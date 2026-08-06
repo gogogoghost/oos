@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace oos::device {
 class ServiceProvider;
@@ -21,11 +22,28 @@ enum class PlayerState : uint8_t {
   Failed,
 };
 
+enum class MediaFailure : uint8_t {
+  None,
+  UnsupportedFormat,
+  MalformedData,
+  ResourceExhaustion,
+  Io,
+  Decoder,
+};
+
+struct MediaSourceLimits {
+  uint64_t maximum_source_bytes = 0;
+  uint64_t maximum_session_bytes = 0;
+  uint32_t maximum_sources = 0;
+  uint32_t maximum_players = 0;
+};
+
 struct PlayerStatus {
   PlayerState state = PlayerState::Failed;
   uint64_t position_ms = 0;
   uint64_t duration_ms = 0;
   int32_t underruns = 0;
+  MediaFailure failure = MediaFailure::None;
 };
 
 // Session-owned asynchronous decoder/player service. Its worker threads never
@@ -40,6 +58,13 @@ public:
 
   bool openAsset(const std::string &path, hardware::AudioUsage usage,
                  uint32_t &handle);
+  MediaSourceLimits sourceLimits() const;
+  bool createSource(const uint8_t *bytes, size_t size,
+                    const std::string &mime_type,
+                    const std::string &locator_hint, uint32_t &handle);
+  bool closeSource(uint32_t handle);
+  bool openSource(uint32_t source, hardware::AudioUsage usage,
+                  uint32_t &handle);
   bool play(uint32_t handle);
   bool pause(uint32_t handle);
   bool seek(uint32_t handle, uint64_t position_ms);

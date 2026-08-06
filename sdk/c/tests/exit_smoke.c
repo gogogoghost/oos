@@ -18,10 +18,11 @@ void exports_oos_platform_lifecycle_event(
 }
 
 bool exports_oos_platform_lifecycle_frame(
-    uint64_t monotonic_time_us,
+    uint64_t monotonic_time_us, uint32_t *next_delay_ms,
     exports_oos_platform_lifecycle_error_code_t *error) {
   (void)monotonic_time_us;
   (void)error;
+  *next_delay_ms = 1000;
   return true;
 }
 

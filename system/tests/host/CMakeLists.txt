@@ -52,6 +52,7 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/src/oos/media/audio_format.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/ffmpeg_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/media_service.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/media_source.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/midi_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/soundfont_midi_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c"
@@ -85,6 +86,7 @@ add_executable(oos_media_core_test
   "${OOS_SYSTEM_ROOT}/src/oos/media/audio_format.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/ffmpeg_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/midi_decoder.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/media/media_source.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/soundfont_midi_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c")
 target_include_directories(oos_media_core_test PRIVATE

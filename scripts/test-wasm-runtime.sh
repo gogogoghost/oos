@@ -12,7 +12,9 @@ BUILD_DIR="$ROOT_DIR/build/host-wamr-runtime"
 "$ROOT_DIR/scripts/build-c-thread-smoke.sh"
 "$ROOT_DIR/scripts/build-c-worker-wit-trap.sh"
 "$ROOT_DIR/scripts/build-c-exit-smoke.sh"
+"$ROOT_DIR/scripts/build-c-subruntime-smoke.sh"
 "$ROOT_DIR/scripts/build-c-thread-smoke-aot.sh"
+"$ROOT_DIR/scripts/build-c-subruntime-smoke-aot.sh"
 if command -v wasm-tools >/dev/null 2>&1 &&
     [[ -f "$ROOT_DIR/build/native-apps/egui-demo.component.wasm" ]]; then
   "$ROOT_DIR/scripts/verify-wit-interfaces.sh"
@@ -28,7 +30,10 @@ cmake --build "$BUILD_DIR"
   "$ROOT_DIR/build/native-apps/c-thread-smoke.wasm" \
   "$ROOT_DIR/build/native-apps/c-worker-wit-trap.wasm" \
   "$ROOT_DIR/build/native-apps/c-exit-smoke.wasm" \
-  "$ROOT_DIR/system/assets/fonts"
+  "$ROOT_DIR/system/assets/fonts" \
+  "$ROOT_DIR/build/native-apps/c-subruntime-parent.wasm" \
+  "$ROOT_DIR/build/native-apps/subruntime-host-modules" \
+  "$ROOT_DIR/build/native-apps/c-production-libc-smoke.wasm"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
 TEST_AOT_PACKAGE="$TEST_DIRECTORY/aot-only.zip"

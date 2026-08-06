@@ -75,7 +75,10 @@ bool NativeAppManager::load(const char *id,
 
   WasmAppOptions wasm_options;
   wasm_options.stack_size = options.stack_size;
+  wasm_options.worker_stack_size = options.worker_stack_size;
+  wasm_options.memory_limit_bytes = options.memory_limit_bytes;
   wasm_options.heap_size = options.heap_size;
+  wasm_options.wake_fd = options.wake_fd;
   wasm_options.app_id = id;
   wasm_options.data_directory =
       options.data_directory ? options.data_directory : "";
@@ -92,6 +95,8 @@ bool NativeAppManager::load(const char *id,
       options.font_directory ? options.font_directory : "";
   wasm_options.asset_directory =
       options.asset_directory ? options.asset_directory : "";
+  wasm_options.module_directory =
+      options.module_directory ? options.module_directory : "";
   wasm_options.service_permission_mask = options.service_permission_mask;
   wasm_options.enforce_service_permissions =
       options.enforce_service_permissions;
@@ -154,13 +159,13 @@ bool NativeAppManager::dispatchKey(const input::KeyEvent &event,
   return true;
 }
 
-bool NativeAppManager::render(int64_t monotonic_us) {
+bool NativeAppManager::render(int64_t monotonic_us, uint32_t &next_delay_ms) {
   if (impl_->active_index >= impl_->apps.size()) {
     impl_->error = "no active native app";
     return false;
   }
   auto &active = impl_->apps[impl_->active_index].app;
-  if (!active->render(monotonic_us)) {
+  if (!active->render(monotonic_us, next_delay_ms)) {
     impl_->error = active->lastError();
     return false;
   }

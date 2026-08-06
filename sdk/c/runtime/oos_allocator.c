@@ -1,19 +1,30 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-typedef struct block {
-  size_t size;
-  struct block *next;
-  int free;
-  uint32_t reserved;
-} block_t;
-
-_Static_assert(sizeof(block_t) % 8 == 0,
-               "allocator headers must preserve 8-byte alignment");
+#include <tlsf.h>
 
 extern unsigned char __heap_base;
-static block_t *blocks;
+
+typedef struct {
+  size_t current_bytes;
+  size_t peak_bytes;
+  size_t allocation_count;
+  size_t free_count;
+  size_t linear_memory_bytes;
+} oos_allocator_stats_t;
+
+static tlsf_t allocator;
 static _Atomic unsigned allocator_lock;
+static oos_allocator_stats_t statistics;
+
+// TLSF diagnostics describe invalid host configuration. OOS validates the
+// pool before calling TLSF, so production guests keep this path allocation and
+// I/O free instead of importing a WASI console.
+int oos_tlsf_diagnostic(const char *format, ...) {
+  (void)format;
+  return 0;
+}
 
 static void lock(void) {
   while (__c11_atomic_exchange(&allocator_lock, 1, __ATOMIC_ACQUIRE))
@@ -25,78 +36,67 @@ static void unlock(void) {
   __builtin_wasm_memory_atomic_notify((int *)&allocator_lock, 1);
 }
 
-static size_t align8(size_t size) { return (size + 7) & ~(size_t)7; }
-
-static int grow_to(uintptr_t end) {
-  const size_t page = 65536;
-  const size_t current = __builtin_wasm_memory_size(0) * page;
-  if (end <= current)
+static int initialize(void) {
+  if (allocator)
     return 1;
-  const size_t pages = (end - current + page - 1) / page;
-  return __builtin_wasm_memory_grow(0, pages) != (size_t)-1;
+  const uintptr_t alignment = tlsf_align_size();
+  const uintptr_t begin =
+      ((uintptr_t)&__heap_base + alignment - 1) & ~(alignment - 1);
+  const uintptr_t end = __builtin_wasm_memory_size(0) * 65536u;
+  if (end <= begin || end - begin < tlsf_size() + tlsf_pool_overhead())
+    return 0;
+  allocator = tlsf_create_with_pool((void *)begin, end - begin);
+  statistics.linear_memory_bytes = end;
+  return allocator != NULL;
 }
 
-static block_t *last_block(void) {
-  block_t *block = blocks;
-  while (block && block->next)
-    block = block->next;
-  return block;
+static int grow(size_t requested) {
+  const size_t overhead = tlsf_pool_overhead() + tlsf_alloc_overhead();
+  if (requested > SIZE_MAX - overhead)
+    return 0;
+  const size_t required = requested + overhead;
+  if (required > SIZE_MAX - 65535u)
+    return 0;
+  const size_t pages =
+      required > 16 * 65536u ? (required + 65535u) / 65536u : 16;
+  const size_t previous = __builtin_wasm_memory_grow(0, pages);
+  if (previous == (size_t)-1)
+    return 0;
+  void *pool = (void *)(previous * 65536u);
+  if (!tlsf_add_pool(allocator, pool, pages * 65536u))
+    return 0;
+  statistics.linear_memory_bytes = (previous + pages) * 65536u;
+  return 1;
 }
 
-void *malloc(size_t requested) {
-  if (!requested)
-    requested = 1;
-  const size_t size = align8(requested);
-  if (size < requested)
-    return NULL;
+void *malloc(size_t size) {
+  if (size == 0)
+    size = 1;
   lock();
-  for (block_t *block = blocks; block; block = block->next) {
-    if (!block->free || block->size < size)
-      continue;
-    if (block->size >= size + sizeof(block_t) + 8) {
-      block_t *tail = (block_t *)((unsigned char *)(block + 1) + size);
-      *tail =
-          (block_t){block->size - size - sizeof(block_t), block->next, 1, 0};
-      block->next = tail;
-      block->size = size;
-    }
-    block->free = 0;
-    unlock();
-    return block + 1;
-  }
-  block_t *last = last_block();
-  uintptr_t address = last ? (uintptr_t)(last + 1) + last->size
-                           : align8((uintptr_t)&__heap_base);
-  if (!grow_to(address + sizeof(block_t) + size)) {
+  if (!initialize()) {
     unlock();
     return NULL;
   }
-  block_t *block = (block_t *)address;
-  *block = (block_t){size, NULL, 0, 0};
-  if (last)
-    last->next = block;
-  else
-    blocks = block;
+  void *result = tlsf_malloc(allocator, size);
+  while (!result && grow(size))
+    result = tlsf_malloc(allocator, size);
+  if (result) {
+    statistics.current_bytes += tlsf_block_size(result);
+    if (statistics.current_bytes > statistics.peak_bytes)
+      statistics.peak_bytes = statistics.current_bytes;
+    ++statistics.allocation_count;
+  }
   unlock();
-  return block + 1;
+  return result;
 }
 
 void free(void *pointer) {
   if (!pointer)
     return;
   lock();
-  block_t *block = (block_t *)pointer - 1;
-  block->free = 1;
-  for (block_t *current = blocks; current && current->next;) {
-    if (current->free && current->next->free &&
-        (unsigned char *)(current + 1) + current->size ==
-            (unsigned char *)current->next) {
-      current->size += sizeof(block_t) + current->next->size;
-      current->next = current->next->next;
-    } else {
-      current = current->next;
-    }
-  }
+  statistics.current_bytes -= tlsf_block_size(pointer);
+  ++statistics.free_count;
+  tlsf_free(allocator, pointer);
   unlock();
 }
 
@@ -104,10 +104,9 @@ void *calloc(size_t count, size_t size) {
   if (count && size > SIZE_MAX / count)
     return NULL;
   const size_t total = count * size;
-  unsigned char *result = malloc(total);
+  void *result = malloc(total);
   if (result)
-    for (size_t index = 0; index < total; ++index)
-      result[index] = 0;
+    memset(result, 0, total);
   return result;
 }
 
@@ -118,16 +117,28 @@ void *realloc(void *pointer, size_t size) {
     free(pointer);
     return NULL;
   }
-  block_t *block = (block_t *)pointer - 1;
-  if (block->size >= size)
-    return pointer;
-  void *replacement = malloc(size);
-  if (!replacement)
-    return NULL;
-  for (size_t index = 0; index < block->size; ++index)
-    ((unsigned char *)replacement)[index] = ((unsigned char *)pointer)[index];
-  free(pointer);
-  return replacement;
+  lock();
+  const size_t previous_size = tlsf_block_size(pointer);
+  void *result = tlsf_realloc(allocator, pointer, size);
+  while (!result && grow(size))
+    result = tlsf_realloc(allocator, pointer, size);
+  if (result) {
+    const size_t current_size = tlsf_block_size(result);
+    statistics.current_bytes =
+        statistics.current_bytes - previous_size + current_size;
+    if (statistics.current_bytes > statistics.peak_bytes)
+      statistics.peak_bytes = statistics.current_bytes;
+  }
+  unlock();
+  return result;
+}
+
+void oos_allocator_get_stats(oos_allocator_stats_t *result) {
+  if (!result)
+    return;
+  lock();
+  *result = statistics;
+  unlock();
 }
 
 _Noreturn void abort(void) { __builtin_trap(); }

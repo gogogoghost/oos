@@ -12,8 +12,12 @@ staging=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-package.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 entries=(manifest.json)
 mkdir -p "$staging/assets/audio"
+mkdir -p "$staging/modules"
 printf 'OOS packaged asset\n' > "$staging/assets/audio/test.dat"
+printf '\0child-wasm-test-module\n' > "$staging/modules/compiler.wasm"
+printf '\0child-aot-test-module\n' > "$staging/modules/runtime.aot"
 entries+=(assets/audio/test.dat)
+entries+=(modules/compiler.wasm modules/runtime.aot)
 if [[ $mode == aot || $mode == both ]]; then
   printf '\0aot-test-module\n' > "$staging/entry.aot"
   entries+=(entry.aot)

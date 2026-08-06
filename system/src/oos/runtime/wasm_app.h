@@ -24,6 +24,8 @@ class GraphicsHost;
 
 struct WasmAppOptions {
   uint32_t stack_size = 128 * 1024;
+  uint32_t worker_stack_size = 128 * 1024;
+  uint64_t memory_limit_bytes = 64ULL * 1024 * 1024;
   uint32_t heap_size = 0;
   std::string app_id;
   std::string data_directory;
@@ -34,6 +36,8 @@ struct WasmAppOptions {
   std::string removable_media_directory = "/data/media/removable";
   std::string font_directory = "/opt/oos/share/fonts";
   std::string asset_directory;
+  std::string module_directory;
+  int wake_fd = -1;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
 };
@@ -51,7 +55,11 @@ public:
   bool load(const char *path);
   bool initialize();
   bool dispatchKey(const input::KeyEvent &event, int64_t monotonic_us);
-  bool render(int64_t monotonic_us);
+  bool render(int64_t monotonic_us, uint32_t &next_delay_ms);
+  bool render(int64_t monotonic_us) {
+    uint32_t ignored_delay = 0;
+    return render(monotonic_us, ignored_delay);
+  }
   bool takeExitRequest();
   void setAudioFocused(bool focused);
   void shutdown();

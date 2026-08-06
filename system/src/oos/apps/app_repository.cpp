@@ -4,6 +4,7 @@
 #include "oos/storage/filesystem.h"
 #include "oos/storage/sqlite.h"
 
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -16,7 +17,9 @@ namespace {
 
 constexpr size_t kMaximumManifestBytes = 256 * 1024;
 constexpr size_t kMaximumAssetBytes = 64 * 1024 * 1024;
+constexpr size_t kMaximumModuleBytes = 32 * 1024 * 1024;
 constexpr const char kAssetPrefix[] = "assets/";
+constexpr const char kModulePrefix[] = "modules/";
 
 std::string join(const std::string &left, const std::string &right) {
   return left + (left.empty() || left.back() == '/' ? "" : "/") + right;
@@ -144,6 +147,24 @@ bool createRegistrySchema(storage::SqliteDatabase &database) {
       " app_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'installed',"
       " last_started_at INTEGER, last_exit_code INTEGER);"
       "PRAGMA user_version=3;");
+}
+
+bool validChildModulePath(const std::string &path) {
+  if (path.rfind(kModulePrefix, 0) != 0 || path.back() == '/' ||
+      path.find('/', sizeof(kModulePrefix) - 1) != std::string::npos)
+    return false;
+  const std::string name = path.substr(sizeof(kModulePrefix) - 1);
+  const bool executable =
+      (name.size() > 4 && name.substr(name.size() - 4) == ".aot") ||
+      (name.size() > 5 && name.substr(name.size() - 5) == ".wasm");
+  if (!executable)
+    return false;
+  for (unsigned char character : name) {
+    if (!(std::isalnum(character) || character == '-' || character == '_' ||
+          character == '.'))
+      return false;
+  }
+  return true;
 }
 
 bool migrateLegacyRegistry(storage::SqliteDatabase &database) {
@@ -285,6 +306,19 @@ bool AppRepository::install(const char *package_path,
     std::vector<uint8_t> verified;
     if (!archive.readEntry(entry, verified, kMaximumAssetBytes)) {
       error_ = "validate packaged asset: " + archive.lastError();
+      return false;
+    }
+  }
+  for (const ZipEntry &entry : archive.entries()) {
+    if (entry.name.rfind(kModulePrefix, 0) != 0)
+      continue;
+    if (!validChildModulePath(entry.name)) {
+      error_ = "invalid child module path: " + entry.name;
+      return false;
+    }
+    std::vector<uint8_t> verified;
+    if (!archive.readEntry(entry, verified, kMaximumModuleBytes)) {
+      error_ = "validate child module: " + archive.lastError();
       return false;
     }
   }
@@ -598,6 +632,29 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
     }
   }
 
+  const std::string module_directory = join(cache_directory, "modules");
+  if (!storage::ensureDirectory(module_directory, 0700, error_))
+    return false;
+  for (const ZipEntry &entry : archive.entries()) {
+    if (!validChildModulePath(entry.name))
+      continue;
+    const std::string name = entry.name.substr(sizeof(kModulePrefix) - 1);
+    const std::string destination = join(module_directory, name);
+    struct stat module_status = {};
+    if (stat(destination.c_str(), &module_status) == 0 &&
+        S_ISREG(module_status.st_mode) &&
+        static_cast<uint64_t>(module_status.st_size) == entry.uncompressed_size)
+      continue;
+    std::vector<uint8_t> bytes;
+    if (!archive.readEntry(entry, bytes, kMaximumModuleBytes) ||
+        !storage::writeFileAtomic(destination, bytes.data(), bytes.size(), 0500,
+                                  error_)) {
+      if (error_.empty())
+        error_ = archive.lastError();
+      return false;
+    }
+  }
+
   const std::string data_directory = join(
       join(join(join(data_root_, "users"), "0"), "wasm"), record.manifest.id);
   if (!storage::ensureDirectory(data_directory, 0700, error_))
@@ -608,6 +665,7 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
   launch.data_directory = data_directory;
   launch.cache_directory = cache_directory;
   launch.asset_directory = asset_directory;
+  launch.module_directory = module_directory;
   return true;
 }
 

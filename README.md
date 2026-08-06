@@ -108,7 +108,8 @@ The hardware test runners remain device-specific:
 See [docs/device-platform.md](docs/device-platform.md),
 [docs/graphics.md](docs/graphics.md), [docs/input.md](docs/input.md),
 [docs/system-ui.md](docs/system-ui.md), [docs/ui-icons.md](docs/ui-icons.md),
-[docs/settings.md](docs/settings.md), [docs/media.md](docs/media.md), and the device READMEs for the common
+[docs/settings.md](docs/settings.md), [docs/media.md](docs/media.md),
+[docs/omnij2me-platform.md](docs/omnij2me-platform.md), and the device READMEs for the common
 hardware API, system icon policy, and verified platform behavior.
 
 ## Packaging

@@ -1,6 +1,7 @@
 #include "oos/media/audio_decoder.h"
 #include "oos/media/audio_format.h"
 #include "oos/media/ffmpeg_decoder.h"
+#include "oos/media/media_source.h"
 #include "oos/media/midi_decoder.h"
 
 #include <algorithm>
@@ -78,6 +79,9 @@ int main(int argc, char **argv) {
       'M',  'T', 'h', 'd', 0,    0,  0,  6, 0,    0,    0,    1, 0,
       96,   'M', 'T', 'r', 'k',  0,  0,  0, 15,   0,    0xc0, 0, 0,
       0x90, 60,  100, 96,  0x80, 60, 64, 0, 0xff, 0x2f, 0};
+  assert(oos::media::identifyMedia(midi.data(), midi.size(),
+                                   "application/octet-stream", "bad.bin") ==
+         oos::media::MediaDecoderKind::StandardMidi);
   char midi_path[] = "/tmp/oos-midi-test.XXXXXX.mid";
   const int midi_fd = mkstemps(midi_path, 4);
   assert(midi_fd >= 0);
@@ -85,7 +89,7 @@ int main(int argc, char **argv) {
          static_cast<ssize_t>(midi.size()));
   close(midi_fd);
   oos::media::MidiDecoder midi_decoder;
-  assert(midi_decoder.openFile(midi_path));
+  assert(midi_decoder.open(midi.data(), midi.size(), true));
   oos::media::MidiDecoder second_midi_decoder;
   assert(second_midi_decoder.openFile(midi_path));
   assert(midi_decoder.format().sample_rate == 44100);
@@ -103,6 +107,8 @@ int main(int argc, char **argv) {
   unlink(midi_path);
 
   constexpr std::array<uint8_t, 4> invalid = {0, 1, 2, 3};
+  assert(oos::media::identifyMedia(invalid.data(), invalid.size(), "", "") ==
+         oos::media::MediaDecoderKind::Unknown);
   assert(!decoder.open(invalid.data(), invalid.size()));
   char invalid_path[] = "/tmp/oos-invalid-audio.XXXXXX.aac";
   const int invalid_fd = mkstemps(invalid_path, 4);
@@ -111,6 +117,7 @@ int main(int argc, char **argv) {
          static_cast<ssize_t>(invalid.size()));
   close(invalid_fd);
   oos::media::FfmpegDecoder invalid_decoder;
+  assert(!invalid_decoder.open(invalid.data(), invalid.size()));
   assert(!invalid_decoder.openFile(invalid_path));
   unlink(invalid_path);
 

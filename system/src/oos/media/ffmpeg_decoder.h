@@ -19,6 +19,7 @@ public:
   FfmpegDecoder &operator=(const FfmpegDecoder &) = delete;
 
   bool openFile(const std::string &path);
+  bool open(const uint8_t *encoded, size_t encoded_bytes);
   void close();
   bool read(int16_t *samples, uint64_t frame_capacity, uint64_t &frames_read);
   bool seek(uint64_t frame);

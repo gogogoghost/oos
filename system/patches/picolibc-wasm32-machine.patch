@@ -1,0 +1,12 @@
+diff --git a/newlib/libc/machine/wasm32/meson.build b/newlib/libc/machine/wasm32/meson.build
+new file mode 100644
+index 000000000..4c96b46c0
+--- /dev/null
++++ b/newlib/libc/machine/wasm32/meson.build
+@@ -0,0 +1,6 @@
++# WebAssembly uses the compiler's generic C memory routines. setjmp/longjmp
++# are intentionally unavailable in the initial OOS C runtime contract.
++srcs_machine = []
++src_machine = files(srcs_machine)
++
++has_ieeefp_funcs = false

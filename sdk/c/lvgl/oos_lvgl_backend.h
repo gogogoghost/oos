@@ -14,6 +14,7 @@ typedef struct {
   uint32_t texture;
   uint32_t width;
   uint32_t height;
+  bool transparent;
   bool dirty;
 } oos_lvgl_backend_t;
 
@@ -21,6 +22,15 @@ typedef struct {
 // sufficient for keypad UIs. The backend uploads only LVGL's invalidated areas.
 bool oos_lvgl_backend_init(oos_lvgl_backend_t *backend, uint32_t texture,
                            void *draw_buffer, size_t draw_buffer_bytes);
+// Alpha mode renders LVGL as ARGB8888, converts dirty rows in place to OOS
+// premultiplied RGBA8888, and leaves transparent pixels compositable over a
+// retained game framebuffer.
+bool oos_lvgl_backend_init_overlay(oos_lvgl_backend_t *backend,
+                                   uint32_t texture, void *draw_buffer,
+                                   size_t draw_buffer_bytes);
+// Recreates the retained texture and updates LVGL's logical resolution.
+bool oos_lvgl_backend_resize(oos_lvgl_backend_t *backend, uint32_t width,
+                             uint32_t height);
 void oos_lvgl_backend_destroy(oos_lvgl_backend_t *backend);
 
 // Produces one textured quad without submitting it. This lets an application

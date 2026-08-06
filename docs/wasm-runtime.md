@@ -31,7 +31,7 @@ Every app implements the WIT `lifecycle` interface:
 
 - `init() -> result`
 - `event(key-event)`
-- `frame(monotonic-time-us) -> result`
+- `frame(monotonic-time-us) -> result<u32, error-code>`
 - `shutdown()`
 
 The generated core-Wasm export names are versioned, for example
@@ -46,21 +46,23 @@ and every WIT import run on the OOS event-loop thread. A non-zero
 return, trap, missing export, invalid pointer, invalid draw range, or resource
 limit violation fails that app call instead of passing untrusted data to GLES.
 
-Each instance gets a 128 KiB execution stack. WAMR's optional host-managed heap
-is disabled; allocation through the generated WIT bindings uses the module's
-own linear memory and exported `cabi_realloc`. Resource policy therefore stays
-under OOS control instead of being requested by application manifests. Core
+Main stack, worker stack, and total linear-memory limits are host launch policy,
+not manifest fields. The production C profile starts at a 512 KiB lifecycle
+stack and a 2 MiB worker stack; applications with smaller measured needs may
+use lower values. WAMR's optional host-managed heap is disabled; allocation
+through the generated WIT bindings uses the module's own linear memory and
+exported `cabi_realloc`. Core
 Wasm modules must declare one memory maximum no larger than 64 MiB; unbounded
 or oversized core modules are rejected before WAMR loads them. Instantiation
 also applies WAMR's 1,024-page cap and verifies the resulting byte size, so the
 same 64 MiB policy covers AOT-only packages.
 
 WAMR shared memory, thread manager, and lib-pthread are enabled for one bounded
-guest worker in addition to the lifecycle thread. C guests reserve a 256 KiB
-linear-memory auxiliary stack region, split into explicit 128 KiB main and
-worker stacks. The worker may execute guest code and atomics only. Every
-OOS WIT import compares the current host thread to the session lifecycle thread
-and traps misuse; only immutable ABI-version discovery is thread-safe.
+guest worker in addition to the lifecycle thread. The worker may execute guest
+code and atomics. ABI discovery, precise monotonic/epoch clocks, and the
+coalescing main-thread wake call are explicitly worker-safe. Every other OOS
+WIT import compares the current host thread to the session lifecycle thread and
+traps misuse.
 WAMR joins cluster threads during instance teardown before OOS releases host
 resources.
 
@@ -92,7 +94,13 @@ activation and cannot leak from a hidden application.
 `set-surface-mode(normal|immersive)` changes the retained compositor layer
 between status-safe geometry and the complete physical display. The status bar
 is hidden in immersive mode, `graphics.surface-size` changes synchronously, and
-the mode is restored with the resident session. These interfaces use ABI 5.
+the mode is restored with the resident session. Lifecycle frame delays,
+worker-safe clocks, dynamic media sources, and child runtimes use ABI 6.
+
+The lifecycle result is the next requested frame delay in milliseconds. OOS
+schedules the earliest application/SystemUI deadline, clamps idle waits to one
+second, and uses input plus `eventfd` wakeups instead of a fixed 33 ms sleep.
+Worker command queues call `wake-main-thread` after publishing work.
 
 Limits are part of the interface: 2048-pixel texture dimensions, 16 MiB per
 upload, 65,535 vertices, 196,605 indices, and 4,096 draw commands per
@@ -123,9 +131,9 @@ implementation for Web applications; it is an API-shape adapter, not a second
 database service.
 
 The `audio` interface reports the running build's real decoder set by canonical
-MIME type. It provides asynchronous managed playback, legacy MIDI/ringtone
-synthesis, modern/phone codec decoding, and bounded PCM streams as described in
-[media.md](media.md). Applications must query this list
+MIME type. It provides immutable session-owned byte sources, asynchronous
+managed playback, legacy MIDI/ringtone synthesis, modern/phone codec decoding,
+and bounded PCM streams as described in [media.md](media.md). Applications must query this list
 instead of inferring support from the phone model or Android API level.
 
 The separate `device-storage` interface reads and writes user-visible internal
@@ -145,6 +153,22 @@ The `system-services` interface is a trusted JSON policy broker for SystemUI.
 It is registered only for applications granted `system`; ordinary WAMR apps do
 not instantiate its SQLite service. It manages software state and events, not
 device drivers.
+
+## Ephemeral Child Modules
+
+An application package may contain named `modules/<name>.wasm` and
+`modules/<name>.aot` files. The `subruntime` interface permits one child at a
+time and prefers AOT. A child inherits the parent's storage and device
+capabilities but owns an independent WAMR instance, worker cluster, stacks, and
+linear memory. All child execution is serialized on a dedicated host thread so
+WAMR execution environments are never re-entered from a parent native callback.
+Destroy joins a live worker, tears down host resources, and releases the entire
+child linear memory.
+
+This is the recoverable-memory model for compiler/game workloads. Host stress
+coverage injects allocation failure and a worker WIT trap, then recreates a
+healthy child repeatedly. It also cancels a worker in atomic wait and checks
+`smaps_rollup` PSS after twelve 12 MiB allocation cycles.
 
 ## WAMR And Components
 
@@ -210,7 +234,11 @@ process-local Dear ImGui backend translates textures, vertices, `u16` indices,
 texture IDs, and clip rectangles directly into the same host records. Both
 backends are device-independent and therefore run unchanged on the 2780,
 8110, and local target. The C guest LVGL adapter lowers partial RGB565 updates
-through WIT and exposes its quad rather than forcing a second submit. Engines
+through WIT and exposes its quad rather than forcing a second submit. Its
+overlay mode renders ARGB8888, converts dirty rows to premultiplied RGBA8888,
+and keeps the root transparent above a retained game texture. Resize replaces
+the texture, updates LVGL resolution, and invalidates the full active screen.
+Engines
 that need custom shaders use the
 batched GLES2 interface while the host continues to own composition.
 
@@ -231,8 +259,10 @@ The host integration test loads three egui demo instances through
 the active instance, and checks texture cleanup. It then loads a generated WIT
 smoke guest that imports every device-service interface and validates
 Canonical ABI error lifting. It also executes a C shared-memory pthread guest,
-checks its worker join, rejects an unbounded-memory module, and compiles that
-same guest to ARMv7 AOT. The interface verifier rejects legacy `oos_*`
+checks repeated worker join, clocks and wakeups, rejects an unbounded-memory
+module, and compiles that same guest to ARMv7 AOT. It also covers dynamic MIDI
+bytes, child failure recovery, live-worker teardown, and PSS recovery. The
+interface verifier rejects legacy `oos_*`
 imports and checks both core-Wasm and component lifecycle exports. The Android
 build also emits `oos_test_nokia_2780_wasm_multi_app`; it cycles three
 independent Launcher states on the physical display for suspend/resume and

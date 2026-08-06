@@ -352,7 +352,7 @@ impl oos_app::App for App {
         });
     }
 
-    fn frame(monotonic_time_us: u64) -> Result<(), oos_app::ErrorCode> {
+    fn frame(monotonic_time_us: u64) -> Result<u32, oos_app::ErrorCode> {
         LAUNCHER.with(|launcher| {
             launcher
                 .borrow_mut()
@@ -362,7 +362,8 @@ impl oos_app::App for App {
                 .map_err(|message| {
                     oos_app::log(3, message);
                     oos_app::ErrorCode::Failed
-                })
+                })?;
+            Ok(33)
         })
     }
 

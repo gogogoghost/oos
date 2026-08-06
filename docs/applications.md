@@ -13,6 +13,9 @@ application.zip
 ├── manifest.json
 ├── entry.wasm         # optional when entry.aot is present
 ├── entry.aot          # optional, preferred when present
+├── modules/           # optional ephemeral child runtimes
+│   ├── compiler.wasm
+│   └── runtime.aot    # preferred over runtime.wasm
 └── assets/            # optional read-only application files
     └── ...
 ```
@@ -57,6 +60,8 @@ Create a deterministic package with:
   --manifest apps/tests/egui-demo/manifest.json \
   --wasm build/native-apps/egui-demo.wasm \
   --aot build/native-apps/egui-demo.aot \
+  --module compiler=build/compiler.wasm \
+  --module runtime=build/runtime.aot \
   --assets path/to/assets \
   --output application.zip
 ```
@@ -64,7 +69,10 @@ Create a deterministic package with:
 The ZIP reader validates central-directory records and CRCs, bounds expanded
 size and entry count, and rejects encryption, ZIP64, absolute paths, parent
 traversal, and duplicate entries. Packaged assets are CRC-validated at install,
-then exposed read-only through the `assets` WIT interface.
+then exposed read-only through the `assets` WIT interface. Child modules use a
+single safe filename component, are limited to 32 MiB each, and are extracted
+into the same content-keyed cache. Applications resolve them by name through
+the `subruntime` WIT API, never by a host path.
 
 ## Registry And Launch
 
@@ -76,7 +84,7 @@ The canonical package is stored at:
 
 `/data/system/app-registry.sqlite3` records the active version, package digest,
 permissions, roles, handlers, and lifecycle state. Launch preparation extracts
-the preferred fixed entry and validated `assets/` tree to
+the preferred fixed entry and validated `assets/` and `modules/` trees to
 `/data/cache/aot/<content-key>/`; the ZIP remains the installed source of truth.
 The content-key cache prevents stale files from another package revision being
 reused.
@@ -87,10 +95,10 @@ entrypoint, and per-app memory columns are removed.
 
 ## Runtime Memory Policy
 
-Memory limits are not package metadata. OOS gives every application a 128 KiB
-WAMR execution stack. C threaded guests reserve a 256 KiB auxiliary stack
-region split between the lifecycle thread and one worker. The WAMR host-managed
-heap is disabled because WIT data exchange uses the guest's exported
+Memory limits are not package metadata. The production C build defaults to a
+512 KiB lifecycle stack and a 2 MiB worker stack; host launch policy can choose
+other validated values. Stack regions count against the total linear-memory
+budget. The WAMR host-managed heap is disabled because WIT data exchange uses the guest's exported
 `cabi_realloc`; application memory comes from its normal Wasm linear memory.
 Core modules must declare a maximum and all core/AOT instances are limited to
 64 MiB.

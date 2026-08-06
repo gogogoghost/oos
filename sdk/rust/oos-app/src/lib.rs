@@ -1,4 +1,4 @@
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 pub const MAX_TEXTURE_SIZE: usize = 2_048;
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_VERTICES: usize = 65_535;

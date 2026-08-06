@@ -178,6 +178,43 @@ public:
     return true;
   }
 
+  bool configure(unsigned int duration_ms) {
+    settings = new_fluid_settings();
+    if (!settings ||
+        fluid_settings_setnum(settings, "synth.sample-rate", kSampleRate) ==
+            0 ||
+        fluid_settings_setint(settings, "synth.polyphony", kMaximumVoices) ==
+            0 ||
+        fluid_settings_setstr(settings, "synth.chorus.active", "no") != 0) {
+      error = "configure FluidLite MIDI synthesizer failed";
+      return false;
+    }
+    synth = new_fluid_synth(settings);
+    if (!synth) {
+      error = "create FluidLite MIDI synthesizer failed";
+      return false;
+    }
+    soundfont = sharedSoundFont().acquire(error);
+    if (!soundfont)
+      return false;
+    if (fluid_synth_add_sfont(synth, soundfont) < 0) {
+      error = "attach embedded gm.sf2 failed";
+      return false;
+    }
+    soundfont_attached = true;
+    if (fluid_synth_set_interp_method(synth, -1, FLUID_INTERP_LINEAR) !=
+        kFluidOk) {
+      error = "configure SoundFont interpolation failed";
+      return false;
+    }
+    next_message = messages;
+    duration_frames =
+        (static_cast<uint64_t>(duration_ms) + kReleaseTailMilliseconds) *
+        kSampleRate / 1000;
+    format = {kSampleRate, kChannels};
+    return true;
+  }
+
   void dispatch(const tml_message &message) {
     const int channel = message.channel;
     const int first = static_cast<unsigned char>(message.key);
@@ -278,48 +315,32 @@ bool SoundFontMidiDecoder::openFile(const std::string &path) {
   unsigned int duration_ms = 0;
   tml_get_info(impl_->messages, nullptr, nullptr, nullptr, nullptr,
                &duration_ms);
-  impl_->settings = new_fluid_settings();
-  if (!impl_->settings ||
-      fluid_settings_setnum(impl_->settings, "synth.sample-rate",
-                            kSampleRate) == 0 ||
-      fluid_settings_setint(impl_->settings, "synth.polyphony",
-                            kMaximumVoices) == 0 ||
-      fluid_settings_setstr(impl_->settings, "synth.chorus.active", "no") !=
-          0) {
-    impl_->error = "configure FluidLite MIDI synthesizer failed";
-    impl_->close();
+  if (impl_->configure(duration_ms))
+    return true;
+  impl_->close();
+  return false;
+}
+
+bool SoundFontMidiDecoder::open(const uint8_t *encoded, size_t encoded_bytes) {
+  impl_->close();
+  impl_->error.clear();
+  if (!encoded || encoded_bytes == 0 || encoded_bytes > UINT_MAX) {
+    impl_->error = "standard MIDI byte source is invalid";
     return false;
   }
-  impl_->synth = new_fluid_synth(impl_->settings);
-  if (!impl_->synth) {
-    impl_->error = "create FluidLite MIDI synthesizer failed";
-    impl_->close();
+  impl_->messages = tml_load_memory(const_cast<uint8_t *>(encoded),
+                                    static_cast<int>(encoded_bytes));
+  if (!impl_->messages) {
+    impl_->error = "parse standard MIDI byte source failed";
     return false;
   }
-  impl_->soundfont = sharedSoundFont().acquire(impl_->error);
-  if (!impl_->soundfont) {
-    impl_->close();
-    return false;
-  }
-  if (fluid_synth_add_sfont(impl_->synth, impl_->soundfont) < 0) {
-    impl_->error = "attach embedded gm.sf2 failed";
-    impl_->close();
-    return false;
-  }
-  impl_->soundfont_attached = true;
-  if (fluid_synth_set_interp_method(impl_->synth, -1, FLUID_INTERP_LINEAR) !=
-      kFluidOk) {
-    if (impl_->error.empty())
-      impl_->error = "configure SoundFont interpolation failed";
-    impl_->close();
-    return false;
-  }
-  impl_->next_message = impl_->messages;
-  const uint64_t duration_with_tail =
-      static_cast<uint64_t>(duration_ms) + kReleaseTailMilliseconds;
-  impl_->duration_frames = duration_with_tail * kSampleRate / 1000;
-  impl_->format = {kSampleRate, kChannels};
-  return true;
+  unsigned int duration_ms = 0;
+  tml_get_info(impl_->messages, nullptr, nullptr, nullptr, nullptr,
+               &duration_ms);
+  if (impl_->configure(duration_ms))
+    return true;
+  impl_->close();
+  return false;
 }
 
 void SoundFontMidiDecoder::close() { impl_->close(); }

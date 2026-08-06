@@ -22,6 +22,7 @@ struct AppLaunch {
   std::string data_directory;
   std::string cache_directory;
   std::string asset_directory;
+  std::string module_directory;
 };
 
 struct AppInstallOptions {

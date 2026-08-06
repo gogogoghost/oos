@@ -115,6 +115,23 @@ fn mocked() {
     let _ = audio::player_status(player).unwrap();
     audio::player_pause(player).unwrap();
     audio::player_close(player).unwrap();
+    let midi = [
+        b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, b'M', b'T', b'r', b'k', 0, 0, 0, 15,
+        0, 0xc0, 0, 0, 0x90, 60, 100, 96, 0x80, 60, 64, 0, 0xff, 0x2f, 0,
+    ];
+    let source_limits = audio::get_source_limits();
+    assert!(source_limits.maximum_sources >= 1);
+    assert!(source_limits.maximum_source_bytes >= midi.len() as u64);
+    let source = audio::source_create(&midi, "application/octet-stream", "effect.bin").unwrap();
+    let dynamic_player = audio::player_open_source(source, audio::Usage::Media).unwrap();
+    audio::source_close(source).unwrap();
+    audio::player_play(dynamic_player).unwrap();
+    let dynamic_status = audio::player_status(dynamic_player).unwrap();
+    assert!(!matches!(
+        dynamic_status.failure,
+        audio::MediaFailure::UnsupportedFormat
+    ));
+    audio::player_close(dynamic_player).unwrap();
     let tone = audio::play_tone(440.0, 10, 0.1, audio::Usage::Media).unwrap();
     assert_eq!(tone.sample_rate, 48_000);
     assert!(audio::record_wav("recording.wav", 10)
@@ -445,8 +462,8 @@ impl AppLifecycle for App {
 
     fn event(_: KeyEvent) {}
 
-    fn frame(_: u64) -> Result<(), ErrorCode> {
-        Ok(())
+    fn frame(_: u64) -> Result<u32, ErrorCode> {
+        Ok(1000)
     }
 
     fn shutdown() {}

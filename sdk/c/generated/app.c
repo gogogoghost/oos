@@ -11,6 +11,15 @@ extern int32_t __wasm_import_oos_platform_runtime_abi_version(void);
 __attribute__((__import_module__("oos:platform/runtime@0.1.0"), __import_name__("wall-clock-minutes")))
 extern int32_t __wasm_import_oos_platform_runtime_wall_clock_minutes(void);
 
+__attribute__((__import_module__("oos:platform/runtime@0.1.0"), __import_name__("monotonic-time-us")))
+extern int64_t __wasm_import_oos_platform_runtime_monotonic_time_us(void);
+
+__attribute__((__import_module__("oos:platform/runtime@0.1.0"), __import_name__("wall-clock-time-ms")))
+extern int64_t __wasm_import_oos_platform_runtime_wall_clock_time_ms(void);
+
+__attribute__((__import_module__("oos:platform/runtime@0.1.0"), __import_name__("wake-main-thread")))
+extern void __wasm_import_oos_platform_runtime_wake_main_thread(void);
+
 __attribute__((__import_module__("oos:platform/runtime@0.1.0"), __import_name__("log")))
 extern void __wasm_import_oos_platform_runtime_log(int32_t, uint8_t *, size_t);
 
@@ -100,6 +109,9 @@ extern void __wasm_import_oos_platform_audio_supported_formats(uint8_t *);
 __attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("get-pcm-capabilities")))
 extern void __wasm_import_oos_platform_audio_get_pcm_capabilities(uint8_t *);
 
+__attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("get-source-limits")))
+extern void __wasm_import_oos_platform_audio_get_source_limits(uint8_t *);
+
 __attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("pcm-open")))
 extern void __wasm_import_oos_platform_audio_pcm_open(int32_t, int32_t, int32_t, int32_t, uint8_t *);
 
@@ -126,6 +138,15 @@ extern void __wasm_import_oos_platform_audio_pcm_close(int32_t, uint8_t *);
 
 __attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("player-open-asset")))
 extern void __wasm_import_oos_platform_audio_player_open_asset(uint8_t *, size_t, int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("source-create")))
+extern void __wasm_import_oos_platform_audio_source_create(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("source-close")))
+extern void __wasm_import_oos_platform_audio_source_close(int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("player-open-source")))
+extern void __wasm_import_oos_platform_audio_player_open_source(int32_t, int32_t, uint8_t *);
 
 __attribute__((__import_module__("oos:platform/audio@0.1.0"), __import_name__("player-play")))
 extern void __wasm_import_oos_platform_audio_player_play(int32_t, uint8_t *);
@@ -426,6 +447,29 @@ extern void __wasm_import_oos_platform_assets_close(int32_t, uint8_t *);
 __attribute__((__import_module__("oos:platform/system-services@0.1.0"), __import_name__("request")))
 extern void __wasm_import_oos_platform_system_services_request(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
+// Imported Functions from `oos:platform/subruntime@0.1.0`
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("get-limits")))
+extern void __wasm_import_oos_platform_subruntime_get_limits(uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("create")))
+extern void __wasm_import_oos_platform_subruntime_create(uint8_t *, size_t, int32_t, int32_t, int64_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("initialize")))
+extern void __wasm_import_oos_platform_subruntime_initialize(int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("event")))
+extern void __wasm_import_oos_platform_subruntime_event(int32_t, int32_t, int32_t, int64_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("frame")))
+extern void __wasm_import_oos_platform_subruntime_frame(int32_t, int64_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("destroy")))
+extern void __wasm_import_oos_platform_subruntime_destroy(int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("last-error")))
+extern void __wasm_import_oos_platform_subruntime_last_error(uint8_t *);
+
 // Exported Functions from `oos:platform/lifecycle@0.1.0`
 
 
@@ -443,8 +487,8 @@ void *cabi_realloc(void *ptr, size_t old_size, size_t align, size_t new_size) {
   return ret;
 }
 
-__attribute__((__aligned__(1)))
-static uint8_t RET_AREA[2];
+__attribute__((__aligned__(4)))
+static uint8_t RET_AREA[8];
 
 // Helper Functions
 
@@ -1016,7 +1060,25 @@ void oos_platform_system_services_result_string_error_code_free(oos_platform_sys
   }
 }
 
+void oos_platform_subruntime_result_u32_error_code_free(oos_platform_subruntime_result_u32_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_subruntime_result_void_error_code_free(oos_platform_subruntime_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
 void exports_oos_platform_lifecycle_result_void_error_code_free(exports_oos_platform_lifecycle_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void exports_oos_platform_lifecycle_result_u32_error_code_free(exports_oos_platform_lifecycle_result_u32_error_code_t *ptr) {
   if (!ptr->is_err) {
   } else {
   }
@@ -1057,6 +1119,20 @@ uint32_t oos_platform_runtime_abi_version(void) {
 uint32_t oos_platform_runtime_wall_clock_minutes(void) {
   int32_t ret = __wasm_import_oos_platform_runtime_wall_clock_minutes();
   return (uint32_t) (ret);
+}
+
+uint64_t oos_platform_runtime_monotonic_time_us(void) {
+  int64_t ret = __wasm_import_oos_platform_runtime_monotonic_time_us();
+  return (uint64_t) (ret);
+}
+
+int64_t oos_platform_runtime_wall_clock_time_ms(void) {
+  int64_t ret = __wasm_import_oos_platform_runtime_wall_clock_time_ms();
+  return ret;
+}
+
+void oos_platform_runtime_wake_main_thread(void) {
+  __wasm_import_oos_platform_runtime_wake_main_thread();
 }
 
 void oos_platform_runtime_log(oos_platform_runtime_log_level_t level, app_string_t *message) {
@@ -1529,6 +1605,19 @@ void oos_platform_audio_get_pcm_capabilities(oos_platform_audio_pcm_capabilities
   };
 }
 
+void oos_platform_audio_get_source_limits(oos_platform_audio_source_limits_t *ret) {
+  __attribute__((__aligned__(8)))
+  uint8_t ret_area[24];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_audio_get_source_limits(ptr);
+  *ret = (oos_platform_audio_source_limits_t) {
+    (uint64_t) (uint64_t) (*((int64_t*) (ptr + 0))),
+    (uint64_t) (uint64_t) (*((int64_t*) (ptr + 8))),
+    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 16))),
+    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 20))),
+  };
+}
+
 bool oos_platform_audio_pcm_open(uint32_t sample_rate, uint32_t channel_count, uint32_t capacity_frames, oos_platform_audio_usage_t usage, oos_platform_audio_opened_pcm_t *ret, oos_platform_audio_error_code_t *err) {
   __attribute__((__aligned__(8)))
   uint8_t ret_area[40];
@@ -1781,6 +1870,85 @@ bool oos_platform_audio_player_open_asset(app_string_t *path, oos_platform_audio
   }
 }
 
+bool oos_platform_audio_source_create(app_list_u8_t *bytes, app_string_t *mime_type, app_string_t *locator_hint, uint32_t *ret, oos_platform_audio_error_code_t *err) {
+  __attribute__((__aligned__(4)))
+  uint8_t ret_area[8];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_audio_source_create((uint8_t *) (*bytes).ptr, (*bytes).len, (uint8_t *) (*mime_type).ptr, (*mime_type).len, (uint8_t *) (*locator_hint).ptr, (*locator_hint).len, ptr);
+  oos_platform_audio_result_u32_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_audio_source_close(uint32_t handle, oos_platform_audio_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_audio_source_close((int32_t) (handle), ptr);
+  oos_platform_audio_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_audio_player_open_source(uint32_t source, oos_platform_audio_usage_t usage, uint32_t *ret, oos_platform_audio_error_code_t *err) {
+  __attribute__((__aligned__(4)))
+  uint8_t ret_area[8];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_audio_player_open_source((int32_t) (source), (int32_t) usage, ptr);
+  oos_platform_audio_result_u32_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
 bool oos_platform_audio_player_play(uint32_t handle, oos_platform_audio_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
@@ -1920,6 +2088,7 @@ bool oos_platform_audio_player_status(uint32_t handle, oos_platform_audio_playba
         (uint64_t) (uint64_t) (*((int64_t*) (ptr + 16))),
         (uint64_t) (uint64_t) (*((int64_t*) (ptr + 24))),
         (int32_t) *((int32_t*) (ptr + 32)),
+        (oos_platform_audio_media_failure_t) (int32_t) *((uint8_t*) (ptr + 36)),
       };
       break;
     }
@@ -4109,6 +4278,156 @@ bool oos_platform_system_services_request(app_string_t *service, app_string_t *o
   }
 }
 
+void oos_platform_subruntime_get_limits(oos_platform_subruntime_limits_t *ret) {
+  __attribute__((__aligned__(8)))
+  uint8_t ret_area[24];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_get_limits(ptr);
+  *ret = (oos_platform_subruntime_limits_t) {
+    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 0))),
+    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 4))),
+    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 8))),
+    (uint64_t) (uint64_t) (*((int64_t*) (ptr + 16))),
+  };
+}
+
+bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t worker_stack_bytes, uint64_t memory_limit_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(4)))
+  uint8_t ret_area[8];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_create((uint8_t *) (*module).ptr, (*module).len, (int32_t) (main_stack_bytes), (int32_t) (worker_stack_bytes), (int64_t) (memory_limit_bytes), ptr);
+  oos_platform_subruntime_result_u32_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_subruntime_initialize(uint32_t handle, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_initialize((int32_t) (handle), ptr);
+  oos_platform_subruntime_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_subruntime_event(uint32_t handle, uint32_t code, uint32_t action, uint64_t monotonic_time_us, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_event((int32_t) (handle), (int32_t) (code), (int32_t) (action), (int64_t) (monotonic_time_us), ptr);
+  oos_platform_subruntime_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_subruntime_frame(uint32_t handle, uint64_t monotonic_time_us, uint32_t *ret, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(4)))
+  uint8_t ret_area[8];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_frame((int32_t) (handle), (int64_t) (monotonic_time_us), ptr);
+  oos_platform_subruntime_result_u32_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_subruntime_destroy(uint32_t handle, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_destroy((int32_t) (handle), ptr);
+  oos_platform_subruntime_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+void oos_platform_subruntime_last_error(app_string_t *ret) {
+  __attribute__((__aligned__(sizeof(void*))))
+  uint8_t ret_area[(2*sizeof(void*))];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_last_error(ptr);
+  *ret = (app_string_t) { (uint8_t*)(*((uint8_t **) (ptr + 0))), (*((size_t*) (ptr + sizeof(void*)))) };
+}
+
 __attribute__((__export_name__("oos:platform/lifecycle@0.1.0#init")))
 uint8_t * __wasm_export_exports_oos_platform_lifecycle_init(void) {
   exports_oos_platform_lifecycle_result_void_error_code_t ret;
@@ -4139,18 +4458,23 @@ void __wasm_export_exports_oos_platform_lifecycle_event(int32_t arg, int32_t arg
 
 __attribute__((__export_name__("oos:platform/lifecycle@0.1.0#frame")))
 uint8_t * __wasm_export_exports_oos_platform_lifecycle_frame(int64_t arg) {
-  exports_oos_platform_lifecycle_result_void_error_code_t ret;
+  exports_oos_platform_lifecycle_result_u32_error_code_t ret;
+  uint32_t ok;
   exports_oos_platform_lifecycle_error_code_t err;
-  ret.is_err = !exports_oos_platform_lifecycle_frame((uint64_t) (arg), &err);
+  ret.is_err = !exports_oos_platform_lifecycle_frame((uint64_t) (arg), &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
+  }
+  if (!ret.is_err) {
+    ret.val.ok = ok;
   }
   uint8_t *ptr = (uint8_t *) &RET_AREA;
   if ((ret).is_err) {
     const exports_oos_platform_lifecycle_error_code_t *payload0 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
-    *((int8_t*)(ptr + 1)) = (int32_t) *payload0;
+    *((int8_t*)(ptr + 4)) = (int32_t) *payload0;
   } else {
-    *((int8_t*)(ptr + 0)) = 0;
+    const uint32_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
+    *((int32_t*)(ptr + 4)) = (int32_t) (*payload);
   }
   return ptr;
 }

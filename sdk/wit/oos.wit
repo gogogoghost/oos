@@ -23,8 +23,9 @@ interface types {
   }
 }
 
-/// Lifecycle-thread services that every OOS application can import. Only
-/// immutable ABI discovery is legal from a guest worker.
+/// Runtime services available to every OOS application. ABI discovery and the
+/// precise clocks are immutable and may be called from the bounded guest
+/// worker. Other calls remain lifecycle-thread-only unless documented.
 interface runtime {
   use types.{error-code};
 
@@ -47,6 +48,13 @@ interface runtime {
 
   abi-version: func() -> u32;
   wall-clock-minutes: func() -> u32;
+  /// Monotonic boot-relative time. Legal from the guest worker.
+  monotonic-time-us: func() -> u64;
+  /// Unix epoch time with millisecond precision. Legal from the guest worker.
+  wall-clock-time-ms: func() -> s64;
+  /// Wakes the lifecycle thread after publishing work to a shared command
+  /// queue. Legal from the guest worker and coalesced by the host.
+  wake-main-thread: func();
   log: func(level: log-level, message: string);
   /// Sets this application's retained status-bar appearance. Only the active
   /// application's value is applied. `background-rgb` is 0x00RRGGBB.
@@ -455,15 +463,33 @@ interface audio {
     failed,
   }
 
+  enum media-failure {
+    none,
+    unsupported-format,
+    malformed-data,
+    resource-exhaustion,
+    io,
+    decoder,
+  }
+
+  record source-limits {
+    maximum-source-bytes: u64,
+    maximum-session-bytes: u64,
+    maximum-sources: u32,
+    maximum-players: u32,
+  }
+
   record playback-status {
     state: player-state,
     position-ms: u64,
     duration-ms: u64,
     underruns: s32,
+    failure: media-failure,
   }
 
   supported-formats: func() -> list<format-support>;
   get-pcm-capabilities: func() -> pcm-capabilities;
+  get-source-limits: func() -> source-limits;
 
   /// Opens a persistent, bounded signed-S16 interleaved output stream.
   pcm-open: func(
@@ -483,6 +509,15 @@ interface audio {
 
   /// Creates an asynchronous player for a file under the package's assets/.
   player-open-asset: func(path: string, usage: usage) -> result<u32, error-code>;
+  /// Copies guest-owned encoded media once into an immutable, session-owned
+  /// source. Empty MIME and locator strings request bounded content sniffing.
+  source-create: func(
+    bytes: list<u8>,
+    mime-type: string,
+    locator-hint: string,
+  ) -> result<u32, error-code>;
+  source-close: func(handle: u32) -> result<_, error-code>;
+  player-open-source: func(source: u32, usage: usage) -> result<u32, error-code>;
   player-play: func(handle: u32) -> result<_, error-code>;
   player-pause: func(handle: u32) -> result<_, error-code>;
   player-seek: func(handle: u32, position-ms: u64) -> result<_, error-code>;
@@ -498,6 +533,34 @@ interface audio {
     usage: usage,
   ) -> result<stream-info, error-code>;
   record-wav: func(path: string, duration-ms: u32) -> result<recording-result, error-code>;
+  last-error: func() -> string;
+}
+
+/// One ephemeral child module owned by the calling application session.
+/// Compiler and game-runtime modules use independent linear memories so
+/// destruction deterministically returns their committed pages to OOS.
+interface subruntime {
+  use types.{error-code};
+
+  record limits {
+    maximum-instances: u32,
+    minimum-stack-bytes: u32,
+    maximum-stack-bytes: u32,
+    maximum-memory-bytes: u64,
+  }
+
+  get-limits: func() -> limits;
+  /// `module` is a simple name resolved as modules/<name>.aot, then .wasm.
+  create: func(
+    module: string,
+    main-stack-bytes: u32,
+    worker-stack-bytes: u32,
+    memory-limit-bytes: u64,
+  ) -> result<u32, error-code>;
+  initialize: func(handle: u32) -> result<_, error-code>;
+  event: func(handle: u32, code: u32, action: u32, monotonic-time-us: u64) -> result<_, error-code>;
+  frame: func(handle: u32, monotonic-time-us: u64) -> result<u32, error-code>;
+  destroy: func(handle: u32) -> result<_, error-code>;
   last-error: func() -> string;
 }
 
@@ -937,7 +1000,9 @@ interface lifecycle {
 
   init: func() -> result<_, error-code>;
   event: func(event: key-event);
-  frame: func(monotonic-time-us: u64) -> result<_, error-code>;
+  /// Returns the maximum delay before the next lifecycle frame. The host may
+  /// wake earlier for input, compositor invalidation, or wake-main-thread.
+  frame: func(monotonic-time-us: u64) -> result<u32, error-code>;
   shutdown: func();
 }
 
@@ -960,6 +1025,7 @@ world app {
   import font-assets;
   import assets;
   import system-services;
+  import subruntime;
 
   export lifecycle;
 }

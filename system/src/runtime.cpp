@@ -1,13 +1,15 @@
 #include <png.h>
 
-#include <chrono>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <poll.h>
 #include <string>
-#include <thread>
+#include <sys/eventfd.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -118,8 +120,7 @@ public:
     return app_.dispatchKey(event, monotonic_us);
   }
   bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) override {
-    next_delay_ms = kFrameIntervalMs;
-    return app_.render(monotonic_us);
+    return app_.render(monotonic_us, next_delay_ms);
   }
   std::string takeLaunchRequest() override { return {}; }
   bool takeExitRequest() override { return app_.takeExitRequest(); }
@@ -188,11 +189,35 @@ bool prepareWasmSession(oos::apps::AppRepository &repository,
   config.options.system_data_root = data_root;
   config.options.app_repository = &repository;
   config.options.asset_directory = launch.asset_directory;
+  config.options.module_directory = launch.module_directory;
   config.options.service_permission_mask =
       oos::apps::deviceServicePermissionMask(
           launch.app.manifest.requested_permissions);
   config.options.enforce_service_permissions = true;
   return true;
+}
+
+int waitForShellEvents(KeyInputSource &input, int wake_fd, int timeout_ms,
+                       oos::input::KeyEventCallback callback, void *context) {
+  const int input_fd = input.fileDescriptor();
+  if (input_fd < 0)
+    return input.poll(timeout_ms, callback, context);
+  {
+    pollfd descriptors[2] = {{input_fd, POLLIN, 0}, {wake_fd, POLLIN, 0}};
+    const nfds_t count = wake_fd >= 0 ? 2 : 1;
+    int result;
+    do {
+      result = ::poll(descriptors, count, timeout_ms);
+    } while (result < 0 && errno == EINTR);
+    if (result < 0)
+      return -1;
+  }
+  if (wake_fd >= 0) {
+    uint64_t pending = 0;
+    while (::read(wake_fd, &pending, sizeof(pending)) < 0 && errno == EINTR) {
+    }
+  }
+  return input.poll(0, callback, context);
 }
 
 int64_t monotonicMicros() {
@@ -406,6 +431,11 @@ int run(int argc, char **argv) {
     return 1;
   }
 
+  const int wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  if (wake_fd < 0)
+    std::fprintf(stderr, "create runtime wake event failed: %s\n",
+                 std::strerror(errno));
+
   ApplicationSessionManager sessions(
       compositor, 0, static_cast<int32_t>(kStatusHeight),
       descriptor.primary_width, content_height, system_ui,
@@ -434,11 +464,14 @@ int run(int argc, char **argv) {
 
   auto register_wasm = [&](const std::string &id,
                            const WasmSessionConfig &config) {
+    WasmSessionConfig launch_config = config;
+    launch_config.options.wake_fd = wake_fd;
     return sessions.registerFactory(
-        id, [&, config](GraphicsHost &graphics,
-                        oos::ui::StatusBarAppearanceController &status_bar) {
+        id,
+        [&, launch_config](GraphicsHost &graphics,
+                           oos::ui::StatusBarAppearanceController &status_bar) {
           return std::make_unique<WasmSession>(graphics, *platform_device,
-                                               status_bar, config);
+                                               status_bar, launch_config);
         });
   };
   auto ensure_registered = [&](const std::string &id) {
@@ -476,12 +509,7 @@ int run(int argc, char **argv) {
 
   oos::window::InputRouter input_router(system_ui, sessions);
   ShellInputContext input_context{&input_router};
-  auto next_frame = std::chrono::steady_clock::now();
   while (!g_stop_requested && !input.stopRequested()) {
-    if (input.poll(0, dispatchShellKey, &input_context) < 0 ||
-        !input_context.success) {
-      break;
-    }
     const std::string launch_request = sessions.takeLaunchRequest();
     if (!launch_request.empty()) {
       if (!ensure_registered(launch_request) ||
@@ -507,13 +535,13 @@ int run(int argc, char **argv) {
     }
     const int64_t frame_time = monotonicMicros();
     uint32_t system_ui_delay_ms = 1000;
+    uint32_t application_delay_ms = 1000;
     if (!system_ui.frame(frame_time, system_ui_delay_ms)) {
       std::fprintf(stderr, "SystemUI frame failed: %s\n",
                    system_ui.lastError().c_str());
       break;
     }
     if (!system_ui.locked()) {
-      uint32_t application_delay_ms = 1000;
       if (!sessions.frame(frame_time, application_delay_ms)) {
         std::fprintf(stderr, "application frame failed: %s\n",
                      sessions.lastError());
@@ -524,12 +552,14 @@ int run(int argc, char **argv) {
       std::fprintf(stderr, "compositor frame failed\n");
       break;
     }
-    next_frame += std::chrono::milliseconds(kFrameIntervalMs);
-    const auto now = std::chrono::steady_clock::now();
-    if (next_frame <= now)
-      next_frame = now;
-    else
-      std::this_thread::sleep_until(next_frame);
+    const uint32_t requested_delay =
+        std::min(system_ui_delay_ms, application_delay_ms);
+    const int timeout_ms = static_cast<int>(
+        std::min<uint32_t>(requested_delay, static_cast<uint32_t>(1000)));
+    if (waitForShellEvents(input, wake_fd, timeout_ms, dispatchShellKey,
+                           &input_context) < 0 ||
+        !input_context.success)
+      break;
   }
 
   const bool stopped = g_stop_requested || input.stopRequested();
@@ -537,6 +567,8 @@ int run(int argc, char **argv) {
   system_ui.shutdown();
   status_monitor.stop();
   platform_device->shutdown();
+  if (wake_fd >= 0)
+    ::close(wake_fd);
   return stopped ? 0 : 1;
 }
 

@@ -3,17 +3,23 @@
 #include "oos/device/service_provider.h"
 #include "oos/media/audio_decoder.h"
 #include "oos/media/ffmpeg_decoder.h"
+#include "oos/media/media_source.h"
 #include "oos/media/midi_decoder.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <exception>
 #include <mutex>
+#include <new>
 #include <sys/stat.h>
+#include <system_error>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -21,6 +27,9 @@ namespace oos::media {
 namespace {
 
 constexpr uint32_t kMaxPlayers = 8;
+constexpr uint32_t kMaxSources = 8;
+constexpr uint64_t kMaxSourceBytes = 16ULL * 1024 * 1024;
+constexpr uint64_t kMaxSessionBytes = 32ULL * 1024 * 1024;
 constexpr uint32_t kDecodeFrames = 1024;
 
 bool validRelativePath(const std::string &path) {
@@ -40,6 +49,22 @@ bool validRelativePath(const std::string &path) {
   return path.find('\0') == std::string::npos;
 }
 
+MediaFailure classifyDecodeFailure(const std::string &message,
+                                   MediaFailure fallback) {
+  std::string lower = message;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char character) {
+                   return static_cast<char>(std::tolower(character));
+                 });
+  if (lower.find("alloc") != std::string::npos ||
+      lower.find("out of memory") != std::string::npos ||
+      lower.find("no memory") != std::string::npos)
+    return MediaFailure::ResourceExhaustion;
+  if (lower.find("unsupported") != std::string::npos)
+    return MediaFailure::UnsupportedFormat;
+  return fallback;
+}
+
 } // namespace
 
 class MediaService::Impl {
@@ -49,8 +74,15 @@ public:
 
     ~Player() { stop(); }
 
-    void start() {
-      worker = std::thread([this] { run(); });
+    bool start() noexcept {
+      try {
+        worker = std::thread([this] { run(); });
+        return true;
+      } catch (const std::system_error &) {
+        return false;
+      } catch (const std::bad_alloc &) {
+        return false;
+      }
     }
 
     void stop() {
@@ -63,26 +95,72 @@ public:
         worker.join();
     }
 
-    void run() {
+    void run() noexcept {
+      try {
+        runDecoder();
+      } catch (const std::bad_alloc &) {
+        fail("audio decoder allocation failed",
+             MediaFailure::ResourceExhaustion);
+      } catch (const std::exception &exception) {
+        fail(std::string("audio decoder exception: ") + exception.what(),
+             MediaFailure::Decoder);
+      } catch (...) {
+        fail("audio decoder failed with an unknown exception",
+             MediaFailure::Decoder);
+      }
+      closePcm();
+    }
+
+    void closePcm() {
+      uint32_t handle = 0;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        handle = std::exchange(pcm_handle, 0);
+      }
+      if (handle)
+        owner.services.pcmClose(handle);
+    }
+
+    void runDecoder() {
       AudioDecoder decoder;
       FfmpegDecoder ffmpeg_decoder;
       MidiDecoder midi_decoder;
-      const bool midi = isMidiOrRingtonePath(path);
-      const bool ffmpeg = !midi && isFfmpegAudioPath(path);
-      const bool opened = midi     ? midi_decoder.openFile(path)
-                          : ffmpeg ? ffmpeg_decoder.openFile(path)
-                                   : decoder.openFile(path);
+      const bool dynamic = source != nullptr;
+      const MediaDecoderKind kind =
+          dynamic ? source->decoder
+                  : (isMidiOrRingtonePath(path) ? MediaDecoderKind::LegacyMidi
+                     : isFfmpegAudioPath(path)  ? MediaDecoderKind::Ffmpeg
+                                                : MediaDecoderKind::Portable);
+      const bool midi = kind == MediaDecoderKind::StandardMidi ||
+                        kind == MediaDecoderKind::LegacyMidi;
+      const bool ffmpeg = kind == MediaDecoderKind::Ffmpeg;
+      const bool opened =
+          dynamic
+              ? (midi ? midi_decoder.open(
+                            source->bytes.data(), source->bytes.size(),
+                            kind == MediaDecoderKind::StandardMidi)
+                 : ffmpeg
+                     ? ffmpeg_decoder.open(source->bytes.data(),
+                                           source->bytes.size())
+                     : decoder.open(source->bytes.data(), source->bytes.size()))
+              : (midi     ? midi_decoder.openFile(path)
+                 : ffmpeg ? ffmpeg_decoder.openFile(path)
+                          : decoder.openFile(path));
       if (!opened) {
-        fail(midi     ? midi_decoder.lastError()
-             : ffmpeg ? ffmpeg_decoder.lastError()
-                      : decoder.lastError());
+        const std::string message = midi     ? midi_decoder.lastError()
+                                    : ffmpeg ? ffmpeg_decoder.lastError()
+                                             : decoder.lastError();
+        fail(message, classifyDecodeFailure(
+                          message, dynamic ? MediaFailure::MalformedData
+                                           : MediaFailure::Io));
         return;
       }
       const DecodedAudioFormat format = midi     ? midi_decoder.format()
                                         : ffmpeg ? ffmpeg_decoder.format()
                                                  : decoder.format();
       if (format.channels > 2) {
-        fail("audio output supports at most two channels");
+        fail("audio output supports at most two channels",
+             MediaFailure::UnsupportedFormat);
         return;
       }
       hardware::PcmOutputConfig config = {static_cast<int>(format.sample_rate),
@@ -91,7 +169,7 @@ public:
       hardware::AudioStreamInfo stream_info;
       uint32_t opened_pcm = 0;
       if (!owner.services.pcmOpen(config, opened_pcm, stream_info)) {
-        fail(owner.services.lastError());
+        fail(owner.services.lastError(), MediaFailure::ResourceExhaustion);
         return;
       }
       {
@@ -148,10 +226,14 @@ public:
                                                   ? ffmpeg_decoder.lastError()
                                                   : decoder.lastError();
             fail(decode_error.empty() ? owner.services.lastError()
-                                      : decode_error);
+                                      : decode_error,
+                 MediaFailure::Decoder);
             break;
           }
-          submitted_frames = seek_frame;
+          {
+            std::lock_guard<std::mutex> lock(mutex);
+            submitted_frames = seek_frame;
+          }
           buffered_frames = 0;
           buffer_offset = 0;
         }
@@ -164,9 +246,11 @@ public:
                                         buffered_frames)
                   : decoder.read(pcm.data(), kDecodeFrames, buffered_frames);
           if (!decoded) {
-            fail(midi     ? midi_decoder.lastError()
-                 : ffmpeg ? ffmpeg_decoder.lastError()
-                          : decoder.lastError());
+            const std::string message = midi     ? midi_decoder.lastError()
+                                        : ffmpeg ? ffmpeg_decoder.lastError()
+                                                 : decoder.lastError();
+            fail(message,
+                 classifyDecodeFailure(message, MediaFailure::Decoder));
             break;
           }
           buffer_offset = 0;
@@ -186,10 +270,13 @@ public:
                                  : ffmpeg ? ffmpeg_decoder.seek(0)
                                           : decoder.seek(0);
             if (!rewound || !owner.services.pcmFlush(pcm_handle)) {
-              fail("loop audio seek failed");
+              fail("loop audio seek failed", MediaFailure::Decoder);
               break;
             }
-            submitted_frames = 0;
+            {
+              std::lock_guard<std::mutex> lock(mutex);
+              submitted_frames = 0;
+            }
             continue;
           }
         }
@@ -198,7 +285,7 @@ public:
         if (!owner.services.pcmWrite(pcm_handle, source,
                                      buffered_frames - buffer_offset,
                                      accepted)) {
-          fail(owner.services.lastError());
+          fail(owner.services.lastError(), MediaFailure::Io);
           break;
         }
         if (accepted == 0) {
@@ -209,27 +296,27 @@ public:
         std::lock_guard<std::mutex> lock(mutex);
         submitted_frames += static_cast<uint64_t>(accepted);
       }
-      if (pcm_handle) {
-        owner.services.pcmClose(pcm_handle);
-        pcm_handle = 0;
-      }
+      closePcm();
     }
 
-    void fail(std::string message) {
+    void fail(std::string message, MediaFailure failure_code) {
       std::lock_guard<std::mutex> lock(mutex);
       error = std::move(message);
       state = PlayerState::Failed;
+      failure = failure_code;
       want_playing = false;
     }
 
     Impl &owner;
     std::string path;
+    std::shared_ptr<const EncodedMediaSource> source;
     hardware::AudioUsage usage = hardware::AudioUsage::Media;
     std::thread worker;
     std::mutex mutex;
     std::condition_variable condition;
     PlayerState state = PlayerState::Preparing;
     std::string error;
+    MediaFailure failure = MediaFailure::None;
     uint32_t pcm_handle = 0;
     uint32_t sample_rate = 0;
     uint64_t duration_frames = 0;
@@ -253,9 +340,48 @@ public:
     return players[handle - 1].get();
   }
 
+  std::shared_ptr<const EncodedMediaSource> source(uint32_t handle) {
+    if (handle == 0 || handle > sources.size() || !sources[handle - 1]) {
+      error = "media source handle is invalid";
+      return {};
+    }
+    return sources[handle - 1];
+  }
+
+  bool insertPlayer(std::unique_ptr<Player> value, uint32_t &handle) {
+    for (size_t index = 0; index < players.size(); ++index) {
+      if (players[index])
+        continue;
+      if (!value->start()) {
+        error = "media decoder thread allocation failed";
+        return false;
+      }
+      players[index] = std::move(value);
+      handle = static_cast<uint32_t>(index + 1);
+      return true;
+    }
+    error = "media player limit reached";
+    return false;
+  }
+
+  uint64_t residentSourceBytes() const {
+    std::unordered_set<const EncodedMediaSource *> seen;
+    uint64_t total = 0;
+    for (const auto &source : sources) {
+      if (source && seen.insert(source.get()).second)
+        total += source->bytes.size();
+    }
+    for (const auto &player : players) {
+      if (player && player->source && seen.insert(player->source.get()).second)
+        total += player->source->bytes.size();
+    }
+    return total;
+  }
+
   device::ServiceProvider &services;
   std::string asset_directory;
   std::array<std::unique_ptr<Player>, kMaxPlayers> players;
+  std::array<std::shared_ptr<EncodedMediaSource>, kMaxSources> sources;
   std::atomic<bool> focused{true};
   std::string error;
 };
@@ -280,19 +406,84 @@ bool MediaService::openAsset(const std::string &path,
     impl_->error = "media asset is not a regular packaged file";
     return false;
   }
-  for (size_t index = 0; index < impl_->players.size(); ++index) {
-    if (impl_->players[index])
-      continue;
+  try {
     auto player = std::make_unique<Impl::Player>(*impl_);
     player->path = absolute;
     player->usage = usage;
-    player->start();
-    impl_->players[index] = std::move(player);
+    return impl_->insertPlayer(std::move(player), handle);
+  } catch (const std::bad_alloc &) {
+    impl_->error = "media player allocation failed";
+    return false;
+  }
+}
+
+MediaSourceLimits MediaService::sourceLimits() const {
+  return {kMaxSourceBytes, kMaxSessionBytes, kMaxSources, kMaxPlayers};
+}
+
+bool MediaService::createSource(const uint8_t *bytes, size_t size,
+                                const std::string &mime_type,
+                                const std::string &locator_hint,
+                                uint32_t &handle) {
+  handle = 0;
+  impl_->error.clear();
+  if (!bytes || size == 0 || size > kMaxSourceBytes ||
+      size > kMaxSessionBytes - impl_->residentSourceBytes()) {
+    impl_->error = "encoded media source exceeds session limits";
+    return false;
+  }
+  const MediaDecoderKind decoder =
+      identifyMedia(bytes, size, mime_type, locator_hint);
+  if (decoder == MediaDecoderKind::Unknown) {
+    impl_->error = "encoded media format is unsupported";
+    return false;
+  }
+  for (size_t index = 0; index < impl_->sources.size(); ++index) {
+    if (impl_->sources[index])
+      continue;
+    try {
+      auto source = std::make_shared<EncodedMediaSource>();
+      source->bytes.assign(bytes, bytes + size);
+      source->mime_type = mime_type;
+      source->locator_hint = locator_hint;
+      source->decoder = decoder;
+      impl_->sources[index] = std::move(source);
+    } catch (const std::bad_alloc &) {
+      impl_->error = "encoded media source allocation failed";
+      return false;
+    }
     handle = static_cast<uint32_t>(index + 1);
     return true;
   }
-  impl_->error = "media player limit reached";
+  impl_->error = "media source limit reached";
   return false;
+}
+
+bool MediaService::closeSource(uint32_t handle) {
+  const auto source = impl_->source(handle);
+  if (!source)
+    return false;
+  impl_->sources[handle - 1].reset();
+  impl_->error.clear();
+  return true;
+}
+
+bool MediaService::openSource(uint32_t source_handle,
+                              hardware::AudioUsage usage, uint32_t &handle) {
+  handle = 0;
+  impl_->error.clear();
+  const auto source = impl_->source(source_handle);
+  if (!source)
+    return false;
+  try {
+    auto player = std::make_unique<Impl::Player>(*impl_);
+    player->source = source;
+    player->usage = usage;
+    return impl_->insertPlayer(std::move(player), handle);
+  } catch (const std::bad_alloc &) {
+    impl_->error = "media player allocation failed";
+    return false;
+  }
 }
 
 bool MediaService::play(uint32_t handle) {
@@ -365,6 +556,7 @@ bool MediaService::status(uint32_t handle, PlayerStatus &status) {
   uint64_t duration_frames = 0;
   uint64_t submitted_frames = 0;
   std::string player_error;
+  MediaFailure failure = MediaFailure::None;
   {
     std::lock_guard<std::mutex> lock(player->mutex);
     state = player->state;
@@ -373,6 +565,7 @@ bool MediaService::status(uint32_t handle, PlayerStatus &status) {
     duration_frames = player->duration_frames;
     submitted_frames = player->submitted_frames;
     player_error = player->error;
+    failure = player->failure;
   }
   hardware::PcmOutputStatus pcm;
   const bool has_pcm = pcm_handle && impl_->services.pcmStatus(pcm_handle, pcm);
@@ -383,7 +576,7 @@ bool MediaService::status(uint32_t handle, PlayerStatus &status) {
       submitted_frames > queued ? submitted_frames - queued : 0;
   status = {state, sample_rate ? played_frames * 1000 / sample_rate : 0,
             sample_rate ? duration_frames * 1000 / sample_rate : 0,
-            has_pcm ? pcm.underruns : 0};
+            has_pcm ? pcm.underruns : 0, failure};
   if (state == PlayerState::Failed)
     impl_->error = std::move(player_error);
   return true;
@@ -410,6 +603,8 @@ void MediaService::closeAll() {
     return;
   for (auto &player : impl_->players)
     player.reset();
+  for (auto &source : impl_->sources)
+    source.reset();
 }
 
 const std::string &MediaService::lastError() const { return impl_->error; }

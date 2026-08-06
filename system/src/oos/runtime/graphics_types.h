@@ -4,7 +4,7 @@
 
 // Internal mirror of the canonical layouts defined by sdk/wit/oos.wit.
 // Guest applications use generated WIT bindings and never include this header.
-#define OOS_WASM_ABI_VERSION 5u
+#define OOS_WASM_ABI_VERSION 6u
 #define OOS_GFX_MAX_TEXTURE_SIZE 2048u
 #define OOS_GFX_MAX_TEXTURE_BYTES (16u * 1024u * 1024u)
 #define OOS_GFX_MAX_VERTICES 65535u

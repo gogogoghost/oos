@@ -36,7 +36,7 @@ struct App;
 impl oos_app::App for App {
     fn init() -> Result<(), oos_app::ErrorCode> { Ok(()) }
     fn event(_: oos_app::KeyEvent) {}
-    fn frame(_: u64) -> Result<(), oos_app::ErrorCode> { Ok(()) }
+    fn frame(_: u64) -> Result<u32, oos_app::ErrorCode> { Ok(1000) }
     fn shutdown() {}
 }
 
@@ -48,16 +48,21 @@ the `app` world. The runtime contract contains no Rust-specific types, WASI,
 EGL, framebuffer, Binder, evdev, file descriptor, or HAL object.
 
 The checked-in C bindings under `c/generated` are reproduced by
-`scripts/generate-c-sdk.sh`. `scripts/build-c-app.sh OUTPUT SOURCE...` supplies a
-freestanding thread-safe allocator, bounded 64 MiB shared linear memory, and
-the WAMR pthread import shape without enabling WASI. C applications implement
-the four generated lifecycle exports. `c/lvgl/oos_lvgl_backend` is the guest
-LVGL 9 adapter: it uploads RGB565 dirty rectangles and returns draw records so
-an app can combine its UI and framebuffer in one submission.
+`scripts/generate-c-sdk.sh`. `scripts/build-c-app.sh OUTPUT SOURCE...` links the
+pinned picolibc 1.8.9 libc/libm, compiler-rt, and the pinned thread-safe TLSF
+allocator for `wasm32-unknown-unknown`; WASI is not enabled. The linker rejects
+undefined symbols and `scripts/validate-wasm-imports.sh` permits only versioned
+OOS WIT plus the explicit WAMR pthread/semaphore imports. Set
+`OOS_WASM_MAIN_STACK_BYTES`, `OOS_WASM_WORKER_STACK_BYTES`, and
+`OOS_WASM_MEMORY_BYTES` to override the 512 KiB/2 MiB/64 MiB production policy.
+C applications implement the four generated lifecycle exports.
+`c/lvgl/oos_lvgl_backend` uploads either RGB565 dirty rectangles or a
+premultiplied RGBA8888 transparent overlay and returns draw records so an app
+can combine its UI and framebuffer in one submission.
 
-The host permits one guest worker in addition to the lifecycle thread. Worker
-code is pure guest code; every OOS WIT service enforces lifecycle-thread
-affinity and traps a worker call. Core Wasm must encode a memory maximum no
+The host permits one guest worker in addition to the lifecycle thread. Precise
+clocks, ABI discovery, and `wake-main-thread` are worker-safe; every other OOS
+WIT service enforces lifecycle-thread affinity and traps a worker call. Core Wasm must encode a memory maximum no
 larger than 64 MiB. ARMv7 AOT is capped and checked again at instantiation.
 
 The Rust crates in `sdk/rust` are libraries and intentionally do not own a

@@ -32,8 +32,12 @@ struct NativeAppLaunchOptions {
   const char *removable_media_directory = "/data/media/removable";
   const char *font_directory = "/opt/oos/share/fonts";
   const char *asset_directory = nullptr;
+  const char *module_directory = nullptr;
   uint32_t stack_size = 128 * 1024;
+  uint32_t worker_stack_size = 128 * 1024;
+  uint64_t memory_limit_bytes = 64ULL * 1024 * 1024;
   uint32_t heap_size = 0;
+  int wake_fd = -1;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
 };
@@ -58,7 +62,11 @@ public:
   bool activate(const char *id);
   bool remove(const char *id);
   bool dispatchKey(const input::KeyEvent &event, int64_t monotonic_us);
-  bool render(int64_t monotonic_us);
+  bool render(int64_t monotonic_us, uint32_t &next_delay_ms);
+  bool render(int64_t monotonic_us) {
+    uint32_t ignored_delay = 0;
+    return render(monotonic_us, ignored_delay);
+  }
   void shutdown();
 
   size_t residentCount() const;

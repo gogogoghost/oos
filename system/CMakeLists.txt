@@ -143,6 +143,7 @@ add_library(oos_media STATIC
   src/oos/media/audio_decoder.cpp
   src/oos/media/audio_format.cpp
   src/oos/media/ffmpeg_decoder.cpp
+  src/oos/media/media_source.cpp
   src/oos/media/midi_decoder.cpp
   src/oos/media/soundfont_midi_decoder.cpp
   src/oos/media/miniaudio_decoder.c)

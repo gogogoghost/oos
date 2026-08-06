@@ -10,10 +10,20 @@ No guest receives AAudio, OpenSL ES, file-descriptor, or device-node access.
 The `audio` WIT interface provides:
 
 - a truthful `supported-formats` list and explicit PCM rate/channel/queue limits;
+- immutable guest-byte sources with explicit 16 MiB source, 32 MiB session,
+  eight-source, and eight-player limits;
 - asynchronous session-owned players with play, pause, seek, loop, volume,
   position/state, underrun count, and close;
 - persistent bounded PCM streams with non-blocking partial writes, negotiated
   stream information, queued/consumed frames, pause/resume, flush, and close.
+
+`source-create` performs one guest-to-host copy, sniffs bounded content when
+legacy MIME or locator hints are missing/wrong, and stores the encoded bytes in
+one reference-counted allocation. Multiple players share it, and closing the
+source handle does not invalidate existing players. Status distinguishes
+unsupported format, malformed data, resource exhaustion, I/O, and decoder
+failure. Decoder thread exception boundaries convert allocation failure into a
+normal failed-player state rather than terminating OOS.
 
 Player decoding runs on host threads. Those threads never call guest code or
 retain a guest pointer. Accepted PCM is copied before a WIT call returns. Direct

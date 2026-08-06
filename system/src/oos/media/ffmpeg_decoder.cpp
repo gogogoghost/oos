@@ -10,6 +10,7 @@ extern "C" {
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -27,6 +28,38 @@ std::string ffmpegError(const char *operation, int result) {
 
 class FfmpegDecoder::Impl {
 public:
+  static int readPacket(void *opaque, uint8_t *buffer, int size) {
+    auto *self = static_cast<Impl *>(opaque);
+    if (!self || size <= 0 || self->memory_offset >= self->memory_size)
+      return AVERROR_EOF;
+    const size_t count = std::min<size_t>(
+        static_cast<size_t>(size), self->memory_size - self->memory_offset);
+    std::memcpy(buffer, self->memory + self->memory_offset, count);
+    self->memory_offset += count;
+    return static_cast<int>(count);
+  }
+
+  static int64_t seekMemory(void *opaque, int64_t offset, int whence) {
+    auto *self = static_cast<Impl *>(opaque);
+    if (!self)
+      return AVERROR(EINVAL);
+    if (whence == AVSEEK_SIZE)
+      return static_cast<int64_t>(self->memory_size);
+    const int origin = whence & ~AVSEEK_FORCE;
+    int64_t base = 0;
+    if (origin == SEEK_CUR)
+      base = static_cast<int64_t>(self->memory_offset);
+    else if (origin == SEEK_END)
+      base = static_cast<int64_t>(self->memory_size);
+    else if (origin != SEEK_SET)
+      return AVERROR(EINVAL);
+    if (offset < -base ||
+        offset > static_cast<int64_t>(self->memory_size) - base)
+      return AVERROR(EINVAL);
+    self->memory_offset = static_cast<size_t>(base + offset);
+    return static_cast<int64_t>(self->memory_offset);
+  }
+
   void close() {
     if (resampler)
       swr_free(&resampler);
@@ -38,6 +71,13 @@ public:
       avcodec_free_context(&codec);
     if (container)
       avformat_close_input(&container);
+    if (io) {
+      av_freep(&io->buffer);
+      avio_context_free(&io);
+    }
+    memory = nullptr;
+    memory_size = 0;
+    memory_offset = 0;
     stream = -1;
     output = {};
     duration_frames = 0;
@@ -112,6 +152,7 @@ public:
   }
 
   AVFormatContext *container = nullptr;
+  AVIOContext *io = nullptr;
   AVCodecContext *codec = nullptr;
   SwrContext *resampler = nullptr;
   AVPacket *packet = nullptr;
@@ -124,6 +165,9 @@ public:
   bool input_eof = false;
   bool decoder_eof = false;
   std::string error;
+  const uint8_t *memory = nullptr;
+  size_t memory_size = 0;
+  size_t memory_offset = 0;
 };
 
 FfmpegDecoder::FfmpegDecoder() : impl_(std::make_unique<Impl>()) {}
@@ -198,6 +242,103 @@ bool FfmpegDecoder::openFile(const std::string &path) {
         av_rescale_q(impl_->container->duration, AV_TIME_BASE_Q,
                      AVRational{1, impl_->codec->sample_rate});
   }
+  return true;
+}
+
+bool FfmpegDecoder::open(const uint8_t *encoded, size_t encoded_bytes) {
+  impl_->close();
+  impl_->error.clear();
+  if (!encoded || encoded_bytes == 0 ||
+      encoded_bytes >
+          static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+    impl_->error = "encoded FFmpeg audio is empty or too large";
+    return false;
+  }
+  impl_->memory = encoded;
+  impl_->memory_size = encoded_bytes;
+  constexpr int kIoBufferBytes = 4096;
+  uint8_t *buffer = static_cast<uint8_t *>(av_malloc(kIoBufferBytes));
+  if (!buffer) {
+    impl_->error = "allocate in-memory audio I/O buffer failed";
+    impl_->close();
+    return false;
+  }
+  impl_->io = avio_alloc_context(buffer, kIoBufferBytes, 0, impl_.get(),
+                                 Impl::readPacket, nullptr, Impl::seekMemory);
+  impl_->container = avformat_alloc_context();
+  if (!impl_->io || !impl_->container) {
+    if (!impl_->io)
+      av_free(buffer);
+    impl_->error = "allocate in-memory audio container failed";
+    impl_->close();
+    return false;
+  }
+  impl_->container->pb = impl_->io;
+  impl_->container->flags |= AVFMT_FLAG_CUSTOM_IO;
+  int result =
+      avformat_open_input(&impl_->container, nullptr, nullptr, nullptr);
+  if (result >= 0)
+    result = avformat_find_stream_info(impl_->container, nullptr);
+  if (result < 0) {
+    impl_->error = ffmpegError("open in-memory audio container", result);
+    impl_->close();
+    return false;
+  }
+  const AVCodec *decoder = nullptr;
+  impl_->stream = av_find_best_stream(impl_->container, AVMEDIA_TYPE_AUDIO, -1,
+                                      -1, &decoder, 0);
+  if (impl_->stream < 0 || !decoder) {
+    impl_->error = "in-memory audio has no supported stream";
+    impl_->close();
+    return false;
+  }
+  impl_->codec = avcodec_alloc_context3(decoder);
+  AVStream *stream = impl_->container->streams[impl_->stream];
+  if (!impl_->codec ||
+      (result = avcodec_parameters_to_context(impl_->codec, stream->codecpar)) <
+          0 ||
+      (result = avcodec_open2(impl_->codec, decoder, nullptr)) < 0) {
+    impl_->error = ffmpegError("open in-memory audio decoder", result);
+    impl_->close();
+    return false;
+  }
+  if (impl_->codec->sample_rate <= 0 ||
+      impl_->codec->ch_layout.nb_channels <= 0) {
+    impl_->error = "decoded in-memory audio format is invalid";
+    impl_->close();
+    return false;
+  }
+  AVChannelLayout output_layout;
+  av_channel_layout_default(&output_layout,
+                            std::min(2, impl_->codec->ch_layout.nb_channels));
+  result = swr_alloc_set_opts2(
+      &impl_->resampler, &output_layout, AV_SAMPLE_FMT_S16,
+      impl_->codec->sample_rate, &impl_->codec->ch_layout,
+      impl_->codec->sample_fmt, impl_->codec->sample_rate, 0, nullptr);
+  av_channel_layout_uninit(&output_layout);
+  if (result < 0 || (result = swr_init(impl_->resampler)) < 0) {
+    impl_->error = ffmpegError("initialize in-memory audio resampler", result);
+    impl_->close();
+    return false;
+  }
+  impl_->packet = av_packet_alloc();
+  impl_->frame = av_frame_alloc();
+  if (!impl_->packet || !impl_->frame) {
+    impl_->error = "allocate in-memory audio decoder buffers failed";
+    impl_->close();
+    return false;
+  }
+  impl_->output = {
+      static_cast<uint32_t>(impl_->codec->sample_rate),
+      static_cast<uint32_t>(std::min(2, impl_->codec->ch_layout.nb_channels))};
+  if (stream->duration != AV_NOPTS_VALUE)
+    impl_->duration_frames =
+        av_rescale_q(stream->duration, stream->time_base,
+                     AVRational{1, impl_->codec->sample_rate});
+  else if (impl_->container->duration != AV_NOPTS_VALUE)
+    impl_->duration_frames =
+        av_rescale_q(impl_->container->duration, AV_TIME_BASE_Q,
+                     AVRational{1, impl_->codec->sample_rate});
   return true;
 }
 

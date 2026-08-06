@@ -2,6 +2,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <malloc.h>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -14,6 +16,20 @@
 #include "oos/ui/status_bar_appearance.h"
 
 namespace {
+
+size_t processPssKilobytes() {
+  std::ifstream input("/proc/self/smaps_rollup");
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.rfind("Pss:", 0) != 0)
+      continue;
+    std::istringstream values(line.substr(4));
+    size_t kilobytes = 0;
+    values >> kilobytes;
+    return kilobytes;
+  }
+  return 0;
+}
 
 class FakeStatusBar final : public oos::ui::StatusBarAppearanceController {
 public:
@@ -232,10 +248,12 @@ private:
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 7) {
+  if (argc != 10) {
     std::fprintf(stderr,
                  "usage: %s egui-demo.wasm wit-smoke.wasm thread-smoke.wasm "
-                 "worker-wit-trap.wasm exit-smoke.wasm font-directory\n",
+                 "worker-wit-trap.wasm exit-smoke.wasm font-directory "
+                 "subruntime-parent.wasm module-directory "
+                 "production-libc-smoke.wasm\n",
                  argv[0]);
     return 2;
   }
@@ -278,13 +296,27 @@ int main(int argc, char **argv) {
               graphics.texture_updates, graphics.last_vertices,
               graphics.last_indices, graphics.last_commands);
   apps.shutdown();
+  oos::runtime::NativeAppManager libc_smoke(graphics, 1);
+  uint32_t libc_delay_ms = 0;
+  if (!libc_smoke.load("production-libc", argv[9]) ||
+      !libc_smoke.activate("production-libc") ||
+      !libc_smoke.render(1'450'000, libc_delay_ms) ||
+      libc_delay_ms != 1000) {
+    std::fprintf(stderr, "production C runtime smoke failed: %s\n",
+                 libc_smoke.lastError());
+    return 1;
+  }
+  libc_smoke.shutdown();
+  std::printf("WAMR production picolibc/libm/TLSF execution passed\n");
   oos::runtime::NativeAppManager wit_smoke(graphics, 1);
   oos::runtime::NativeAppLaunchOptions smoke_launch;
   smoke_launch.module_path = argv[2];
   smoke_launch.font_directory = argv[6];
   smoke_launch.status_bar = &status_bar;
+  uint32_t smoke_delay_ms = 0;
   if (!wit_smoke.load("wit-smoke", smoke_launch) ||
-      !wit_smoke.activate("wit-smoke") || !wit_smoke.render(1'500'000)) {
+      !wit_smoke.activate("wit-smoke") ||
+      !wit_smoke.render(1'500'000, smoke_delay_ms) || smoke_delay_ms != 1000) {
     std::fprintf(stderr, "WIT device API smoke failed: %s\n",
                  wit_smoke.lastError());
     return 1;
@@ -311,6 +343,17 @@ int main(int argc, char **argv) {
     return 1;
   }
   thread_smoke.shutdown();
+  for (unsigned iteration = 0; iteration < 8; ++iteration) {
+    oos::runtime::NativeAppManager repeated_thread(graphics, 1);
+    if (!repeated_thread.load("repeated-thread", thread_launch) ||
+        !repeated_thread.activate("repeated-thread") ||
+        !repeated_thread.render(1'610'000 + iteration * 1'000)) {
+      std::fprintf(stderr, "WAMR repeated worker lifecycle failed: %s\n",
+                   repeated_thread.lastError());
+      return 1;
+    }
+    repeated_thread.shutdown();
+  }
   std::printf("WAMR bounded guest worker passed\n");
   oos::runtime::NativeAppManager affinity_smoke(graphics, 1);
   oos::runtime::NativeAppLaunchOptions affinity_launch;
@@ -338,7 +381,7 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppLaunchOptions unbounded_launch;
   unbounded_launch.module_path = unbounded_path.c_str();
   if (policy_test.load("unbounded", unbounded_launch) ||
-      std::string(policy_test.lastError()).find("bounded maximum") ==
+      std::string(policy_test.lastError()).find("memory") ==
           std::string::npos) {
     std::fprintf(stderr, "unbounded Wasm memory policy was not enforced\n");
     return 1;
@@ -356,7 +399,7 @@ int main(int argc, char **argv) {
   oos::runtime::NativeAppLaunchOptions oversized_launch;
   oversized_launch.module_path = oversized_path.c_str();
   if (policy_test.load("oversized", oversized_launch) ||
-      std::string(policy_test.lastError()).find("64 MiB") ==
+      std::string(policy_test.lastError()).find("memory") ==
           std::string::npos) {
     std::fprintf(stderr, "oversized Wasm memory policy was not enforced\n");
     return 1;
@@ -377,6 +420,51 @@ int main(int argc, char **argv) {
     exit_smoke.shutdown();
   }
   std::printf("WAMR deferred exit request passed\n");
+  {
+    malloc_trim(0);
+    const size_t baseline_pss_kb = processPssKilobytes();
+    const std::string child_path = std::string(argv[8]) + "/memory-child.wasm";
+    oos::runtime::NativeAppManager direct_child(graphics, 1);
+    uint32_t child_delay_ms = 0;
+    if (!direct_child.load("direct-child", child_path.c_str()) ||
+        !direct_child.activate("direct-child") ||
+        !direct_child.render(1'640'000, child_delay_ms) ||
+        child_delay_ms != 17) {
+      std::fprintf(stderr, "direct child worker smoke failed: %s\n",
+                   direct_child.lastError());
+      return 1;
+    }
+    direct_child.shutdown();
+    oos::runtime::NativeAppManager subruntime_smoke(graphics, 1);
+    oos::runtime::NativeAppLaunchOptions child_launch;
+    child_launch.module_path = argv[7];
+    child_launch.module_directory = argv[8];
+    child_launch.font_directory = argv[6];
+    uint32_t parent_delay_ms = 0;
+    if (!subruntime_smoke.load("subruntime-smoke", child_launch) ||
+        !subruntime_smoke.activate("subruntime-smoke") ||
+        !subruntime_smoke.render(1'650'000, parent_delay_ms) ||
+        parent_delay_ms != 1000) {
+      std::fprintf(stderr, "ephemeral subruntime smoke failed: %s\n",
+                   subruntime_smoke.lastError());
+      return 1;
+    }
+    subruntime_smoke.shutdown();
+    malloc_trim(0);
+    const size_t final_pss_kb = processPssKilobytes();
+    constexpr size_t kPssToleranceKb = 8 * 1024;
+    if (baseline_pss_kb && final_pss_kb > baseline_pss_kb + kPssToleranceKb) {
+      std::fprintf(stderr,
+                   "child runtime PSS did not return near baseline: "
+                   "before=%zu KiB after=%zu KiB\n",
+                   baseline_pss_kb, final_pss_kb);
+      return 1;
+    }
+    std::printf("WAMR child PSS returned near baseline: before=%zu KiB "
+                "after=%zu KiB\n",
+                baseline_pss_kb, final_pss_kb);
+  }
+  std::printf("WAMR ephemeral child create/grow/join/destroy passed\n");
   oos::runtime::NativeAppManager mock_smoke(graphics, mock_device, 1);
   char storage_template[] = "/tmp/oos-wasm-storage.XXXXXX";
   const char *storage_root = mkdtemp(storage_template);

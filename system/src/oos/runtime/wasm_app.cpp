@@ -5,13 +5,17 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <functional>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -62,6 +66,7 @@ constexpr const char *kFontAssetsInterface = "oos:platform/font-assets@0.1.0";
 constexpr const char *kAssetsInterface = "oos:platform/assets@0.1.0";
 constexpr const char *kSystemServicesInterface =
     "oos:platform/system-services@0.1.0";
+constexpr const char *kSubruntimeInterface = "oos:platform/subruntime@0.1.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.1.0#init";
 constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.1.0#event";
 constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.1.0#frame";
@@ -77,6 +82,21 @@ enum class WitError : uint8_t {
   Timeout = 5,
   Busy = 6,
   Failed = 7,
+};
+
+class SubruntimeHost {
+public:
+  virtual ~SubruntimeHost() = default;
+  virtual bool create(const std::string &module, uint32_t main_stack_bytes,
+                      uint32_t worker_stack_bytes, uint64_t memory_limit_bytes,
+                      uint32_t &handle) = 0;
+  virtual bool initialize(uint32_t handle) = 0;
+  virtual bool event(uint32_t handle, uint32_t code, uint32_t action,
+                     uint64_t monotonic_us) = 0;
+  virtual bool frame(uint32_t handle, uint64_t monotonic_us,
+                     uint32_t &delay_ms) = 0;
+  virtual bool destroy(uint32_t handle) = 0;
+  virtual const std::string &lastError() const = 0;
 };
 
 const char *witErrorName(uint8_t error) {
@@ -134,6 +154,8 @@ struct AppHostContext {
   std::thread::id lifecycle_thread;
   bool *exit_requested = nullptr;
   bool *audio_focused = nullptr;
+  int wake_fd = -1;
+  SubruntimeHost *subruntime = nullptr;
   std::vector<std::string> wake_locks;
 };
 
@@ -147,6 +169,11 @@ AppHostContext *hostFor(wasm_exec_env_t environment) {
     return nullptr;
   }
   return host;
+}
+
+AppHostContext *hostForAnyThread(wasm_exec_env_t environment) {
+  return static_cast<AppHostContext *>(
+      wasm_runtime_get_custom_data(wasm_runtime_get_module_inst(environment)));
 }
 
 GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
@@ -360,6 +387,32 @@ uint32_t nativeWallClockMinutes(wasm_exec_env_t environment) {
   if (!localtime_r(&now, &local))
     return 0;
   return static_cast<uint32_t>(local.tm_hour * 60 + local.tm_min);
+}
+
+uint64_t nativeMonotonicTimeUs(wasm_exec_env_t) {
+  timespec now = {};
+  return clock_gettime(CLOCK_MONOTONIC, &now) == 0
+             ? static_cast<uint64_t>(now.tv_sec) * 1000000ULL +
+                   static_cast<uint64_t>(now.tv_nsec) / 1000ULL
+             : 0;
+}
+
+int64_t nativeWallClockTimeMs(wasm_exec_env_t) {
+  timespec now = {};
+  return clock_gettime(CLOCK_REALTIME, &now) == 0
+             ? static_cast<int64_t>(now.tv_sec) * 1000LL + now.tv_nsec / 1000000
+             : 0;
+}
+
+void nativeWakeMainThread(wasm_exec_env_t environment) {
+  AppHostContext *host = hostForAnyThread(environment);
+  if (!host || host->wake_fd < 0)
+    return;
+  const uint64_t value = 1;
+  ssize_t written;
+  do {
+    written = ::write(host->wake_fd, &value, sizeof(value));
+  } while (written < 0 && errno == EINTR);
 }
 
 void nativeLog(wasm_exec_env_t environment, uint32_t level, uint32_t offset,
@@ -1563,6 +1616,22 @@ void nativePcmCapabilities(wasm_exec_env_t environment,
   result[4] = 65536;
 }
 
+void nativeMediaSourceLimits(wasm_exec_env_t environment,
+                             uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 24, 24);
+  media::MediaService *media = mediaFor(environment);
+  if (!result || !media) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  const media::MediaSourceLimits limits = media->sourceLimits();
+  storeCanonical<uint64_t>(result, 0, limits.maximum_source_bytes);
+  storeCanonical<uint64_t>(result, 8, limits.maximum_session_bytes);
+  storeCanonical<uint32_t>(result, 16, limits.maximum_sources);
+  storeCanonical<uint32_t>(result, 20, limits.maximum_players);
+}
+
 void nativePcmOpen(wasm_exec_env_t environment, uint32_t sample_rate,
                    uint32_t channels, uint32_t capacity_frames, uint32_t usage,
                    uint32_t result_offset) {
@@ -1689,6 +1758,56 @@ void nativePlayerOpenAsset(wasm_exec_env_t environment, uint32_t path_offset,
                  valid ? WitError::Io : WitError::InvalidArgument);
 }
 
+void nativeMediaSourceCreate(wasm_exec_env_t environment, uint32_t data_offset,
+                             uint32_t data_length, uint32_t mime_offset,
+                             uint32_t mime_length, uint32_t hint_offset,
+                             uint32_t hint_length, uint32_t result_offset) {
+  const uint8_t *bytes = appArray<uint8_t>(environment, data_offset,
+                                           data_length, 16 * 1024 * 1024);
+  std::string mime;
+  std::string hint;
+  const bool valid =
+      bytes && data_length &&
+      guestString(environment, mime_offset, mime_length, mime, 128) &&
+      guestString(environment, hint_offset, hint_length, hint, 1024);
+  uint32_t handle = 0;
+  media::MediaService *media = mediaFor(environment);
+  const bool success =
+      valid && media &&
+      media->createSource(bytes, data_length, mime, hint, handle);
+  WitError error = WitError::Io;
+  if (!valid)
+    error = WitError::InvalidArgument;
+  else if (media &&
+           (media->lastError().find("limit") != std::string::npos ||
+            media->lastError().find("allocation") != std::string::npos))
+    error = WitError::LimitExceeded;
+  else if (media && media->lastError().find("unsupported") != std::string::npos)
+    error = WitError::Unavailable;
+  writeU32Result(environment, result_offset, success, handle, error);
+}
+
+void nativeMediaSourceClose(wasm_exec_env_t environment, uint32_t handle,
+                            uint32_t result_offset) {
+  media::MediaService *media = mediaFor(environment);
+  writeResult(environment, result_offset, media && media->closeSource(handle),
+              WitError::InvalidArgument);
+}
+
+void nativePlayerOpenSource(wasm_exec_env_t environment, uint32_t source,
+                            uint32_t usage, uint32_t result_offset) {
+  const bool valid =
+      usage <= static_cast<uint32_t>(hardware::AudioUsage::Notification);
+  uint32_t handle = 0;
+  media::MediaService *media = mediaFor(environment);
+  const bool success =
+      valid && media &&
+      media->openSource(source, static_cast<hardware::AudioUsage>(usage),
+                        handle);
+  writeU32Result(environment, result_offset, success, handle,
+                 valid ? WitError::Io : WitError::InvalidArgument);
+}
+
 void nativePlayerPlay(wasm_exec_env_t environment, uint32_t handle,
                       uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
@@ -1742,6 +1861,7 @@ void nativePlayerStatus(wasm_exec_env_t environment, uint32_t handle,
   storeCanonical<uint64_t>(result, 16, status.position_ms);
   storeCanonical<uint64_t>(result, 24, status.duration_ms);
   storeCanonical<int32_t>(result, 32, status.underruns);
+  result[36] = static_cast<uint8_t>(status.failure);
 }
 
 void nativePlayerClose(wasm_exec_env_t environment, uint32_t handle,
@@ -2630,10 +2750,96 @@ void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
                    wit_error);
 }
 
+void nativeSubruntimeLimits(wasm_exec_env_t environment,
+                            uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 24, 24);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  storeCanonical<uint32_t>(result, 0, 1);
+  storeCanonical<uint32_t>(result, 4, 64 * 1024);
+  storeCanonical<uint32_t>(result, 8, 4 * 1024 * 1024);
+  storeCanonical<uint64_t>(result, 16, 64ULL * 1024 * 1024);
+}
+
+void nativeSubruntimeCreate(wasm_exec_env_t environment, uint32_t module_offset,
+                            uint32_t module_length, uint32_t main_stack_bytes,
+                            uint32_t worker_stack_bytes,
+                            uint64_t memory_limit_bytes,
+                            uint32_t result_offset) {
+  std::string module;
+  AppHostContext *host = hostFor(environment);
+  const bool valid =
+      guestString(environment, module_offset, module_length, module, 128);
+  uint32_t handle = 0;
+  const bool success =
+      valid && host && host->subruntime &&
+      host->subruntime->create(module, main_stack_bytes, worker_stack_bytes,
+                               memory_limit_bytes, handle);
+  writeU32Result(environment, result_offset, success, handle,
+                 valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeSubruntimeInitialize(wasm_exec_env_t environment, uint32_t handle,
+                                uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  writeResult(environment, result_offset,
+              host && host->subruntime && host->subruntime->initialize(handle),
+              WitError::Failed);
+}
+
+void nativeSubruntimeEvent(wasm_exec_env_t environment, uint32_t handle,
+                           uint32_t code, uint32_t action,
+                           uint64_t monotonic_us, uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  writeResult(environment, result_offset,
+              host && host->subruntime &&
+                  host->subruntime->event(handle, code, action, monotonic_us),
+              WitError::Failed);
+}
+
+void nativeSubruntimeFrame(wasm_exec_env_t environment, uint32_t handle,
+                           uint64_t monotonic_us, uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  uint32_t delay_ms = 0;
+  const bool success = host && host->subruntime &&
+                       host->subruntime->frame(handle, monotonic_us, delay_ms);
+  writeU32Result(environment, result_offset, success, delay_ms,
+                 WitError::Failed);
+}
+
+void nativeSubruntimeDestroy(wasm_exec_env_t environment, uint32_t handle,
+                             uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  writeResult(environment, result_offset,
+              host && host->subruntime && host->subruntime->destroy(handle),
+              WitError::InvalidArgument);
+}
+
+void nativeSubruntimeLastError(wasm_exec_env_t environment,
+                               uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  const std::string empty;
+  const std::string &value =
+      host && host->subruntime ? host->subruntime->lastError() : empty;
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+  if (!result || !lowerString(environment, value.c_str(), result[0], result[1]))
+    trapInvalidReturnArea(environment);
+}
+
 NativeSymbol kRuntimeSymbols[] = {
     {"abi-version", reinterpret_cast<void *>(nativeAbiVersion), "()i", nullptr},
     {"wall-clock-minutes", reinterpret_cast<void *>(nativeWallClockMinutes),
      "()i", nullptr},
+    {"monotonic-time-us", reinterpret_cast<void *>(nativeMonotonicTimeUs),
+     "()I", nullptr},
+    {"wall-clock-time-ms", reinterpret_cast<void *>(nativeWallClockTimeMs),
+     "()I", nullptr},
+    {"wake-main-thread", reinterpret_cast<void *>(nativeWakeMainThread), "()",
+     nullptr},
     {"log", reinterpret_cast<void *>(nativeLog), "(iii)", nullptr},
     {"set-status-bar-style", reinterpret_cast<void *>(nativeSetStatusBarStyle),
      "(iii)", nullptr},
@@ -2697,6 +2903,8 @@ NativeSymbol kAudioSymbols[] = {
      "(i)", nullptr},
     {"get-pcm-capabilities", reinterpret_cast<void *>(nativePcmCapabilities),
      "(i)", nullptr},
+    {"get-source-limits", reinterpret_cast<void *>(nativeMediaSourceLimits),
+     "(i)", nullptr},
     {"pcm-open", reinterpret_cast<void *>(nativePcmOpen), "(iiiii)",
      reinterpret_cast<void *>(8)},
     {"pcm-write", reinterpret_cast<void *>(nativePcmWrite), "(iiii)",
@@ -2715,6 +2923,12 @@ NativeSymbol kAudioSymbols[] = {
      reinterpret_cast<void *>(1)},
     {"player-open-asset", reinterpret_cast<void *>(nativePlayerOpenAsset),
      "(iiii)", reinterpret_cast<void *>(4)},
+    {"source-create", reinterpret_cast<void *>(nativeMediaSourceCreate),
+     "(iiiiiii)", reinterpret_cast<void *>(4)},
+    {"source-close", reinterpret_cast<void *>(nativeMediaSourceClose), "(ii)",
+     reinterpret_cast<void *>(1)},
+    {"player-open-source", reinterpret_cast<void *>(nativePlayerOpenSource),
+     "(iii)", reinterpret_cast<void *>(4)},
     {"player-play", reinterpret_cast<void *>(nativePlayerPlay), "(ii)",
      reinterpret_cast<void *>(1)},
     {"player-pause", reinterpret_cast<void *>(nativePlayerPause), "(ii)",
@@ -2935,6 +3149,23 @@ NativeSymbol kSystemServicesSymbols[] = {
      serviceAttachment(4, WasmServicePermission::System)},
 };
 
+NativeSymbol kSubruntimeSymbols[] = {
+    {"get-limits", reinterpret_cast<void *>(nativeSubruntimeLimits), "(i)",
+     nullptr},
+    {"create", reinterpret_cast<void *>(nativeSubruntimeCreate), "(iiiiIi)",
+     nullptr},
+    {"initialize", reinterpret_cast<void *>(nativeSubruntimeInitialize), "(ii)",
+     nullptr},
+    {"event", reinterpret_cast<void *>(nativeSubruntimeEvent), "(iiiIi)",
+     nullptr},
+    {"frame", reinterpret_cast<void *>(nativeSubruntimeFrame), "(iIi)",
+     nullptr},
+    {"destroy", reinterpret_cast<void *>(nativeSubruntimeDestroy), "(ii)",
+     nullptr},
+    {"last-error", reinterpret_cast<void *>(nativeSubruntimeLastError), "(i)",
+     nullptr},
+};
+
 struct WitNativeInterface {
   const char *name;
   NativeSymbol *symbols;
@@ -2969,6 +3200,8 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kAssetsSymbols))},
     {kSystemServicesInterface, kSystemServicesSymbols,
      static_cast<uint32_t>(std::size(kSystemServicesSymbols))},
+    {kSubruntimeInterface, kSubruntimeSymbols,
+     static_cast<uint32_t>(std::size(kSubruntimeSymbols))},
 };
 
 uint32_t gRuntimeReferences = 0;
@@ -3344,8 +3577,12 @@ bool readUleb(const uint8_t *&cursor, const uint8_t *end, uint32_t &value) {
 }
 
 bool validateCoreMemoryPolicy(const uint8_t *bytes, size_t size,
+                              uint64_t maximum_memory_bytes,
+                              uint32_t &declared_maximum_pages,
                               std::string &error) {
-  constexpr uint32_t kMaximumPages = 1024; // 64 MiB
+  declared_maximum_pages = 0;
+  const uint32_t maximum_pages = static_cast<uint32_t>(
+      std::min<uint64_t>(maximum_memory_bytes / (64 * 1024), 1024));
   if (size < 8 || std::memcmp(bytes, "\0asm", 4) != 0)
     return true; // AOT memory is capped and verified after instantiation.
   const uint8_t *cursor = bytes + 8;
@@ -3366,11 +3603,11 @@ bool validateCoreMemoryPolicy(const uint8_t *bytes, size_t size,
           (flags & ~uint32_t{3}) != 0 ||
           !readUleb(cursor, section_end, initial) || (flags & 1) == 0 ||
           !readUleb(cursor, section_end, maximum) || initial > maximum ||
-          maximum > kMaximumPages) {
-        error =
-            "Wasm memory must declare one bounded maximum of at most 64 MiB";
+          maximum > maximum_pages) {
+        error = "Wasm memory exceeds the configured application memory limit";
         return false;
       }
+      declared_maximum_pages = maximum;
       return true;
     }
     cursor = section_end;
@@ -3381,10 +3618,10 @@ bool validateCoreMemoryPolicy(const uint8_t *bytes, size_t size,
 
 } // namespace
 
-class WasmApp::Impl {
+class WasmApp::Impl : public SubruntimeHost {
 public:
   Impl(GraphicsHost &graphics, device::Device *device, WasmAppOptions options)
-      : graphics(graphics), options(std::move(options)) {
+      : graphics(graphics), device_ptr(device), options(std::move(options)) {
     if (!this->options.data_directory.empty()) {
       app_storage =
           std::make_unique<storage::AppStorage>(this->options.data_directory);
@@ -3426,7 +3663,9 @@ public:
             this->options.enforce_service_permissions,
             std::this_thread::get_id(),
             &exit_requested,
-            &audio_focused};
+            &audio_focused,
+            this->options.wake_fd};
+    host.subruntime = this;
   }
 
   ~Impl() { shutdown(); }
@@ -3471,6 +3710,224 @@ public:
     return false;
   }
 
+  bool callU32Result(const char *name, uint32_t argc, uint32_t *argv,
+                     uint32_t &value) {
+    if (!call(name, argc, argv))
+      return false;
+    const uint32_t result_offset = argv ? argv[0] : 0;
+    const uint8_t *result = appArray<uint8_t>(environment, result_offset, 8, 8);
+    if (!result || result[0] > 1) {
+      error = std::string(name) + " returned an invalid WIT result";
+      return false;
+    }
+    if (result[0] != 0) {
+      error = std::string(name) + " returned " + witErrorName(result[4]);
+      return false;
+    }
+    std::memcpy(&value, result + 4, sizeof(value));
+    return true;
+  }
+
+  bool create(const std::string &name, uint32_t main_stack_bytes,
+              uint32_t worker_stack_bytes, uint64_t memory_limit_bytes,
+              uint32_t &handle) override {
+    handle = 0;
+    child_error.clear();
+    if (child) {
+      child_error = "the application already owns a child runtime";
+      return false;
+    }
+    if (options.module_directory.empty() || name.empty() || name.size() > 96 ||
+        !std::all_of(name.begin(), name.end(), [](unsigned char value) {
+          return std::isalnum(value) || value == '-' || value == '_' ||
+                 value == '.';
+        })) {
+      child_error = "child module name or package module directory is invalid";
+      return false;
+    }
+    std::string path;
+    for (const char *extension : {".aot", ".wasm"}) {
+      const std::string candidate =
+          options.module_directory + "/" + name + extension;
+      struct stat status{};
+      if (::stat(candidate.c_str(), &status) == 0 && S_ISREG(status.st_mode)) {
+        path = candidate;
+        break;
+      }
+    }
+    if (path.empty()) {
+      child_error = "packaged child module was not found";
+      return false;
+    }
+    WasmAppOptions child_options = options;
+    child_options.stack_size = main_stack_bytes;
+    child_options.worker_stack_size = worker_stack_bytes;
+    child_options.memory_limit_bytes = memory_limit_bytes;
+    child_options.module_directory.clear();
+    child_options.status_bar = nullptr;
+    if (!startChildThread())
+      return false;
+    const bool loaded =
+        runChild([&, child_options = std::move(child_options)]() mutable {
+          if (device_ptr)
+            child = std::make_unique<WasmApp>(graphics, *device_ptr,
+                                              std::move(child_options));
+          else
+            child =
+                std::make_unique<WasmApp>(graphics, std::move(child_options));
+          if (child->load(path.c_str()))
+            return true;
+          child_error = child->lastError();
+          child.reset();
+          return false;
+        });
+    if (!loaded) {
+      stopChildThread();
+      return false;
+    }
+    handle = child_handle;
+    return true;
+  }
+
+  bool initialize(uint32_t handle) override {
+    if (!validChild(handle))
+      return false;
+    return runChild([&] {
+      if (child->initialize())
+        return true;
+      child_error = child->lastError();
+      return false;
+    });
+  }
+
+  bool event(uint32_t handle, uint32_t code, uint32_t action,
+             uint64_t monotonic_us) override {
+    if (!validChild(handle) || code > UINT16_MAX || action > 2)
+      return false;
+    const input::KeyEvent key = {static_cast<int64_t>(monotonic_us),
+                                 static_cast<uint16_t>(code),
+                                 static_cast<input::KeyAction>(action),
+                                 {},
+                                 {}};
+    return runChild([&] {
+      if (child->dispatchKey(key, static_cast<int64_t>(monotonic_us)))
+        return true;
+      child_error = child->lastError();
+      return false;
+    });
+  }
+
+  bool frame(uint32_t handle, uint64_t monotonic_us,
+             uint32_t &delay_ms) override {
+    if (!validChild(handle))
+      return false;
+    return runChild([&] {
+      if (child->render(static_cast<int64_t>(monotonic_us), delay_ms))
+        return true;
+      child_error = child->lastError();
+      return false;
+    });
+  }
+
+  bool destroy(uint32_t handle) override {
+    if (!validChild(handle))
+      return false;
+    const bool stopped = runChild([&] {
+      child->shutdown();
+      child.reset();
+      return true;
+    });
+    stopChildThread();
+    if (!stopped)
+      return false;
+    ++child_handle;
+    if (child_handle == 0)
+      child_handle = 1;
+    child_error.clear();
+    return true;
+  }
+
+  const std::string &lastError() const override { return child_error; }
+
+  bool validChild(uint32_t handle) {
+    if (child && handle == child_handle)
+      return true;
+    child_error = "child runtime handle is invalid";
+    return false;
+  }
+
+  bool startChildThread() {
+    std::unique_lock lock(child_mutex);
+    child_thread_ready = false;
+    child_thread_env_ready = false;
+    child_thread_stop = false;
+    child_thread = std::thread([this] {
+      const bool environment_ready = wasm_runtime_init_thread_env();
+      {
+        std::lock_guard guard(child_mutex);
+        child_thread_env_ready = environment_ready;
+        child_thread_ready = true;
+      }
+      child_condition.notify_all();
+      if (!environment_ready)
+        return;
+
+      std::unique_lock thread_lock(child_mutex);
+      for (;;) {
+        child_condition.wait(thread_lock, [this] {
+          return child_thread_stop || child_task_ready;
+        });
+        if (child_thread_stop)
+          break;
+        auto task = std::move(child_task);
+        child_task_ready = false;
+        thread_lock.unlock();
+        const bool result = task();
+        thread_lock.lock();
+        child_task_result = result;
+        child_task_done = true;
+        child_condition.notify_all();
+      }
+      thread_lock.unlock();
+      wasm_runtime_destroy_thread_env();
+    });
+    child_condition.wait(lock, [this] { return child_thread_ready; });
+    if (child_thread_env_ready)
+      return true;
+    child_error = "initialize child WAMR thread environment failed";
+    lock.unlock();
+    child_thread.join();
+    return false;
+  }
+
+  bool runChild(std::function<bool()> task) {
+    std::unique_lock lock(child_mutex);
+    if (!child_thread.joinable() || !child_thread_env_ready) {
+      child_error = "child runtime execution thread is unavailable";
+      return false;
+    }
+    child_task = std::move(task);
+    child_task_done = false;
+    child_task_ready = true;
+    child_condition.notify_all();
+    child_condition.wait(lock, [this] { return child_task_done; });
+    return child_task_result;
+  }
+
+  void stopChildThread() {
+    {
+      std::lock_guard lock(child_mutex);
+      if (!child_thread.joinable())
+        return;
+      child_thread_stop = true;
+      child_condition.notify_all();
+    }
+    child_thread.join();
+    child_thread_ready = false;
+    child_thread_env_ready = false;
+    child_thread_stop = false;
+  }
+
   void shutdown() {
     if (instance && environment) {
       wasm_function_inst_t function =
@@ -3478,6 +3935,14 @@ public:
       if (function)
         wasm_runtime_call_wasm(environment, function, 0, nullptr);
     }
+    if (child) {
+      runChild([&] {
+        child->shutdown();
+        child.reset();
+        return true;
+      });
+    }
+    stopChildThread();
     if (environment) {
       wasm_runtime_destroy_exec_env(environment);
       environment = nullptr;
@@ -3504,6 +3969,7 @@ public:
       app_storage->closeSessionStatements();
     graphics.reset();
     module_bytes.reset();
+    declared_maximum_pages = 0;
     initialized = false;
     exit_requested = false;
     if (runtime_initialized) {
@@ -3513,6 +3979,7 @@ public:
   }
 
   NamespacedGraphicsHost graphics;
+  device::Device *device_ptr = nullptr;
   std::unique_ptr<device::ServiceProvider> services;
   std::unique_ptr<media::MediaService> media_service;
   std::unique_ptr<storage::AppStorage> app_storage;
@@ -3527,6 +3994,20 @@ public:
   wasm_module_inst_t instance = nullptr;
   wasm_exec_env_t environment = nullptr;
   std::string error;
+  std::unique_ptr<WasmApp> child;
+  std::string child_error;
+  std::thread child_thread;
+  std::mutex child_mutex;
+  std::condition_variable child_condition;
+  std::function<bool()> child_task;
+  bool child_thread_ready = false;
+  bool child_thread_env_ready = false;
+  bool child_thread_stop = false;
+  bool child_task_ready = false;
+  bool child_task_done = false;
+  bool child_task_result = false;
+  uint32_t child_handle = 1;
+  uint32_t declared_maximum_pages = 0;
   bool runtime_initialized = false;
   bool initialized = false;
   bool exit_requested = false;
@@ -3549,6 +4030,20 @@ bool WasmApp::load(const char *path) {
     impl_->error = "WASM app path is empty";
     return false;
   }
+  constexpr uint32_t kMinimumStackBytes = 64 * 1024;
+  constexpr uint32_t kMaximumStackBytes = 4 * 1024 * 1024;
+  constexpr uint64_t kMinimumMemoryBytes = 1024 * 1024;
+  constexpr uint64_t kMaximumMemoryBytes = 64ULL * 1024 * 1024;
+  if (impl_->options.stack_size < kMinimumStackBytes ||
+      impl_->options.stack_size > kMaximumStackBytes ||
+      impl_->options.worker_stack_size < kMinimumStackBytes ||
+      impl_->options.worker_stack_size > kMaximumStackBytes ||
+      impl_->options.memory_limit_bytes < kMinimumMemoryBytes ||
+      impl_->options.memory_limit_bytes > kMaximumMemoryBytes ||
+      impl_->options.memory_limit_bytes % (64 * 1024) != 0) {
+    impl_->error = "WASM stack or memory policy is invalid";
+    return false;
+  }
   if (impl_->app_storage && !impl_->app_storage->initialize()) {
     impl_->error = "initialize app storage: " + impl_->app_storage->lastError();
     return false;
@@ -3563,7 +4058,9 @@ bool WasmApp::load(const char *path) {
     return false;
   }
   if (!validateCoreMemoryPolicy(impl_->module_bytes.data(),
-                                impl_->module_bytes.size(), impl_->error))
+                                impl_->module_bytes.size(),
+                                impl_->options.memory_limit_bytes,
+                                impl_->declared_maximum_pages, impl_->error))
     return false;
   std::array<char, kErrorBufferSize> error_buffer{};
   impl_->module =
@@ -3573,9 +4070,14 @@ bool WasmApp::load(const char *path) {
     impl_->error = std::string("load WASM module: ") + error_buffer.data();
     return false;
   }
-  constexpr uint32_t kMaximumMemoryPages = 1024;
-  const InstantiationArgs arguments = {
-      impl_->options.stack_size, impl_->options.heap_size, kMaximumMemoryPages};
+  uint32_t maximum_memory_pages = static_cast<uint32_t>(std::min<uint64_t>(
+      impl_->options.memory_limit_bytes / (64 * 1024), 1024));
+  if (impl_->declared_maximum_pages)
+    maximum_memory_pages =
+        std::min(maximum_memory_pages, impl_->declared_maximum_pages);
+  const InstantiationArgs arguments = {impl_->options.stack_size,
+                                       impl_->options.heap_size,
+                                       maximum_memory_pages};
   impl_->instance = wasm_runtime_instantiate_ex(
       impl_->module, &arguments, error_buffer.data(), error_buffer.size());
   if (!impl_->instance) {
@@ -3590,12 +4092,11 @@ bool WasmApp::load(const char *path) {
       memory ? wasm_memory_get_cur_page_count(memory) : 0;
   const uint64_t maximum_pages =
       memory ? wasm_memory_get_max_page_count(memory) : 0;
-  constexpr uint64_t kMaximumMemoryBytes = 64ULL * 1024 * 1024;
   if (!memory || bytes_per_page == 0 || current_pages > maximum_pages ||
-      maximum_pages > kMaximumMemoryBytes / bytes_per_page) {
+      maximum_pages > impl_->options.memory_limit_bytes / bytes_per_page) {
     wasm_runtime_deinstantiate(impl_->instance);
     impl_->instance = nullptr;
-    impl_->error = "WASM instance memory exceeds the 64 MiB policy";
+    impl_->error = "WASM instance memory exceeds its configured policy";
     return false;
   }
   wasm_runtime_set_custom_data(impl_->instance, &impl_->host);
@@ -3631,7 +4132,7 @@ bool WasmApp::dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) {
   return impl_->call(kLifecycleEvent, std::size(arguments), arguments);
 }
 
-bool WasmApp::render(int64_t monotonic_us) {
+bool WasmApp::render(int64_t monotonic_us, uint32_t &next_delay_ms) {
   if (!impl_->initialized)
     return false;
   const uint64_t timestamp = static_cast<uint64_t>(monotonic_us);
@@ -3639,7 +4140,8 @@ bool WasmApp::render(int64_t monotonic_us) {
       static_cast<uint32_t>(timestamp),
       static_cast<uint32_t>(timestamp >> 32),
   };
-  return impl_->callResult(kLifecycleFrame, std::size(arguments), arguments);
+  return impl_->callU32Result(kLifecycleFrame, std::size(arguments), arguments,
+                              next_delay_ms);
 }
 
 void WasmApp::shutdown() { impl_->shutdown(); }
