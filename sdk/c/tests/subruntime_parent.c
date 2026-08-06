@@ -2,6 +2,13 @@
 
 #include <stdint.h>
 
+static uint32_t child_handle;
+static unsigned phase;
+static unsigned iteration;
+static unsigned failure_index;
+static const char *failure_modules[] = {"allocation-failure", "trap-child",
+                                        "stack-overflow"};
+
 static void log_child_error(void) {
   app_string_t message = {0};
   oos_platform_subruntime_last_error(&message);
@@ -10,55 +17,24 @@ static void log_child_error(void) {
   app_string_free(&message);
 }
 
-static bool
-exercise_expected_failure(const char *name, size_t name_length,
-                          uint64_t memory_limit,
-                          exports_oos_platform_lifecycle_error_code_t *error) {
-  app_string_t module = {(uint8_t *)name, name_length};
-  uint32_t handle = 0;
-  if (!oos_platform_subruntime_create(&module, 512 * 1024, 2 * 1024 * 1024,
-                                      memory_limit, &handle, error)) {
-    log_child_error();
-    return false;
-  }
-  if (oos_platform_subruntime_initialize(handle, error)) {
-    oos_platform_runtime_log(OOS_PLATFORM_RUNTIME_LOG_LEVEL_ERROR, &module);
-    app_string_t unexpected = {(uint8_t *)"expected child failure succeeded",
-                               32};
-    oos_platform_runtime_log(OOS_PLATFORM_RUNTIME_LOG_LEVEL_ERROR, &unexpected);
-    oos_platform_subruntime_destroy(handle, error);
-    return false;
-  }
-  if (!oos_platform_subruntime_destroy(handle, error)) {
-    log_child_error();
-    return false;
-  }
-  return true;
+static bool create_child(const char *name,
+                         exports_oos_platform_lifecycle_error_code_t *error) {
+  app_string_t module;
+  app_string_set(&module, name);
+  return oos_platform_subruntime_create(&module, 512 * 1024, &child_handle,
+                                        error) &&
+         oos_platform_subruntime_initialize(child_handle, error);
 }
 
 bool exports_oos_platform_lifecycle_init(
     exports_oos_platform_lifecycle_error_code_t *error) {
-  app_string_t module = {(uint8_t *)"memory-child", 12};
-  if (!exercise_expected_failure("allocation-failure", 18, 16ULL * 1024 * 1024,
-                                 error) ||
-      !exercise_expected_failure("trap-child", 10, 64ULL * 1024 * 1024,
-                                 error) ||
-      !exercise_expected_failure("stack-overflow", 14, 64ULL * 1024 * 1024,
-                                 error))
+  if (!create_child("memory-child", error)) {
+    log_child_error();
     return false;
-  for (unsigned iteration = 0; iteration < 12; ++iteration) {
-    uint32_t handle = 0;
-    uint32_t delay = 0;
-    if (!oos_platform_subruntime_create(&module, 512 * 1024, 2 * 1024 * 1024,
-                                        32ULL * 1024 * 1024, &handle, error) ||
-        !oos_platform_subruntime_initialize(handle, error) ||
-        !oos_platform_subruntime_frame(
-            handle, oos_platform_runtime_monotonic_time_us(), &delay, error) ||
-        delay != 17 || !oos_platform_subruntime_destroy(handle, error)) {
-      log_child_error();
-      return false;
-    }
   }
+  phase = 0;
+  iteration = 0;
+  failure_index = 0;
   return true;
 }
 
@@ -71,9 +47,68 @@ bool exports_oos_platform_lifecycle_frame(
     uint64_t monotonic_time_us, uint32_t *next_delay_ms,
     exports_oos_platform_lifecycle_error_code_t *error) {
   (void)monotonic_time_us;
-  (void)error;
+  oos_platform_subruntime_child_status_t status = {0};
+  if (!oos_platform_subruntime_status(child_handle, &status, error)) {
+    log_child_error();
+    return false;
+  }
+  if (iteration >= 12) {
+    if (status.state != OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_FAILED) {
+      *error = OOS_PLATFORM_TYPES_ERROR_CODE_FAILED;
+      return false;
+    }
+    if (!oos_platform_subruntime_destroy(child_handle, error))
+      return false;
+    if (++failure_index <
+        sizeof(failure_modules) / sizeof(failure_modules[0])) {
+      if (!create_child(failure_modules[failure_index], error))
+        return false;
+      *next_delay_ms = 0;
+      return true;
+    }
+    phase = 1;
+    *next_delay_ms = 1000;
+    return true;
+  }
+  if (phase == 0) {
+    if (status.state != OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_COMPLETED ||
+        status.result_code != 7) {
+      app_string_t message;
+      app_string_set(&message, "subruntime child completion state is invalid");
+      oos_platform_runtime_log(OOS_PLATFORM_RUNTIME_LOG_LEVEL_ERROR, &message);
+      *error = OOS_PLATFORM_TYPES_ERROR_CODE_FAILED;
+      return false;
+    }
+    const uint32_t stale_handle = child_handle;
+    if (!oos_platform_subruntime_destroy(child_handle, error))
+      return false;
+    if (oos_platform_subruntime_status(stale_handle, &status, error)) {
+      app_string_t message;
+      app_string_set(&message, "stale child handle remained valid");
+      oos_platform_runtime_log(OOS_PLATFORM_RUNTIME_LOG_LEVEL_ERROR, &message);
+      *error = OOS_PLATFORM_TYPES_ERROR_CODE_FAILED;
+      return false;
+    }
+    if (++iteration < 12) {
+      if (!create_child("memory-child", error)) {
+        log_child_error();
+        return false;
+      }
+      *next_delay_ms = 0;
+      return true;
+    }
+    if (!create_child(failure_modules[0], error))
+      return false;
+    *next_delay_ms = 0;
+    return true;
+  }
   *next_delay_ms = 1000;
   return true;
 }
 
-void exports_oos_platform_lifecycle_shutdown(void) {}
+void exports_oos_platform_lifecycle_shutdown(void) {
+  if (phase == 0) {
+    exports_oos_platform_lifecycle_error_code_t error;
+    oos_platform_subruntime_destroy(child_handle, &error);
+  }
+}

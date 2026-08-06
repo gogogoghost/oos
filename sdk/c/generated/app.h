@@ -1127,10 +1127,26 @@ typedef struct {
 
 typedef oos_platform_types_error_code_t oos_platform_subruntime_error_code_t;
 
+typedef uint8_t oos_platform_subruntime_child_state_t;
+
+#define OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_LOADING 0
+#define OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_RUNNING 1
+#define OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_COMPLETED 2
+#define OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_EXIT_REQUESTED 3
+#define OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_FAILED 4
+#define OOS_PLATFORM_SUBRUNTIME_CHILD_STATE_CANCELLED 5
+
+typedef struct oos_platform_subruntime_child_status_t {
+  oos_platform_subruntime_child_state_t   state;
+  uint32_t   next_frame_delay_ms;
+  uint32_t   result_code;
+} oos_platform_subruntime_child_status_t;
+
 typedef struct oos_platform_subruntime_limits_t {
   uint32_t   maximum_instances;
   uint32_t   minimum_stack_bytes;
   uint32_t   maximum_stack_bytes;
+  uint32_t   effective_worker_stack_bytes;
   uint64_t   maximum_memory_bytes;
 } oos_platform_subruntime_limits_t;
 
@@ -1148,6 +1164,14 @@ typedef struct {
     oos_platform_subruntime_error_code_t err;
   } val;
 } oos_platform_subruntime_result_void_error_code_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_subruntime_child_status_t ok;
+    oos_platform_subruntime_error_code_t err;
+  } val;
+} oos_platform_subruntime_result_child_status_error_code_t;
 
 typedef oos_platform_types_error_code_t exports_oos_platform_lifecycle_error_code_t;
 
@@ -1371,10 +1395,13 @@ extern bool oos_platform_system_services_request(app_string_t *service, app_stri
 // Imported Functions from `oos:platform/subruntime@0.1.0`
 extern void oos_platform_subruntime_get_limits(oos_platform_subruntime_limits_t *ret);
 // `module` is a simple name resolved as modules/<name>.aot, then .wasm.
-extern bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t worker_stack_bytes, uint64_t memory_limit_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err);
+extern bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err);
 extern bool oos_platform_subruntime_initialize(uint32_t handle, oos_platform_subruntime_error_code_t *err);
 extern bool oos_platform_subruntime_event(uint32_t handle, uint32_t code, uint32_t action, uint64_t monotonic_time_us, oos_platform_subruntime_error_code_t *err);
 extern bool oos_platform_subruntime_frame(uint32_t handle, uint64_t monotonic_time_us, uint32_t *ret, oos_platform_subruntime_error_code_t *err);
+extern bool oos_platform_subruntime_status(uint32_t handle, oos_platform_subruntime_child_status_t *ret, oos_platform_subruntime_error_code_t *err);
+// Called by a packaged child after it has durably committed its result.
+extern bool oos_platform_subruntime_complete(uint32_t result_code, oos_platform_subruntime_error_code_t *err);
 extern bool oos_platform_subruntime_destroy(uint32_t handle, oos_platform_subruntime_error_code_t *err);
 extern void oos_platform_subruntime_last_error(app_string_t *ret);
 
@@ -1553,6 +1580,8 @@ void oos_platform_system_services_result_string_error_code_free(oos_platform_sys
 void oos_platform_subruntime_result_u32_error_code_free(oos_platform_subruntime_result_u32_error_code_t *ptr);
 
 void oos_platform_subruntime_result_void_error_code_free(oos_platform_subruntime_result_void_error_code_t *ptr);
+
+void oos_platform_subruntime_result_child_status_error_code_free(oos_platform_subruntime_result_child_status_error_code_t *ptr);
 
 void exports_oos_platform_lifecycle_result_void_error_code_free(exports_oos_platform_lifecycle_result_void_error_code_t *ptr);
 

@@ -15,8 +15,9 @@ part of unrelated device backends.
   content sniffing tolerates legacy MIME metadata, and status has structured
   failure categories.
 - The production C SDK links pinned picolibc, libm, compiler-rt, WAMR pthreads,
-  and TLSF without WASI or unresolved imports. Main stack, worker stack, and
-  total memory are build parameters.
+  and TLSF without WASI or unresolved imports. The worker auxiliary stack is a
+  fixed, reported build-time partition; lifecycle stack and total memory remain
+  host launch parameters.
 - Recoverable compiler/game memory uses one ephemeral child WAMR instance.
   Packages place children in `modules/`; AOT is preferred over core Wasm.
   Children inherit capabilities/storage but own their linear memory and worker.
@@ -40,15 +41,17 @@ available commands on each wake.
 OOS owns supported encoded-media decoding and the shared SoundFont. OmniJ2ME
 queries `supported-formats`, sends JAR resource bytes through `source-create`,
 and uses PCM only for raw/generated audio or genuinely unsupported codecs.
+Programmatic MMAPI `MIDIControl` is not exposed by the current WIT contract and
+must be reported as unavailable by the guest. It must not be approximated with
+`play-tone`; a future implementation will use the shared OOS SoundFont service.
 
 ## Verification
 
 `scripts/test-wasm-runtime.sh` verifies core-Wasm C/Rust applications, strict
 imports, libc/libm, worker clocks and wakeups, frame delays, dynamic in-memory
 MIDI, transparent LVGL compilation, worker thread-affinity traps, memory-policy
-rejection, and child runtime failure recovery. The child stress test includes
-allocation failure, worker trap, cancellation from atomic wait, twelve 12 MiB
-allocation cycles, and PSS recovery near its pre-test baseline.
+rejection, deferred child activation, completion state, event-loop affinity,
+stale handles, and PSS recovery near its pre-test baseline.
 
 `scripts/compile-native-app-aot.sh` applies the same ARMv7 bounds-checking AOT
 configuration used by production packages. Device builds remain isolated under

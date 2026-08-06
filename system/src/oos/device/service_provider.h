@@ -37,6 +37,7 @@ public:
   bool pcmPause(uint32_t handle);
   bool pcmResume(uint32_t handle);
   bool pcmFlush(uint32_t handle);
+  bool pcmWaitWritable(uint32_t handle, int timeout_ms);
   bool pcmStatus(uint32_t handle, hardware::PcmOutputStatus &status);
   bool pcmClose(uint32_t handle);
   void setAudioFocused(bool focused);

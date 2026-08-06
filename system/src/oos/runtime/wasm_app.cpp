@@ -8,7 +8,6 @@
 #include <cctype>
 #include <cerrno>
 #include <cmath>
-#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -86,15 +85,31 @@ enum class WitError : uint8_t {
 
 class SubruntimeHost {
 public:
+  enum class ChildState : uint8_t {
+    Loading = 0,
+    Running = 1,
+    Completed = 2,
+    ExitRequested = 3,
+    Failed = 4,
+    Cancelled = 5,
+  };
+
+  struct ChildStatus {
+    ChildState state = ChildState::Loading;
+    uint32_t next_frame_delay_ms = 0;
+    uint32_t result_code = 0;
+  };
+
   virtual ~SubruntimeHost() = default;
   virtual bool create(const std::string &module, uint32_t main_stack_bytes,
-                      uint32_t worker_stack_bytes, uint64_t memory_limit_bytes,
                       uint32_t &handle) = 0;
   virtual bool initialize(uint32_t handle) = 0;
   virtual bool event(uint32_t handle, uint32_t code, uint32_t action,
                      uint64_t monotonic_us) = 0;
   virtual bool frame(uint32_t handle, uint64_t monotonic_us,
                      uint32_t &delay_ms) = 0;
+  virtual bool status(uint32_t handle, ChildStatus &value) = 0;
+  virtual bool complete(uint32_t result_code) = 0;
   virtual bool destroy(uint32_t handle) = 0;
   virtual const std::string &lastError() const = 0;
 };
@@ -257,8 +272,14 @@ device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
       !servicePermissionGranted(environment,
                                 attachedServicePermission(environment)))
     return nullptr;
-  if (!*host->services)
-    *host->services = std::make_unique<device::ServiceProvider>(*host->device);
+  if (!*host->services) {
+    try {
+      *host->services =
+          std::make_unique<device::ServiceProvider>(*host->device);
+    } catch (...) {
+      return nullptr;
+    }
+  }
   return host->services->get();
 }
 
@@ -268,12 +289,36 @@ media::MediaService *mediaFor(wasm_exec_env_t environment) {
   if (!host || !services || !host->media_service || !host->asset_directory)
     return nullptr;
   if (!*host->media_service) {
-    *host->media_service = std::make_unique<media::MediaService>(
-        *services, *host->asset_directory);
+    try {
+      *host->media_service = std::make_unique<media::MediaService>(
+          *services, *host->asset_directory);
+    } catch (...) {
+      return nullptr;
+    }
     (*host->media_service)
         ->setFocused(!host->audio_focused || *host->audio_focused);
   }
   return host->media_service->get();
+}
+
+WitError mediaErrorToWit(media::MediaError error) {
+  switch (error) {
+  case media::MediaError::InvalidArgument:
+    return WitError::InvalidArgument;
+  case media::MediaError::UnsupportedFormat:
+    return WitError::Unavailable;
+  case media::MediaError::ResourceExhaustion:
+    return WitError::LimitExceeded;
+  case media::MediaError::Busy:
+    return WitError::Busy;
+  case media::MediaError::None:
+    return WitError::Failed;
+  case media::MediaError::MalformedData:
+  case media::MediaError::Io:
+  case media::MediaError::Decoder:
+    return WitError::Io;
+  }
+  return WitError::Failed;
 }
 
 services::SystemServiceHub *systemServicesFor(wasm_exec_env_t environment) {
@@ -1745,149 +1790,205 @@ void nativePcmClose(wasm_exec_env_t environment, uint32_t handle,
 void nativePlayerOpenAsset(wasm_exec_env_t environment, uint32_t path_offset,
                            uint32_t path_length, uint32_t usage,
                            uint32_t result_offset) {
-  std::string path;
-  uint32_t handle = 0;
-  media::MediaService *media = mediaFor(environment);
-  const bool valid =
-      usage <= static_cast<uint32_t>(hardware::AudioUsage::Notification) &&
-      guestString(environment, path_offset, path_length, path, 1024);
-  const bool success =
-      valid && media &&
-      media->openAsset(path, static_cast<hardware::AudioUsage>(usage), handle);
-  writeU32Result(environment, result_offset, success, handle,
-                 valid ? WitError::Io : WitError::InvalidArgument);
+  try {
+    std::string path;
+    uint32_t handle = 0;
+    media::MediaService *media = mediaFor(environment);
+    const bool valid =
+        usage <= static_cast<uint32_t>(hardware::AudioUsage::Notification) &&
+        guestString(environment, path_offset, path_length, path, 1024);
+    const bool success =
+        valid && media &&
+        media->openAsset(path, static_cast<hardware::AudioUsage>(usage),
+                         handle);
+    const WitError error = !valid  ? WitError::InvalidArgument
+                           : media ? mediaErrorToWit(media->lastErrorCode())
+                                   : WitError::Unavailable;
+    writeU32Result(environment, result_offset, success, handle, error);
+  } catch (const std::bad_alloc &) {
+    writeU32Result(environment, result_offset, false, 0,
+                   WitError::LimitExceeded);
+  } catch (...) {
+    writeU32Result(environment, result_offset, false, 0, WitError::Failed);
+  }
 }
 
 void nativeMediaSourceCreate(wasm_exec_env_t environment, uint32_t data_offset,
                              uint32_t data_length, uint32_t mime_offset,
                              uint32_t mime_length, uint32_t hint_offset,
                              uint32_t hint_length, uint32_t result_offset) {
-  const uint8_t *bytes = appArray<uint8_t>(environment, data_offset,
-                                           data_length, 16 * 1024 * 1024);
-  std::string mime;
-  std::string hint;
-  const bool valid =
-      bytes && data_length &&
-      guestString(environment, mime_offset, mime_length, mime, 128) &&
-      guestString(environment, hint_offset, hint_length, hint, 1024);
-  uint32_t handle = 0;
-  media::MediaService *media = mediaFor(environment);
-  const bool success =
-      valid && media &&
-      media->createSource(bytes, data_length, mime, hint, handle);
-  WitError error = WitError::Io;
-  if (!valid)
-    error = WitError::InvalidArgument;
-  else if (media &&
-           (media->lastError().find("limit") != std::string::npos ||
-            media->lastError().find("allocation") != std::string::npos))
-    error = WitError::LimitExceeded;
-  else if (media && media->lastError().find("unsupported") != std::string::npos)
-    error = WitError::Unavailable;
-  writeU32Result(environment, result_offset, success, handle, error);
+  try {
+    const uint8_t *bytes = appArray<uint8_t>(environment, data_offset,
+                                             data_length, 16 * 1024 * 1024);
+    std::string mime;
+    std::string hint;
+    const bool valid =
+        bytes && data_length &&
+        guestString(environment, mime_offset, mime_length, mime, 128) &&
+        guestString(environment, hint_offset, hint_length, hint, 1024);
+    uint32_t handle = 0;
+    media::MediaService *media = mediaFor(environment);
+    const bool success =
+        valid && media &&
+        media->createSource(bytes, data_length, mime, hint, handle);
+    const WitError error = !valid  ? WitError::InvalidArgument
+                           : media ? mediaErrorToWit(media->lastErrorCode())
+                                   : WitError::Unavailable;
+    writeU32Result(environment, result_offset, success, handle, error);
+  } catch (const std::bad_alloc &) {
+    writeU32Result(environment, result_offset, false, 0,
+                   WitError::LimitExceeded);
+  } catch (...) {
+    writeU32Result(environment, result_offset, false, 0, WitError::Failed);
+  }
 }
 
 void nativeMediaSourceClose(wasm_exec_env_t environment, uint32_t handle,
                             uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
-  writeResult(environment, result_offset, media && media->closeSource(handle),
-              WitError::InvalidArgument);
+  const bool success = media && media->closeSource(handle);
+  writeResult(environment, result_offset, success,
+              media ? mediaErrorToWit(media->lastErrorCode())
+                    : WitError::Unavailable);
 }
 
 void nativePlayerOpenSource(wasm_exec_env_t environment, uint32_t source,
                             uint32_t usage, uint32_t result_offset) {
-  const bool valid =
-      usage <= static_cast<uint32_t>(hardware::AudioUsage::Notification);
-  uint32_t handle = 0;
-  media::MediaService *media = mediaFor(environment);
-  const bool success =
-      valid && media &&
-      media->openSource(source, static_cast<hardware::AudioUsage>(usage),
-                        handle);
-  writeU32Result(environment, result_offset, success, handle,
-                 valid ? WitError::Io : WitError::InvalidArgument);
+  try {
+    const bool valid =
+        usage <= static_cast<uint32_t>(hardware::AudioUsage::Notification);
+    uint32_t handle = 0;
+    media::MediaService *media = mediaFor(environment);
+    const bool success =
+        valid && media &&
+        media->openSource(source, static_cast<hardware::AudioUsage>(usage),
+                          handle);
+    const WitError error = !valid  ? WitError::InvalidArgument
+                           : media ? mediaErrorToWit(media->lastErrorCode())
+                                   : WitError::Unavailable;
+    writeU32Result(environment, result_offset, success, handle, error);
+  } catch (const std::bad_alloc &) {
+    writeU32Result(environment, result_offset, false, 0,
+                   WitError::LimitExceeded);
+  } catch (...) {
+    writeU32Result(environment, result_offset, false, 0, WitError::Failed);
+  }
 }
 
 void nativePlayerPlay(wasm_exec_env_t environment, uint32_t handle,
                       uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
-  writeResult(environment, result_offset, media && media->play(handle),
-              WitError::Io);
+  const bool success = media && media->play(handle);
+  writeResult(environment, result_offset, success,
+              media ? mediaErrorToWit(media->lastErrorCode())
+                    : WitError::Unavailable);
 }
 
 void nativePlayerPause(wasm_exec_env_t environment, uint32_t handle,
                        uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
-  writeResult(environment, result_offset, media && media->pause(handle),
-              WitError::Io);
+  const bool success = media && media->pause(handle);
+  writeResult(environment, result_offset, success,
+              media ? mediaErrorToWit(media->lastErrorCode())
+                    : WitError::Unavailable);
 }
 
 void nativePlayerSeek(wasm_exec_env_t environment, uint32_t handle,
                       uint64_t position_ms, uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
-  writeResult(environment, result_offset,
-              media && media->seek(handle, position_ms), WitError::Io);
+  const bool success = media && media->seek(handle, position_ms);
+  writeResult(environment, result_offset, success,
+              media ? mediaErrorToWit(media->lastErrorCode())
+                    : WitError::Unavailable);
 }
 
 void nativePlayerSetVolume(wasm_exec_env_t environment, uint32_t handle,
                            float volume, uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
   const bool valid = std::isfinite(volume) && volume >= 0.0F && volume <= 1.0F;
-  writeResult(environment, result_offset,
-              valid && media && media->setVolume(handle, volume),
-              valid ? WitError::Io : WitError::InvalidArgument);
+  const bool success = valid && media && media->setVolume(handle, volume);
+  writeResult(environment, result_offset, success,
+              !valid  ? WitError::InvalidArgument
+              : media ? mediaErrorToWit(media->lastErrorCode())
+                      : WitError::Unavailable);
 }
 
 void nativePlayerSetLooping(wasm_exec_env_t environment, uint32_t handle,
                             uint32_t looping, uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
-  writeResult(environment, result_offset,
-              looping <= 1 && media && media->setLooping(handle, looping != 0),
-              looping <= 1 ? WitError::Io : WitError::InvalidArgument);
+  const bool success =
+      looping <= 1 && media && media->setLooping(handle, looping != 0);
+  writeResult(environment, result_offset, success,
+              looping > 1 ? WitError::InvalidArgument
+              : media     ? mediaErrorToWit(media->lastErrorCode())
+                          : WitError::Unavailable);
 }
 
 void nativePlayerStatus(wasm_exec_env_t environment, uint32_t handle,
                         uint32_t result_offset) {
-  uint8_t *result = serviceResultArea(environment, result_offset, 40);
-  if (!result)
-    return;
-  media::PlayerStatus status;
-  media::MediaService *media = mediaFor(environment);
-  if (!media || !media->status(handle, status)) {
-    failServiceResult(result, 8);
-    return;
+  try {
+    uint8_t *result = serviceResultArea(environment, result_offset, 40);
+    if (!result)
+      return;
+    media::PlayerStatus status;
+    media::MediaService *media = mediaFor(environment);
+    if (!media || !media->status(handle, status)) {
+      failServiceResult(result, 8,
+                        media ? mediaErrorToWit(media->lastErrorCode())
+                              : WitError::Unavailable);
+      return;
+    }
+    result[8] = static_cast<uint8_t>(status.state);
+    storeCanonical<uint64_t>(result, 16, status.position_ms);
+    storeCanonical<uint64_t>(result, 24, status.duration_ms);
+    storeCanonical<int32_t>(result, 32, status.underruns);
+    result[36] = static_cast<uint8_t>(status.failure);
+  } catch (const std::bad_alloc &) {
+    uint8_t *result = serviceResultArea(environment, result_offset, 40);
+    if (result)
+      failServiceResult(result, 8, WitError::LimitExceeded);
+  } catch (...) {
+    uint8_t *result = serviceResultArea(environment, result_offset, 40);
+    if (result)
+      failServiceResult(result, 8, WitError::Failed);
   }
-  result[8] = static_cast<uint8_t>(status.state);
-  storeCanonical<uint64_t>(result, 16, status.position_ms);
-  storeCanonical<uint64_t>(result, 24, status.duration_ms);
-  storeCanonical<int32_t>(result, 32, status.underruns);
-  result[36] = static_cast<uint8_t>(status.failure);
 }
 
 void nativePlayerClose(wasm_exec_env_t environment, uint32_t handle,
                        uint32_t result_offset) {
   media::MediaService *media = mediaFor(environment);
-  writeResult(environment, result_offset, media && media->close(handle),
-              WitError::Io);
+  const bool success = media && media->close(handle);
+  writeResult(environment, result_offset, success,
+              media ? mediaErrorToWit(media->lastErrorCode())
+                    : WitError::Unavailable);
 }
 
 void nativeAudioLastError(wasm_exec_env_t environment, uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  const std::string *message = nullptr;
-  if (host && host->media_service && *host->media_service &&
-      !(*host->media_service)->lastError().empty()) {
-    message = &(*host->media_service)->lastError();
+  try {
+    AppHostContext *host = hostFor(environment);
+    const std::string *message = nullptr;
+    if (host && host->media_service && *host->media_service &&
+        !(*host->media_service)->lastError().empty()) {
+      message = &(*host->media_service)->lastError();
+    }
+    device::ServiceProvider *services = servicesFor(environment);
+    const std::string fallback = !services ? "service unavailable"
+                                 : services->lastError().empty()
+                                     ? "service ready"
+                                     : services->lastError();
+    const std::string &value = message ? *message : fallback;
+    uint32_t *result =
+        appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+    if (!result ||
+        !lowerString(environment, value.c_str(), result[0], result[1]))
+      trapInvalidReturnArea(environment);
+  } catch (...) {
+    static constexpr char kFailure[] = "audio diagnostic unavailable";
+    uint32_t *result =
+        appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+    if (!result || !lowerString(environment, kFailure, result[0], result[1]))
+      trapInvalidReturnArea(environment);
   }
-  device::ServiceProvider *services = servicesFor(environment);
-  const std::string fallback = !services ? "service unavailable"
-                               : services->lastError().empty()
-                                   ? "service ready"
-                                   : services->lastError();
-  const std::string &value = message ? *message : fallback;
-  uint32_t *result =
-      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
-  if (!result || !lowerString(environment, value.c_str(), result[0], result[1]))
-    trapInvalidReturnArea(environment);
 }
 
 void nativeAudioRecord(wasm_exec_env_t environment, uint32_t path_offset,
@@ -2761,13 +2862,12 @@ void nativeSubruntimeLimits(wasm_exec_env_t environment,
   storeCanonical<uint32_t>(result, 0, 1);
   storeCanonical<uint32_t>(result, 4, 64 * 1024);
   storeCanonical<uint32_t>(result, 8, 4 * 1024 * 1024);
+  storeCanonical<uint32_t>(result, 12, 2 * 1024 * 1024);
   storeCanonical<uint64_t>(result, 16, 64ULL * 1024 * 1024);
 }
 
 void nativeSubruntimeCreate(wasm_exec_env_t environment, uint32_t module_offset,
                             uint32_t module_length, uint32_t main_stack_bytes,
-                            uint32_t worker_stack_bytes,
-                            uint64_t memory_limit_bytes,
                             uint32_t result_offset) {
   std::string module;
   AppHostContext *host = hostFor(environment);
@@ -2776,8 +2876,7 @@ void nativeSubruntimeCreate(wasm_exec_env_t environment, uint32_t module_offset,
   uint32_t handle = 0;
   const bool success =
       valid && host && host->subruntime &&
-      host->subruntime->create(module, main_stack_bytes, worker_stack_bytes,
-                               memory_limit_bytes, handle);
+      host->subruntime->create(module, main_stack_bytes, handle);
   writeU32Result(environment, result_offset, success, handle,
                  valid ? WitError::Failed : WitError::InvalidArgument);
 }
@@ -2808,6 +2907,38 @@ void nativeSubruntimeFrame(wasm_exec_env_t environment, uint32_t handle,
                        host->subruntime->frame(handle, monotonic_us, delay_ms);
   writeU32Result(environment, result_offset, success, delay_ms,
                  WitError::Failed);
+}
+
+void nativeSubruntimeStatus(wasm_exec_env_t environment, uint32_t handle,
+                            uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  SubruntimeHost::ChildStatus status;
+  const bool success =
+      host && host->subruntime && host->subruntime->status(handle, status);
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 16, 16);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 16);
+  result[0] = success ? 0 : 1;
+  if (!success) {
+    result[4] = static_cast<uint8_t>(WitError::InvalidArgument);
+    return;
+  }
+  result[4] = static_cast<uint8_t>(status.state);
+  storeCanonical(result, 8, status.next_frame_delay_ms);
+  storeCanonical(result, 12, status.result_code);
+}
+
+void nativeSubruntimeComplete(wasm_exec_env_t environment, uint32_t result_code,
+                              uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  writeResult(environment, result_offset,
+              host && host->subruntime &&
+                  host->subruntime->complete(result_code),
+              WitError::InvalidArgument);
 }
 
 void nativeSubruntimeDestroy(wasm_exec_env_t environment, uint32_t handle,
@@ -3152,13 +3283,17 @@ NativeSymbol kSystemServicesSymbols[] = {
 NativeSymbol kSubruntimeSymbols[] = {
     {"get-limits", reinterpret_cast<void *>(nativeSubruntimeLimits), "(i)",
      nullptr},
-    {"create", reinterpret_cast<void *>(nativeSubruntimeCreate), "(iiiiIi)",
+    {"create", reinterpret_cast<void *>(nativeSubruntimeCreate), "(iiii)",
      nullptr},
     {"initialize", reinterpret_cast<void *>(nativeSubruntimeInitialize), "(ii)",
      nullptr},
     {"event", reinterpret_cast<void *>(nativeSubruntimeEvent), "(iiiIi)",
      nullptr},
     {"frame", reinterpret_cast<void *>(nativeSubruntimeFrame), "(iIi)",
+     nullptr},
+    {"status", reinterpret_cast<void *>(nativeSubruntimeStatus), "(ii)",
+     nullptr},
+    {"complete", reinterpret_cast<void *>(nativeSubruntimeComplete), "(ii)",
      nullptr},
     {"destroy", reinterpret_cast<void *>(nativeSubruntimeDestroy), "(ii)",
      nullptr},
@@ -3729,11 +3864,10 @@ public:
   }
 
   bool create(const std::string &name, uint32_t main_stack_bytes,
-              uint32_t worker_stack_bytes, uint64_t memory_limit_bytes,
               uint32_t &handle) override {
     handle = 0;
     child_error.clear();
-    if (child) {
+    if (child_slot_active) {
       child_error = "the application already owns a child runtime";
       return false;
     }
@@ -3761,30 +3895,15 @@ public:
     }
     WasmAppOptions child_options = options;
     child_options.stack_size = main_stack_bytes;
-    child_options.worker_stack_size = worker_stack_bytes;
-    child_options.memory_limit_bytes = memory_limit_bytes;
     child_options.module_directory.clear();
     child_options.status_bar = nullptr;
-    if (!startChildThread())
-      return false;
-    const bool loaded =
-        runChild([&, child_options = std::move(child_options)]() mutable {
-          if (device_ptr)
-            child = std::make_unique<WasmApp>(graphics, *device_ptr,
-                                              std::move(child_options));
-          else
-            child =
-                std::make_unique<WasmApp>(graphics, std::move(child_options));
-          if (child->load(path.c_str()))
-            return true;
-          child_error = child->lastError();
-          child.reset();
-          return false;
-        });
-    if (!loaded) {
-      stopChildThread();
-      return false;
-    }
+    child_path = std::move(path);
+    pending_child_options = std::move(child_options);
+    child_slot_active = true;
+    child_activation_pending = false;
+    child_state = ChildState::Loading;
+    child_next_delay_ms = 0;
+    child_result_code = 0;
     handle = child_handle;
     return true;
   }
@@ -3792,54 +3911,61 @@ public:
   bool initialize(uint32_t handle) override {
     if (!validChild(handle))
       return false;
-    return runChild([&] {
-      if (child->initialize())
-        return true;
-      child_error = child->lastError();
+    if (child_state != ChildState::Loading || child_activation_pending) {
+      child_error = "child runtime is not waiting for initialization";
       return false;
-    });
+    }
+    child_activation_pending = true;
+    return true;
   }
 
   bool event(uint32_t handle, uint32_t code, uint32_t action,
              uint64_t monotonic_us) override {
-    if (!validChild(handle) || code > UINT16_MAX || action > 2)
+    if (!validChild(handle) || code > UINT16_MAX || action > 2) {
+      child_error = "child event is invalid";
       return false;
-    const input::KeyEvent key = {static_cast<int64_t>(monotonic_us),
-                                 static_cast<uint16_t>(code),
-                                 static_cast<input::KeyAction>(action),
-                                 {},
-                                 {}};
-    return runChild([&] {
-      if (child->dispatchKey(key, static_cast<int64_t>(monotonic_us)))
-        return true;
-      child_error = child->lastError();
-      return false;
-    });
+    }
+    child_error = "events are routed by OOS while the child runtime is active";
+    return false;
   }
 
   bool frame(uint32_t handle, uint64_t monotonic_us,
              uint32_t &delay_ms) override {
+    (void)monotonic_us;
     if (!validChild(handle))
       return false;
-    return runChild([&] {
-      if (child->render(static_cast<int64_t>(monotonic_us), delay_ms))
-        return true;
-      child_error = child->lastError();
+    delay_ms = child_next_delay_ms;
+    return true;
+  }
+
+  bool status(uint32_t handle, ChildStatus &value) override {
+    if (!validChild(handle))
       return false;
-    });
+    value = {child_state, child_next_delay_ms, child_result_code};
+    return true;
+  }
+
+  bool complete(uint32_t result_code) override {
+    if (!managed_child || completion_requested) {
+      child_error = "only an active packaged child can report completion";
+      return false;
+    }
+    completion_requested = true;
+    completion_result_code = result_code;
+    return true;
   }
 
   bool destroy(uint32_t handle) override {
     if (!validChild(handle))
       return false;
-    const bool stopped = runChild([&] {
+    if (child) {
       child->shutdown();
       child.reset();
-      return true;
-    });
-    stopChildThread();
-    if (!stopped)
-      return false;
+      child_state = ChildState::Cancelled;
+    }
+    child_slot_active = false;
+    child_activation_pending = false;
+    child_path.clear();
     ++child_handle;
     if (child_handle == 0)
       child_handle = 1;
@@ -3850,99 +3976,91 @@ public:
   const std::string &lastError() const override { return child_error; }
 
   bool validChild(uint32_t handle) {
-    if (child && handle == child_handle)
+    if (child_slot_active && handle == child_handle)
       return true;
     child_error = "child runtime handle is invalid";
     return false;
   }
 
-  bool startChildThread() {
-    std::unique_lock lock(child_mutex);
-    child_thread_ready = false;
-    child_thread_env_ready = false;
-    child_thread_stop = false;
-    child_thread = std::thread([this] {
-      const bool environment_ready = wasm_runtime_init_thread_env();
-      {
-        std::lock_guard guard(child_mutex);
-        child_thread_env_ready = environment_ready;
-        child_thread_ready = true;
-      }
-      child_condition.notify_all();
-      if (!environment_ready)
-        return;
-
-      std::unique_lock thread_lock(child_mutex);
-      for (;;) {
-        child_condition.wait(thread_lock, [this] {
-          return child_thread_stop || child_task_ready;
-        });
-        if (child_thread_stop)
-          break;
-        auto task = std::move(child_task);
-        child_task_ready = false;
-        thread_lock.unlock();
-        const bool result = task();
-        thread_lock.lock();
-        child_task_result = result;
-        child_task_done = true;
-        child_condition.notify_all();
-      }
-      thread_lock.unlock();
-      wasm_runtime_destroy_thread_env();
-    });
-    child_condition.wait(lock, [this] { return child_thread_ready; });
-    if (child_thread_env_ready)
-      return true;
-    child_error = "initialize child WAMR thread environment failed";
-    lock.unlock();
-    child_thread.join();
-    return false;
+  void finishChild(ChildState state, uint32_t result_code,
+                   std::string failure = {}) {
+    if (!failure.empty())
+      child_error = std::move(failure);
+    if (child) {
+      child->shutdown();
+      child.reset();
+    }
+    child_state = state;
+    child_result_code = result_code;
+    child_next_delay_ms = 0;
+    child_activation_pending = false;
   }
 
-  bool runChild(std::function<bool()> task) {
-    std::unique_lock lock(child_mutex);
-    if (!child_thread.joinable() || !child_thread_env_ready) {
-      child_error = "child runtime execution thread is unavailable";
+  bool activateChild() {
+    child_activation_pending = false;
+    try {
+      if (device_ptr)
+        child = std::make_unique<WasmApp>(graphics, *device_ptr,
+                                          pending_child_options);
+      else
+        child = std::make_unique<WasmApp>(graphics, pending_child_options);
+    } catch (const std::bad_alloc &) {
+      finishChild(ChildState::Failed, 0, "allocate child runtime failed");
       return false;
     }
-    child_task = std::move(task);
-    child_task_done = false;
-    child_task_ready = true;
-    child_condition.notify_all();
-    child_condition.wait(lock, [this] { return child_task_done; });
-    return child_task_result;
+    child->impl_->managed_child = true;
+    child->setAudioFocused(audio_focused);
+    if (!child->load(child_path.c_str()) || !child->initialize()) {
+      const std::string failure = child->lastError();
+      finishChild(ChildState::Failed, 0, failure);
+      return false;
+    }
+    child_state = ChildState::Running;
+    return true;
   }
 
-  void stopChildThread() {
-    {
-      std::lock_guard lock(child_mutex);
-      if (!child_thread.joinable())
-        return;
-      child_thread_stop = true;
-      child_condition.notify_all();
+  bool driveChild(int64_t monotonic_us, uint32_t &next_delay_ms) {
+    if (child_activation_pending && !activateChild()) {
+      next_delay_ms = 0;
+      return true;
     }
-    child_thread.join();
-    child_thread_ready = false;
-    child_thread_env_ready = false;
-    child_thread_stop = false;
+    if (child_state != ChildState::Running || !child)
+      return false;
+    uint32_t delay_ms = 0;
+    if (!child->render(monotonic_us, delay_ms)) {
+      const std::string failure = child->lastError();
+      finishChild(ChildState::Failed, 0, failure);
+      next_delay_ms = 0;
+      return true;
+    }
+    child_next_delay_ms = delay_ms;
+    if (child->impl_->completion_requested) {
+      finishChild(ChildState::Completed, child->impl_->completion_result_code);
+      next_delay_ms = 0;
+      return true;
+    }
+    if (child->takeExitRequest()) {
+      finishChild(ChildState::ExitRequested, 0);
+      next_delay_ms = 0;
+      return true;
+    }
+    next_delay_ms = delay_ms;
+    return true;
   }
 
   void shutdown() {
+    if (child) {
+      child->shutdown();
+      child.reset();
+    }
+    child_slot_active = false;
+    child_activation_pending = false;
     if (instance && environment) {
       wasm_function_inst_t function =
           wasm_runtime_lookup_function(instance, kLifecycleShutdown);
       if (function)
         wasm_runtime_call_wasm(environment, function, 0, nullptr);
     }
-    if (child) {
-      runChild([&] {
-        child->shutdown();
-        child.reset();
-        return true;
-      });
-    }
-    stopChildThread();
     if (environment) {
       wasm_runtime_destroy_exec_env(environment);
       environment = nullptr;
@@ -3995,23 +4113,23 @@ public:
   wasm_exec_env_t environment = nullptr;
   std::string error;
   std::unique_ptr<WasmApp> child;
+  WasmAppOptions pending_child_options;
+  std::string child_path;
   std::string child_error;
-  std::thread child_thread;
-  std::mutex child_mutex;
-  std::condition_variable child_condition;
-  std::function<bool()> child_task;
-  bool child_thread_ready = false;
-  bool child_thread_env_ready = false;
-  bool child_thread_stop = false;
-  bool child_task_ready = false;
-  bool child_task_done = false;
-  bool child_task_result = false;
+  ChildState child_state = ChildState::Loading;
+  uint32_t child_next_delay_ms = 0;
+  uint32_t child_result_code = 0;
   uint32_t child_handle = 1;
   uint32_t declared_maximum_pages = 0;
   bool runtime_initialized = false;
   bool initialized = false;
   bool exit_requested = false;
   bool audio_focused = true;
+  bool child_slot_active = false;
+  bool child_activation_pending = false;
+  bool managed_child = false;
+  bool completion_requested = false;
+  uint32_t completion_result_code = 0;
 };
 
 WasmApp::WasmApp(GraphicsHost &graphics, WasmAppOptions options)
@@ -4032,16 +4150,10 @@ bool WasmApp::load(const char *path) {
   }
   constexpr uint32_t kMinimumStackBytes = 64 * 1024;
   constexpr uint32_t kMaximumStackBytes = 4 * 1024 * 1024;
-  constexpr uint64_t kMinimumMemoryBytes = 1024 * 1024;
   constexpr uint64_t kMaximumMemoryBytes = 64ULL * 1024 * 1024;
   if (impl_->options.stack_size < kMinimumStackBytes ||
-      impl_->options.stack_size > kMaximumStackBytes ||
-      impl_->options.worker_stack_size < kMinimumStackBytes ||
-      impl_->options.worker_stack_size > kMaximumStackBytes ||
-      impl_->options.memory_limit_bytes < kMinimumMemoryBytes ||
-      impl_->options.memory_limit_bytes > kMaximumMemoryBytes ||
-      impl_->options.memory_limit_bytes % (64 * 1024) != 0) {
-    impl_->error = "WASM stack or memory policy is invalid";
+      impl_->options.stack_size > kMaximumStackBytes) {
+    impl_->error = "WASM lifecycle stack policy is invalid";
     return false;
   }
   if (impl_->app_storage && !impl_->app_storage->initialize()) {
@@ -4058,8 +4170,7 @@ bool WasmApp::load(const char *path) {
     return false;
   }
   if (!validateCoreMemoryPolicy(impl_->module_bytes.data(),
-                                impl_->module_bytes.size(),
-                                impl_->options.memory_limit_bytes,
+                                impl_->module_bytes.size(), kMaximumMemoryBytes,
                                 impl_->declared_maximum_pages, impl_->error))
     return false;
   std::array<char, kErrorBufferSize> error_buffer{};
@@ -4070,8 +4181,7 @@ bool WasmApp::load(const char *path) {
     impl_->error = std::string("load WASM module: ") + error_buffer.data();
     return false;
   }
-  uint32_t maximum_memory_pages = static_cast<uint32_t>(std::min<uint64_t>(
-      impl_->options.memory_limit_bytes / (64 * 1024), 1024));
+  uint32_t maximum_memory_pages = 1024;
   if (impl_->declared_maximum_pages)
     maximum_memory_pages =
         std::min(maximum_memory_pages, impl_->declared_maximum_pages);
@@ -4093,7 +4203,7 @@ bool WasmApp::load(const char *path) {
   const uint64_t maximum_pages =
       memory ? wasm_memory_get_max_page_count(memory) : 0;
   if (!memory || bytes_per_page == 0 || current_pages > maximum_pages ||
-      maximum_pages > impl_->options.memory_limit_bytes / bytes_per_page) {
+      maximum_pages > kMaximumMemoryBytes / bytes_per_page) {
     wasm_runtime_deinstantiate(impl_->instance);
     impl_->instance = nullptr;
     impl_->error = "WASM instance memory exceeds its configured policy";
@@ -4122,6 +4232,16 @@ bool WasmApp::initialize() {
 bool WasmApp::dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) {
   if (!impl_->initialized)
     return false;
+  if (impl_->child_state == SubruntimeHost::ChildState::Running &&
+      impl_->child) {
+    if (impl_->child->dispatchKey(event, monotonic_us))
+      return true;
+    const std::string failure = impl_->child->lastError();
+    impl_->finishChild(SubruntimeHost::ChildState::Failed, 0, failure);
+    return true;
+  }
+  if (impl_->child_activation_pending)
+    return true;
   const uint64_t timestamp = static_cast<uint64_t>(monotonic_us);
   uint32_t arguments[4] = {
       event.code,
@@ -4135,6 +4255,9 @@ bool WasmApp::dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) {
 bool WasmApp::render(int64_t monotonic_us, uint32_t &next_delay_ms) {
   if (!impl_->initialized)
     return false;
+  if (impl_->child_activation_pending ||
+      impl_->child_state == SubruntimeHost::ChildState::Running)
+    return impl_->driveChild(monotonic_us, next_delay_ms);
   const uint64_t timestamp = static_cast<uint64_t>(monotonic_us);
   uint32_t arguments[2] = {
       static_cast<uint32_t>(timestamp),
@@ -4154,6 +4277,8 @@ bool WasmApp::takeExitRequest() {
 
 void WasmApp::setAudioFocused(bool focused) {
   impl_->audio_focused = focused;
+  if (impl_->child)
+    impl_->child->setAudioFocused(focused);
   if (impl_->media_service)
     impl_->media_service->setFocused(focused);
   if (impl_->services)

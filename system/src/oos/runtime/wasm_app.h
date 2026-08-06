@@ -23,9 +23,7 @@ namespace oos::runtime {
 class GraphicsHost;
 
 struct WasmAppOptions {
-  uint32_t stack_size = 128 * 1024;
-  uint32_t worker_stack_size = 128 * 1024;
-  uint64_t memory_limit_bytes = 64ULL * 1024 * 1024;
+  uint32_t stack_size = 512 * 1024;
   uint32_t heap_size = 0;
   std::string app_id;
   std::string data_directory;

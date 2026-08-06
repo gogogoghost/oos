@@ -53,8 +53,11 @@ pinned picolibc 1.8.9 libc/libm, compiler-rt, and the pinned thread-safe TLSF
 allocator for `wasm32-unknown-unknown`; WASI is not enabled. The linker rejects
 undefined symbols and `scripts/validate-wasm-imports.sh` permits only versioned
 OOS WIT plus the explicit WAMR pthread/semaphore imports. Set
-`OOS_WASM_MAIN_STACK_BYTES`, `OOS_WASM_WORKER_STACK_BYTES`, and
-`OOS_WASM_MEMORY_BYTES` to override the 512 KiB/2 MiB/64 MiB production policy.
+`OOS_WASM_MEMORY_BYTES` controls the encoded memory maximum and defaults to the
+64 MiB OOS ceiling. The host supplies the 512 KiB WAMR lifecycle execution
+stack. The SDK fixes the one supported guest auxiliary stack at 2 MiB because
+WAMR partitions the linked region at module build time; it cannot be changed
+when a child is instantiated.
 C applications implement the four generated lifecycle exports.
 `c/lvgl/oos_lvgl_backend` uploads either RGB565 dirty rectangles or a
 premultiplied RGBA8888 transparent overlay and returns draw records so an app

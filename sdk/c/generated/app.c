@@ -453,7 +453,7 @@ __attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name
 extern void __wasm_import_oos_platform_subruntime_get_limits(uint8_t *);
 
 __attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("create")))
-extern void __wasm_import_oos_platform_subruntime_create(uint8_t *, size_t, int32_t, int32_t, int64_t, uint8_t *);
+extern void __wasm_import_oos_platform_subruntime_create(uint8_t *, size_t, int32_t, uint8_t *);
 
 __attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("initialize")))
 extern void __wasm_import_oos_platform_subruntime_initialize(int32_t, uint8_t *);
@@ -463,6 +463,12 @@ extern void __wasm_import_oos_platform_subruntime_event(int32_t, int32_t, int32_
 
 __attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("frame")))
 extern void __wasm_import_oos_platform_subruntime_frame(int32_t, int64_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("status")))
+extern void __wasm_import_oos_platform_subruntime_status(int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("complete")))
+extern void __wasm_import_oos_platform_subruntime_complete(int32_t, uint8_t *);
 
 __attribute__((__import_module__("oos:platform/subruntime@0.1.0"), __import_name__("destroy")))
 extern void __wasm_import_oos_platform_subruntime_destroy(int32_t, uint8_t *);
@@ -1067,6 +1073,12 @@ void oos_platform_subruntime_result_u32_error_code_free(oos_platform_subruntime_
 }
 
 void oos_platform_subruntime_result_void_error_code_free(oos_platform_subruntime_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_subruntime_result_child_status_error_code_free(oos_platform_subruntime_result_child_status_error_code_t *ptr) {
   if (!ptr->is_err) {
   } else {
   }
@@ -4287,15 +4299,16 @@ void oos_platform_subruntime_get_limits(oos_platform_subruntime_limits_t *ret) {
     (uint32_t) (uint32_t) (*((int32_t*) (ptr + 0))),
     (uint32_t) (uint32_t) (*((int32_t*) (ptr + 4))),
     (uint32_t) (uint32_t) (*((int32_t*) (ptr + 8))),
+    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 12))),
     (uint64_t) (uint64_t) (*((int64_t*) (ptr + 16))),
   };
 }
 
-bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t worker_stack_bytes, uint64_t memory_limit_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err) {
+bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err) {
   __attribute__((__aligned__(4)))
   uint8_t ret_area[8];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_create((uint8_t *) (*module).ptr, (*module).len, (int32_t) (main_stack_bytes), (int32_t) (worker_stack_bytes), (int64_t) (memory_limit_bytes), ptr);
+  __wasm_import_oos_platform_subruntime_create((uint8_t *) (*module).ptr, (*module).len, (int32_t) (main_stack_bytes), ptr);
   oos_platform_subruntime_result_u32_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -4388,6 +4401,62 @@ bool oos_platform_subruntime_frame(uint32_t handle, uint64_t monotonic_time_us, 
   }
   if (!result.is_err) {
     *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_subruntime_status(uint32_t handle, oos_platform_subruntime_child_status_t *ret, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(4)))
+  uint8_t ret_area[16];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_status((int32_t) (handle), ptr);
+  oos_platform_subruntime_result_child_status_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (oos_platform_subruntime_child_status_t) {
+        (oos_platform_subruntime_child_state_t) (int32_t) *((uint8_t*) (ptr + 4)),
+        (uint32_t) (uint32_t) (*((int32_t*) (ptr + 8))),
+        (uint32_t) (uint32_t) (*((int32_t*) (ptr + 12))),
+      };
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_subruntime_complete(uint32_t result_code, oos_platform_subruntime_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_subruntime_complete((int32_t) (result_code), ptr);
+  oos_platform_subruntime_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
     return 1;
   } else {
     *err = result.val.err;

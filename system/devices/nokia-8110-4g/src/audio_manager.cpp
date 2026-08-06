@@ -273,6 +273,7 @@ public:
       return false;
     }
     paused_ = true;
+    writable_.notify_all();
     return true;
   }
 
@@ -284,6 +285,7 @@ public:
       return false;
     }
     paused_ = false;
+    writable_.notify_all();
     return true;
   }
 
@@ -296,6 +298,7 @@ public:
       buffers_.clear();
       queued_frames_ = 0;
       starvation_armed_ = false;
+      writable_.notify_all();
     }
     if (result == SL_RESULT_SUCCESS && !paused_)
       result = (*play_)->SetPlayState(play_, SL_PLAYSTATE_PLAYING);
@@ -304,6 +307,14 @@ public:
       return false;
     }
     return true;
+  }
+
+  bool waitWritable(int timeout_ms) override {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return writable_.wait_for(
+               lock, std::chrono::milliseconds(timeout_ms),
+               [this] { return paused_ || buffers_.size() < kQueueBuffers; }) &&
+           !paused_;
   }
 
   PcmOutputStatus status() const override {
@@ -334,6 +345,7 @@ private:
     output.queued_frames_ -= output.buffers_.front().frames;
     output.buffers_.pop_front();
     output.starvation_armed_ = output.buffers_.empty();
+    output.writable_.notify_all();
   }
 
   static constexpr size_t kQueueBuffers = 4;
@@ -345,6 +357,7 @@ private:
   SLPlayItf play_ = nullptr;
   SLAndroidSimpleBufferQueueItf queue_ = nullptr;
   mutable std::mutex mutex_;
+  std::condition_variable writable_;
   std::deque<Buffer> buffers_;
   int sample_rate_ = 0;
   int channels_ = 0;

@@ -96,8 +96,11 @@ entrypoint, and per-app memory columns are removed.
 ## Runtime Memory Policy
 
 Memory limits are not package metadata. The production C build defaults to a
-512 KiB lifecycle stack and a 2 MiB worker stack; host launch policy can choose
-other validated values. Stack regions count against the total linear-memory
+512 KiB lifecycle stack and a fixed 2 MiB worker stack. Host launch policy can
+choose the lifecycle stack. Worker stack partitioning is fixed when the module
+is linked, and OOS enforces one 64 MiB encoded/hard memory ceiling. Lower
+32/48 MiB application settings are guest allocator or VM budgets, not host
+instance limits. Stack regions count against the total linear-memory
 budget. The WAMR host-managed heap is disabled because WIT data exchange uses the guest's exported
 `cabi_realloc`; application memory comes from its normal Wasm linear memory.
 Core modules must declare a maximum and all core/AOT instances are limited to

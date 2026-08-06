@@ -240,7 +240,7 @@ struct ServiceProvider::Impl {
   }
 
   struct PcmSlot {
-    std::unique_ptr<hardware::PcmOutput> output;
+    std::shared_ptr<hardware::PcmOutput> output;
     bool app_paused = false;
     bool focus_paused = false;
   };
@@ -305,10 +305,12 @@ bool ServiceProvider::pcmOpen(const hardware::PcmOutputConfig &config,
     auto &slot = impl_->pcm_outputs[index];
     if (slot.output)
       continue;
-    if (!impl_->audio->openPcmOutput(config, slot.output, info)) {
+    std::unique_ptr<hardware::PcmOutput> output;
+    if (!impl_->audio->openPcmOutput(config, output, info)) {
       impl_->pcm_error = impl_->audio->lastError();
       return false;
     }
+    slot.output = std::move(output);
     slot.app_paused = false;
     slot.focus_paused = !impl_->audio_focused;
     if (slot.focus_paused && !slot.output->pause()) {
@@ -381,6 +383,18 @@ bool ServiceProvider::pcmFlush(uint32_t handle) {
   const bool success = output->flush();
   impl_->pcm_error = success ? std::string() : output->lastError();
   return success;
+}
+
+bool ServiceProvider::pcmWaitWritable(uint32_t handle, int timeout_ms) {
+  std::shared_ptr<hardware::PcmOutput> output;
+  {
+    std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+    auto *slot = impl_->pcmSlot(handle);
+    if (!slot)
+      return false;
+    output = slot->output;
+  }
+  return output->waitWritable(timeout_ms);
 }
 
 bool ServiceProvider::pcmStatus(uint32_t handle,

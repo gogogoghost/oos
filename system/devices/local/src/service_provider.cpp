@@ -111,6 +111,13 @@ bool ServiceProvider::pcmFlush(uint32_t handle) {
          impl_->pcm_outputs[handle - 1].open;
 }
 
+bool ServiceProvider::pcmWaitWritable(uint32_t handle, int timeout_ms) {
+  (void)timeout_ms;
+  std::lock_guard<std::mutex> lock(impl_->pcm_mutex);
+  return handle != 0 && handle <= impl_->pcm_outputs.size() &&
+         impl_->pcm_outputs[handle - 1].open;
+}
+
 bool ServiceProvider::pcmStatus(uint32_t handle,
                                 hardware::PcmOutputStatus &status) {
   std::lock_guard<std::mutex> lock(impl_->pcm_mutex);

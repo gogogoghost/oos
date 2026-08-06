@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace oos::hardware {
@@ -212,6 +214,24 @@ public:
       return false;
     }
     return true;
+  }
+
+  bool waitWritable(int timeout_ms) override {
+    if (!stream_ || timeout_ms <= 0 || paused_)
+      return false;
+    const int64_t queued =
+        std::max<int64_t>(0, AAudioStream_getFramesWritten(stream_) -
+                                 AAudioStream_getFramesRead(stream_));
+    if (queued < capacity_frames_)
+      return true;
+    const int32_t sample_rate = AAudioStream_getSampleRate(stream_);
+    const int64_t wait_us =
+        sample_rate > 0 ? std::max<int64_t>(1000, 1000000 / sample_rate) : 1000;
+    std::this_thread::sleep_for(std::chrono::microseconds(
+        std::min<int64_t>(wait_us, static_cast<int64_t>(timeout_ms) * 1000)));
+    return AAudioStream_getFramesWritten(stream_) -
+               AAudioStream_getFramesRead(stream_) <
+           capacity_frames_;
   }
 
   PcmOutputStatus status() const override {

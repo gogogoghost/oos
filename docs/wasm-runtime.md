@@ -46,10 +46,11 @@ and every WIT import run on the OOS event-loop thread. A non-zero
 return, trap, missing export, invalid pointer, invalid draw range, or resource
 limit violation fails that app call instead of passing untrusted data to GLES.
 
-Main stack, worker stack, and total linear-memory limits are host launch policy,
-not manifest fields. The production C profile starts at a 512 KiB lifecycle
-stack and a 2 MiB worker stack; applications with smaller measured needs may
-use lower values. WAMR's optional host-managed heap is disabled; allocation
+The lifecycle execution stack and total linear-memory limit are host launch
+policy, not manifest fields. The production C profile starts at a 512 KiB
+lifecycle stack. Its one guest worker has a fixed 2 MiB auxiliary stack because
+WAMR partitions that region from module linker metadata at build time. WAMR's
+optional host-managed heap is disabled; allocation
 through the generated WIT bindings uses the module's own linear memory and
 exported `cabi_realloc`. Core
 Wasm modules must declare one memory maximum no larger than 64 MiB; unbounded
@@ -160,15 +161,16 @@ An application package may contain named `modules/<name>.wasm` and
 `modules/<name>.aot` files. The `subruntime` interface permits one child at a
 time and prefers AOT. A child inherits the parent's storage and device
 capabilities but owns an independent WAMR instance, worker cluster, stacks, and
-linear memory. All child execution is serialized on a dedicated host thread so
-WAMR execution environments are never re-entered from a parent native callback.
-Destroy joins a live worker, tears down host resources, and releases the entire
-child linear memory.
+linear memory. Creation and activation are deferred until the parent import has
+returned. OOS then suspends the parent and routes lifecycle, input, graphics,
+and device calls to the child on the normal event-loop thread. Child completion,
+exit, failure, and cancellation are explicit states; resuming the parent never
+re-enters it from a native callback. Destroy joins a live worker, tears down host
+resources, and releases the entire child linear memory.
 
 This is the recoverable-memory model for compiler/game workloads. Host stress
-coverage injects allocation failure and a worker WIT trap, then recreates a
-healthy child repeatedly. It also cancels a worker in atomic wait and checks
-`smaps_rollup` PSS after twelve 12 MiB allocation cycles.
+coverage checks deferred activation, event-loop thread affinity, completion,
+stale handles, worker WIT traps, and `smaps_rollup` PSS recovery.
 
 ## WAMR And Components
 

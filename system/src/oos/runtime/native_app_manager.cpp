@@ -75,8 +75,6 @@ bool NativeAppManager::load(const char *id,
 
   WasmAppOptions wasm_options;
   wasm_options.stack_size = options.stack_size;
-  wasm_options.worker_stack_size = options.worker_stack_size;
-  wasm_options.memory_limit_bytes = options.memory_limit_bytes;
   wasm_options.heap_size = options.heap_size;
   wasm_options.wake_fd = options.wake_fd;
   wasm_options.app_id = id;

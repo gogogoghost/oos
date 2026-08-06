@@ -31,6 +31,17 @@ enum class MediaFailure : uint8_t {
   Decoder,
 };
 
+enum class MediaError : uint8_t {
+  None,
+  InvalidArgument,
+  UnsupportedFormat,
+  MalformedData,
+  ResourceExhaustion,
+  Busy,
+  Io,
+  Decoder,
+};
+
 struct MediaSourceLimits {
   uint64_t maximum_source_bytes = 0;
   uint64_t maximum_session_bytes = 0;
@@ -76,6 +87,7 @@ public:
   void closeAll();
 
   const std::string &lastError() const;
+  MediaError lastErrorCode() const;
 
 private:
   class Impl;

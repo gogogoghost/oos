@@ -4,6 +4,7 @@
 #include <fstream>
 #include <malloc.h>
 #include <sstream>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -54,12 +55,26 @@ public:
 
 class FakeGraphics final : public oos::runtime::GraphicsHost {
 public:
-  uint32_t width() const override { return 240; }
-  uint32_t height() const override { return 320; }
-  uint32_t surfaceFormat() const override { return OOS_TEXTURE_RGB565; }
+  FakeGraphics() : owner_thread_(std::this_thread::get_id()) {}
+
+  uint32_t width() const override {
+    checkThread();
+    return 240;
+  }
+  uint32_t height() const override {
+    checkThread();
+    return 320;
+  }
+  uint32_t surfaceFormat() const override {
+    checkThread();
+    return OOS_TEXTURE_RGB565;
+  }
   uint32_t supportedTextureFormats() const override {
+    checkThread();
     return OOS_TEXTURE_FORMAT_MASK;
   }
+
+  bool threadSafe() const { return !thread_violation_; }
 
   bool setTexture(uint32_t texture, uint32_t format, uint32_t x, uint32_t y,
                   uint32_t width, uint32_t height, uint32_t row_stride,
@@ -207,6 +222,15 @@ public:
   std::unordered_set<uint32_t> buffers;
   std::unordered_set<uint32_t> shaders;
   std::unordered_set<uint32_t> programs;
+
+private:
+  void checkThread() const {
+    if (std::this_thread::get_id() != owner_thread_)
+      thread_violation_ = true;
+  }
+
+  std::thread::id owner_thread_;
+  mutable bool thread_violation_ = false;
 };
 
 class MockDevice final : public oos::device::Device {
@@ -300,8 +324,7 @@ int main(int argc, char **argv) {
   uint32_t libc_delay_ms = 0;
   if (!libc_smoke.load("production-libc", argv[9]) ||
       !libc_smoke.activate("production-libc") ||
-      !libc_smoke.render(1'450'000, libc_delay_ms) ||
-      libc_delay_ms != 1000) {
+      !libc_smoke.render(1'450'000, libc_delay_ms) || libc_delay_ms != 1000) {
     std::fprintf(stderr, "production C runtime smoke failed: %s\n",
                  libc_smoke.lastError());
     return 1;
@@ -441,12 +464,18 @@ int main(int argc, char **argv) {
     child_launch.module_directory = argv[8];
     child_launch.font_directory = argv[6];
     uint32_t parent_delay_ms = 0;
-    if (!subruntime_smoke.load("subruntime-smoke", child_launch) ||
-        !subruntime_smoke.activate("subruntime-smoke") ||
-        !subruntime_smoke.render(1'650'000, parent_delay_ms) ||
-        parent_delay_ms != 1000) {
-      std::fprintf(stderr, "ephemeral subruntime smoke failed: %s\n",
-                   subruntime_smoke.lastError());
+    bool subruntime_ok =
+        subruntime_smoke.load("subruntime-smoke", child_launch) &&
+        subruntime_smoke.activate("subruntime-smoke");
+    for (unsigned frame = 0;
+         subruntime_ok && frame < 40 && parent_delay_ms != 1000; ++frame) {
+      subruntime_ok = subruntime_smoke.render(
+          1'650'000 + static_cast<int64_t>(frame) * 17'000, parent_delay_ms);
+    }
+    if (!subruntime_ok || parent_delay_ms != 1000 || !graphics.threadSafe()) {
+      std::fprintf(
+          stderr, "ephemeral subruntime smoke failed: %s delay=%u thread=%d\n",
+          subruntime_smoke.lastError(), parent_delay_ms, graphics.threadSafe());
       return 1;
     }
     subruntime_smoke.shutdown();

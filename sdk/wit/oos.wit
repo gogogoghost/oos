@@ -542,10 +542,26 @@ interface audio {
 interface subruntime {
   use types.{error-code};
 
+  enum child-state {
+    loading,
+    running,
+    completed,
+    exit-requested,
+    failed,
+    cancelled,
+  }
+
+  record child-status {
+    state: child-state,
+    next-frame-delay-ms: u32,
+    result-code: u32,
+  }
+
   record limits {
     maximum-instances: u32,
     minimum-stack-bytes: u32,
     maximum-stack-bytes: u32,
+    effective-worker-stack-bytes: u32,
     maximum-memory-bytes: u64,
   }
 
@@ -554,12 +570,13 @@ interface subruntime {
   create: func(
     module: string,
     main-stack-bytes: u32,
-    worker-stack-bytes: u32,
-    memory-limit-bytes: u64,
   ) -> result<u32, error-code>;
   initialize: func(handle: u32) -> result<_, error-code>;
   event: func(handle: u32, code: u32, action: u32, monotonic-time-us: u64) -> result<_, error-code>;
   frame: func(handle: u32, monotonic-time-us: u64) -> result<u32, error-code>;
+  status: func(handle: u32) -> result<child-status, error-code>;
+  /// Called by a packaged child after it has durably committed its result.
+  complete: func(result-code: u32) -> result<_, error-code>;
   destroy: func(handle: u32) -> result<_, error-code>;
   last-error: func() -> string;
 }
