@@ -23,6 +23,8 @@
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/ui/status_bar_appearance.h"
+#include "oos/ui/system_ui_settings.h"
+#include "oos/ui/system_ui_state.h"
 
 #include <cerrno>
 #include <charconv>
@@ -76,9 +78,8 @@ JSValue unavailable(JSContext *context, ApplicationContext *application,
 
 JSValue failed(JSContext *context, const std::string &message,
                const char *code = "io") {
-  return throwPlatformError(context, code,
-                            message.empty() ? "platform operation failed"
-                                            : message);
+  return throwPlatformError(
+      context, code, message.empty() ? "platform operation failed" : message);
 }
 
 JSValue runtimeAbiVersion(JSContext *context, JSValueConst, int,
@@ -100,20 +101,20 @@ JSValue runtimeWallClockMinutes(JSContext *context, JSValueConst, int,
                                 JSValueConst *) {
   const time_t now = std::time(nullptr);
   tm local = {};
-  const uint32_t value = localtime_r(&now, &local)
-                             ? static_cast<uint32_t>(local.tm_hour * 60 +
-                                                     local.tm_min)
-                             : 0;
+  const uint32_t value =
+      localtime_r(&now, &local)
+          ? static_cast<uint32_t>(local.tm_hour * 60 + local.tm_min)
+          : 0;
   return JS_NewUint32(context, value);
 }
 
 JSValue runtimeWallClockTime(JSContext *context, JSValueConst, int,
                              JSValueConst *) {
   timespec now = {};
-  const int64_t value = ::clock_gettime(CLOCK_REALTIME, &now) == 0
-                            ? static_cast<int64_t>(now.tv_sec) * 1000LL +
-                                  now.tv_nsec / 1000000
-                            : 0;
+  const int64_t value =
+      ::clock_gettime(CLOCK_REALTIME, &now) == 0
+          ? static_cast<int64_t>(now.tv_sec) * 1000LL + now.tv_nsec / 1000000
+          : 0;
   return JS_NewBigInt64(context, value);
 }
 
@@ -161,10 +162,10 @@ JSValue runtimeSetSurfaceMode(JSContext *context, JSValueConst, int argc,
   auto *status_bar = application ? application->statusBar() : nullptr;
   const bool normal = mode && std::strcmp(mode, "normal") == 0;
   const bool immersive = mode && std::strcmp(mode, "immersive") == 0;
-  const bool success = status_bar && (normal || immersive) &&
-                       status_bar->setSurfaceMode(
-                           normal ? ui::SurfaceMode::Normal
-                                  : ui::SurfaceMode::Immersive);
+  const bool success =
+      status_bar && (normal || immersive) &&
+      status_bar->setSurfaceMode(normal ? ui::SurfaceMode::Normal
+                                        : ui::SurfaceMode::Immersive);
   if (mode)
     JS_FreeCString(context, mode);
   if (!success)
@@ -179,11 +180,10 @@ JSValue runtimeLog(JSContext *context, JSValueConst, int argc,
     return JS_ThrowTypeError(context, "log expects a level and message");
   const char *level = JS_ToCString(context, argv[0]);
   const char *message = JS_ToCString(context, argv[1]);
-  const bool valid = level && message &&
-                     (std::strcmp(level, "debug") == 0 ||
-                      std::strcmp(level, "info") == 0 ||
-                      std::strcmp(level, "warn") == 0 ||
-                      std::strcmp(level, "error") == 0);
+  const bool valid =
+      level && message &&
+      (std::strcmp(level, "debug") == 0 || std::strcmp(level, "info") == 0 ||
+       std::strcmp(level, "warn") == 0 || std::strcmp(level, "error") == 0);
   if (valid)
     std::fprintf(stderr, "[js:%s] %s\n", level, message);
   if (level)
@@ -302,8 +302,8 @@ bool setU64(JSContext *context, JSValue object, const char *name,
 }
 
 bool setBool(JSContext *context, JSValue object, const char *name, bool value) {
-  return JS_SetPropertyStr(context, object, name,
-                           JS_NewBool(context, value)) >= 0;
+  return JS_SetPropertyStr(context, object, name, JS_NewBool(context, value)) >=
+         0;
 }
 
 bool int32Argument(JSContext *context, JSValueConst value, int32_t &result) {
@@ -344,8 +344,8 @@ bool getStringProperty(JSContext *context, JSValueConst object,
                        const char *name, std::string &result,
                        size_t maximum = 4096) {
   JSValue value = JS_GetPropertyStr(context, object, name);
-  const bool valid = !JS_IsException(value) &&
-                     stringArgument(context, value, result, maximum);
+  const bool valid =
+      !JS_IsException(value) && stringArgument(context, value, result, maximum);
   JS_FreeValue(context, value);
   return valid;
 }
@@ -353,8 +353,8 @@ bool getStringProperty(JSContext *context, JSValueConst object,
 bool getU32Property(JSContext *context, JSValueConst object, const char *name,
                     uint32_t &result) {
   JSValue value = JS_GetPropertyStr(context, object, name);
-  const bool valid = !JS_IsException(value) &&
-                     uint32Argument(context, value, result);
+  const bool valid =
+      !JS_IsException(value) && uint32Argument(context, value, result);
   JS_FreeValue(context, value);
   return valid;
 }
@@ -402,7 +402,8 @@ JSValue jsDeviceDescriptor(JSContext *context, JSValueConst, int,
   ApplicationContext *application = applicationFor(context);
   device::Device *target = application ? application->device() : nullptr;
   const device::DeviceDescriptor empty = {};
-  const device::DeviceDescriptor &descriptor = target ? target->descriptor() : empty;
+  const device::DeviceDescriptor &descriptor =
+      target ? target->descriptor() : empty;
   JSValue result = JS_NewObject(context);
   if (JS_IsException(result))
     return result;
@@ -425,10 +426,10 @@ JSValue jsDeviceCapability(JSContext *context, JSValueConst, int argc,
   if (argc < 1 || !uint32Argument(context, argv[0], feature) ||
       feature >= static_cast<uint32_t>(device::Feature::Count))
     return JS_ThrowRangeError(context, "invalid device feature");
-  return JS_NewUint32(
-      context, target ? static_cast<uint32_t>(target->capability(
-                            static_cast<device::Feature>(feature)))
-                      : 0);
+  return JS_NewUint32(context, target
+                                   ? static_cast<uint32_t>(target->capability(
+                                         static_cast<device::Feature>(feature)))
+                                   : 0);
 }
 
 JSValue jsDeviceAccess(JSContext *context, JSValueConst, int argc,
@@ -475,11 +476,11 @@ JSValue jsKvSet(JSContext *context, JSValueConst, int argc,
   const uint8_t *bytes = nullptr;
   size_t size = 0;
   JSValue backing = JS_UNDEFINED;
-  const bool valid = argc >= 2 && stringArgument(context, argv[0], key, 1024) &&
-                     bytesArgument(context, argv[1], bytes, size, backing,
-                                   4 * 1024 * 1024);
-  const bool success = valid && storage &&
-                       storage->set(key, size ? bytes : nullptr, size);
+  const bool valid =
+      argc >= 2 && stringArgument(context, argv[0], key, 1024) &&
+      bytesArgument(context, argv[1], bytes, size, backing, 4 * 1024 * 1024);
+  const bool success =
+      valid && storage && storage->set(key, size ? bytes : nullptr, size);
   JS_FreeValue(context, backing);
   if (!valid)
     return JS_ThrowTypeError(context, "kvSet expects a key and byte array");
@@ -550,7 +551,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::Prepare: {
     if (argc < 2 || !stringArgument(context, argv[0], first, 255) ||
         !stringArgument(context, argv[1], second, 256 * 1024))
-      return JS_ThrowTypeError(context, "database operation expects name and SQL");
+      return JS_ThrowTypeError(context,
+                               "database operation expects name and SQL");
     uint32_t result = 0;
     success = operation == DatabaseOperation::Execute
                   ? storage->databaseExecute(first, second, result)
@@ -566,7 +568,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::BindBlob:
     if (argc < 2 || !uint32Argument(context, argv[0], handle) ||
         !uint32Argument(context, argv[1], index))
-      return JS_ThrowTypeError(context, "statement binding expects handle and index");
+      return JS_ThrowTypeError(context,
+                               "statement binding expects handle and index");
     if (operation == DatabaseOperation::BindNull) {
       success = storage->statementBindNull(handle, index);
     } else if (operation == DatabaseOperation::BindInteger) {
@@ -577,7 +580,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
     } else if (operation == DatabaseOperation::BindFloat) {
       double value = 0;
       if (argc < 3 || !doubleArgument(context, argv[2], value))
-        return JS_ThrowTypeError(context, "float binding expects a finite number");
+        return JS_ThrowTypeError(context,
+                                 "float binding expects a finite number");
       success = storage->statementBindFloat(handle, index, value);
     } else if (operation == DatabaseOperation::BindText) {
       if (argc < 3 || !stringArgument(context, argv[2], first))
@@ -607,7 +611,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   }
   case DatabaseOperation::ColumnCount: {
     if (argc < 1 || !uint32Argument(context, argv[0], handle))
-      return JS_ThrowTypeError(context, "statementColumnCount expects a handle");
+      return JS_ThrowTypeError(context,
+                               "statementColumnCount expects a handle");
     uint32_t count = 0;
     if (!storage->statementColumnCount(handle, count))
       return failed(context, storage->lastError());
@@ -616,7 +621,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::ColumnKind: {
     if (argc < 2 || !uint32Argument(context, argv[0], handle) ||
         !uint32Argument(context, argv[1], index))
-      return JS_ThrowTypeError(context, "column operation expects handle and index");
+      return JS_ThrowTypeError(context,
+                               "column operation expects handle and index");
     storage::SqlValueKind kind = storage::SqlValueKind::Null;
     if (!storage->statementColumnKind(handle, index, kind))
       return failed(context, storage->lastError());
@@ -625,7 +631,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::ColumnInteger: {
     if (argc < 2 || !uint32Argument(context, argv[0], handle) ||
         !uint32Argument(context, argv[1], index))
-      return JS_ThrowTypeError(context, "column operation expects handle and index");
+      return JS_ThrowTypeError(context,
+                               "column operation expects handle and index");
     int64_t value = 0;
     if (!storage->statementColumnInt64(handle, index, value))
       return failed(context, storage->lastError());
@@ -634,7 +641,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::ColumnFloat: {
     if (argc < 2 || !uint32Argument(context, argv[0], handle) ||
         !uint32Argument(context, argv[1], index))
-      return JS_ThrowTypeError(context, "column operation expects handle and index");
+      return JS_ThrowTypeError(context,
+                               "column operation expects handle and index");
     double value = 0;
     if (!storage->statementColumnDouble(handle, index, value))
       return failed(context, storage->lastError());
@@ -643,7 +651,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::ColumnText: {
     if (argc < 2 || !uint32Argument(context, argv[0], handle) ||
         !uint32Argument(context, argv[1], index))
-      return JS_ThrowTypeError(context, "column operation expects handle and index");
+      return JS_ThrowTypeError(context,
+                               "column operation expects handle and index");
     std::string value;
     if (!storage->statementColumnText(handle, index, value))
       return failed(context, storage->lastError());
@@ -652,7 +661,8 @@ JSValue jsDatabase(JSContext *context, JSValueConst, int argc,
   case DatabaseOperation::ColumnBlob: {
     if (argc < 2 || !uint32Argument(context, argv[0], handle) ||
         !uint32Argument(context, argv[1], index))
-      return JS_ThrowTypeError(context, "column operation expects handle and index");
+      return JS_ThrowTypeError(context,
+                               "column operation expects handle and index");
     std::vector<uint8_t> value;
     if (!storage->statementColumnBlob(handle, index, value))
       return failed(context, storage->lastError());
@@ -678,8 +688,8 @@ bool deviceStorageVolume(JSContext *context, JSValueConst value,
   return true;
 }
 
-storage::DeviceStorageService *deviceStorageFor(
-    JSContext *context, uint32_t permission, JSValue &failure) {
+storage::DeviceStorageService *
+deviceStorageFor(JSContext *context, uint32_t permission, JSValue &failure) {
   ApplicationContext *application = applicationFor(context);
   if (!application || !application->permissionGranted(permission)) {
     failure = unavailable(context, application, permission, "device storage");
@@ -733,7 +743,8 @@ JSValue jsDeviceStorageRead(JSContext *context, JSValueConst, int argc,
   if (!service)
     return failure;
   std::vector<uint8_t> bytes;
-  if (!service->read(volume, path, bytes) || bytes.size() > kMaximumStorageBytes)
+  if (!service->read(volume, path, bytes) ||
+      bytes.size() > kMaximumStorageBytes)
     return failed(context, service->lastError());
   return newBytes(context, bytes.data(), bytes.size());
 }
@@ -746,12 +757,12 @@ JSValue jsDeviceStorageWrite(JSContext *context, JSValueConst, int argc,
   const uint8_t *bytes = nullptr;
   size_t size = 0;
   JSValue backing = JS_UNDEFINED;
-  const bool valid =
-      argc >= 4 && deviceStorageVolume(context, argv[0], volume) &&
-      stringArgument(context, argv[1], path, 4096) &&
-      apps::validPackagePath(path) && path.back() != '/' &&
-      uint32Argument(context, argv[2], mode) && mode <= 2 &&
-      bytesArgument(context, argv[3], bytes, size, backing);
+  const bool valid = argc >= 4 &&
+                     deviceStorageVolume(context, argv[0], volume) &&
+                     stringArgument(context, argv[1], path, 4096) &&
+                     apps::validPackagePath(path) && path.back() != '/' &&
+                     uint32Argument(context, argv[2], mode) && mode <= 2 &&
+                     bytesArgument(context, argv[3], bytes, size, backing);
   if (!valid) {
     JS_FreeValue(context, backing);
     return JS_ThrowTypeError(context, "invalid device storage write arguments");
@@ -761,10 +772,11 @@ JSValue jsDeviceStorageWrite(JSContext *context, JSValueConst, int argc,
                 : apps::DeviceServicePermission::DeviceStorageWrite);
   JSValue failure = JS_UNDEFINED;
   auto *service = deviceStorageFor(context, permission, failure);
-  const bool success = service && service->write(
-                                      volume, path,
-                                      static_cast<storage::DeviceStorageWriteMode>(mode),
-                                      size ? bytes : nullptr, size);
+  const bool success =
+      service &&
+      service->write(volume, path,
+                     static_cast<storage::DeviceStorageWriteMode>(mode),
+                     size ? bytes : nullptr, size);
   JS_FreeValue(context, backing);
   if (!service)
     return failure;
@@ -826,12 +838,11 @@ JSValue jsFontLoad(JSContext *context, JSValueConst, int argc,
   auto status = service->fileSize(static_cast<resources::FontRole>(role), size);
   if (status != resources::FontAssetStatus::Ok ||
       size > resources::FontAssetService::kMaximumFontBytes)
-    return failed(context, service->lastError(),
-                  status == resources::FontAssetStatus::Unavailable
-                      ? "unavailable"
-                      : status == resources::FontAssetStatus::LimitExceeded
-                            ? "limit-exceeded"
-                            : "io");
+    return failed(
+        context, service->lastError(),
+        status == resources::FontAssetStatus::Unavailable     ? "unavailable"
+        : status == resources::FontAssetStatus::LimitExceeded ? "limit-exceeded"
+                                                              : "io");
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
   size_t read = 0;
   status = service->readInto(static_cast<resources::FontRole>(role),
@@ -917,16 +928,145 @@ JSValue jsSystemRequest(JSContext *context, JSValueConst, int argc,
                                   payload, response, true);
   if (status == 0)
     return JS_NewStringLen(context, response.data(), response.size());
-  const char *code = status == -EINVAL  ? "invalid-argument"
+  const char *code = status == -EINVAL ? "invalid-argument"
                      : status == -EACCES || status == -EPERM
                          ? "permission-denied"
-                     : status == -ENOSYS || status == -ENOTSUP
-                         ? "unavailable"
-                     : status == -E2BIG      ? "limit-exceeded"
-                     : status == -EBUSY      ? "busy"
-                     : status == -ETIMEDOUT  ? "timeout"
-                                             : "io";
+                     : status == -ENOSYS || status == -ENOTSUP ? "unavailable"
+                     : status == -E2BIG     ? "limit-exceeded"
+                     : status == -EBUSY     ? "busy"
+                     : status == -ETIMEDOUT ? "timeout"
+                                            : "io";
   return failed(context, hub->lastError(), code);
+}
+
+JSValue jsApplicationsList(JSContext *context, JSValueConst, int,
+                           JSValueConst *) {
+  ApplicationContext *application = applicationFor(context);
+  std::vector<ApplicationInfo> applications;
+  if (!application || !application->listApplications(applications))
+    return failed(context,
+                  application ? application->lastError()
+                              : "application context is unavailable",
+                  "permission-denied");
+  JSValue result = JS_NewArray(context);
+  if (JS_IsException(result))
+    return result;
+  for (uint32_t index = 0; index < applications.size(); ++index) {
+    const ApplicationInfo &info = applications[index];
+    JSValue item = JS_NewObject(context);
+    if (JS_IsException(item) || !setString(context, item, "id", info.id) ||
+        !setString(context, item, "name", info.name) ||
+        !setString(context, item, "version", info.version) ||
+        !setString(context, item, "runtime",
+                   apps::appRuntimeKindName(info.runtime)) ||
+        !setBool(context, item, "enabled", info.enabled) ||
+        JS_SetPropertyUint32(context, result, index, item) < 0) {
+      JS_FreeValue(context, item);
+      JS_FreeValue(context, result);
+      return JS_EXCEPTION;
+    }
+  }
+  return result;
+}
+
+JSValue jsSystemUiSnapshot(JSContext *context, JSValueConst, int,
+                           JSValueConst *) {
+  ApplicationContext *application = applicationFor(context);
+  const uint32_t permission =
+      apps::permissionBit(apps::DeviceServicePermission::SystemUi);
+  ui::SystemUiState *state =
+      application && application->permissionGranted(permission)
+          ? application->systemUiState()
+          : nullptr;
+  std::string snapshot;
+  if (!state || !state->snapshotJson(snapshot))
+    return unavailable(context, application, permission, "system UI state");
+  return JS_NewStringLen(context, snapshot.data(), snapshot.size());
+}
+
+JSValue jsSystemUiSetLocked(JSContext *context, JSValueConst, int argc,
+                            JSValueConst *argv) {
+  ApplicationContext *application = applicationFor(context);
+  const uint32_t permission =
+      apps::permissionBit(apps::DeviceServicePermission::SystemUi);
+  ui::SystemUiState *state =
+      application && application->permissionGranted(permission)
+          ? application->systemUiState()
+          : nullptr;
+  const int locked = argc > 0 ? JS_ToBool(context, argv[0]) : -1;
+  if (!state)
+    return unavailable(context, application, permission, "system UI state");
+  if (locked < 0)
+    return JS_ThrowTypeError(context, "setLocked expects a boolean");
+  state->setLocked(locked != 0);
+  return JS_UNDEFINED;
+}
+
+JSValue jsSystemSettingsGetStatusBar(JSContext *context, JSValueConst, int,
+                                     JSValueConst *) {
+  ApplicationContext *application = applicationFor(context);
+  const uint32_t permission =
+      apps::permissionBit(apps::DeviceServicePermission::SystemSettings);
+  ui::SystemUiSettings *settings =
+      application && application->permissionGranted(permission)
+          ? application->systemUiSettings()
+          : nullptr;
+  if (!settings)
+    return unavailable(context, application, permission, "system settings");
+  const ui::StatusBarPreferences &preferences = settings->statusBar();
+  JSValue result = JS_NewObject(context);
+  if (JS_IsException(result) ||
+      !setBool(context, result, "showClock", preferences.show_clock) ||
+      !setBool(context, result, "showNetwork", preferences.show_network) ||
+      !setBool(context, result, "showBatteryPercentage",
+               preferences.show_battery_percentage) ||
+      !setU64(context, result, "revision", preferences.revision)) {
+    JS_FreeValue(context, result);
+    return JS_EXCEPTION;
+  }
+  return result;
+}
+
+JSValue jsSystemSettingsSetStatusBar(JSContext *context, JSValueConst, int argc,
+                                     JSValueConst *argv) {
+  ApplicationContext *application = applicationFor(context);
+  const uint32_t permission =
+      apps::permissionBit(apps::DeviceServicePermission::SystemSettings);
+  ui::SystemUiSettings *settings =
+      application && application->permissionGranted(permission)
+          ? application->systemUiSettings()
+          : nullptr;
+  if (!settings)
+    return unavailable(context, application, permission, "system settings");
+  if (argc < 3)
+    return JS_ThrowTypeError(context, "setStatusBar expects three booleans");
+  const int show_clock = JS_ToBool(context, argv[0]);
+  const int show_network = JS_ToBool(context, argv[1]);
+  const int show_battery_percentage = JS_ToBool(context, argv[2]);
+  if (show_clock < 0 || show_network < 0 || show_battery_percentage < 0)
+    return JS_EXCEPTION;
+  if (!settings->setStatusBar(show_clock != 0, show_network != 0,
+                              show_battery_percentage != 0))
+    return failed(context, settings->lastError());
+  return JS_UNDEFINED;
+}
+
+JSValue jsApplicationAction(JSContext *context, JSValueConst, int argc,
+                            JSValueConst *argv, int magic) {
+  ApplicationContext *application = applicationFor(context);
+  std::string app_id;
+  if (argc < 1 || !stringArgument(context, argv[0], app_id, 128))
+    return JS_ThrowTypeError(context, "application action expects an app id");
+  const bool success =
+      application &&
+      (magic == 0 ? application->requestApplicationLaunch(app_id)
+                  : application->requestApplicationUninstall(app_id));
+  if (!success)
+    return failed(context,
+                  application ? application->lastError()
+                              : "application context is unavailable",
+                  "permission-denied");
+  return JS_UNDEFINED;
 }
 
 JSValue audioStreamObject(JSContext *context,
@@ -1025,12 +1165,13 @@ JSValue jsPcmWrite(JSContext *context, JSValueConst, int argc,
                    JSValueConst *argv) {
   uint32_t handle = 0;
   if (argc < 2 || !uint32Argument(context, argv[0], handle))
-    return JS_ThrowTypeError(context, "pcmWrite expects a handle and Int16Array");
+    return JS_ThrowTypeError(context,
+                             "pcmWrite expects a handle and Int16Array");
   size_t byte_offset = 0;
   size_t byte_length = 0;
   size_t bytes_per_element = 0;
-  JSValue backing = JS_GetTypedArrayBuffer(
-      context, argv[1], &byte_offset, &byte_length, &bytes_per_element);
+  JSValue backing = JS_GetTypedArrayBuffer(context, argv[1], &byte_offset,
+                                           &byte_length, &bytes_per_element);
   size_t backing_size = 0;
   uint8_t *bytes = JS_IsException(backing)
                        ? nullptr
@@ -1041,8 +1182,8 @@ JSValue jsPcmWrite(JSContext *context, JSValueConst, int argc,
                      byte_length % sizeof(int16_t) == 0 &&
                      byte_length <= 4 * 1024 * 1024;
   JSValue failure = JS_UNDEFINED;
-  auto *service = valid ? serviceFor(context, 0, "audio playback", failure)
-                        : nullptr;
+  auto *service =
+      valid ? serviceFor(context, 0, "audio playback", failure) : nullptr;
   hardware::PcmOutputStatus status;
   int64_t accepted = 0;
   const size_t sample_count = byte_length / sizeof(int16_t);
@@ -1111,7 +1252,8 @@ JSValue jsAudioHandle(JSContext *context, JSValueConst, int argc,
       double volume = 0;
       if (argc < 2 || !doubleArgument(context, argv[1], volume) || volume < 0 ||
           volume > 1)
-        return JS_ThrowRangeError(context, "volume must be between zero and one");
+        return JS_ThrowRangeError(context,
+                                  "volume must be between zero and one");
       success = service->pcmSetVolume(handle, static_cast<float>(volume));
     } else if (operation == AudioHandleOperation::PcmPause) {
       success = service->pcmPause(handle);
@@ -1197,7 +1339,8 @@ JSValue jsAudioOpen(JSContext *context, JSValueConst, int argc,
     uint32_t usage = 0;
     if (argc < 2 || !stringArgument(context, argv[0], path, 1024) ||
         !uint32Argument(context, argv[1], usage) || usage > 4)
-      return JS_ThrowTypeError(context, "playerOpenAsset expects path and usage");
+      return JS_ThrowTypeError(context,
+                               "playerOpenAsset expects path and usage");
     if (!media->openAsset(path, static_cast<hardware::AudioUsage>(usage),
                           handle))
       return failed(context, media->lastError());
@@ -1210,13 +1353,15 @@ JSValue jsAudioOpen(JSContext *context, JSValueConst, int argc,
     const bool valid = argc >= 3 &&
                        bytesArgument(context, argv[0], bytes, size, backing,
                                      16 * 1024 * 1024) &&
-                       size != 0 && stringArgument(context, argv[1], mime, 128) &&
+                       size != 0 &&
+                       stringArgument(context, argv[1], mime, 128) &&
                        stringArgument(context, argv[2], hint, 1024);
-    const bool success = valid && media->createSource(bytes, size, mime, hint,
-                                                       handle);
+    const bool success =
+        valid && media->createSource(bytes, size, mime, hint, handle);
     JS_FreeValue(context, backing);
     if (!valid)
-      return JS_ThrowTypeError(context, "sourceCreate expects bytes, MIME and locator");
+      return JS_ThrowTypeError(context,
+                               "sourceCreate expects bytes, MIME and locator");
     if (!success)
       return failed(context, media->lastError());
   } else {
@@ -1224,7 +1369,8 @@ JSValue jsAudioOpen(JSContext *context, JSValueConst, int argc,
     uint32_t usage = 0;
     if (argc < 2 || !uint32Argument(context, argv[0], source) ||
         !uint32Argument(context, argv[1], usage) || usage > 4)
-      return JS_ThrowTypeError(context, "playerOpenSource expects source and usage");
+      return JS_ThrowTypeError(context,
+                               "playerOpenSource expects source and usage");
     if (!media->openSource(source, static_cast<hardware::AudioUsage>(usage),
                            handle))
       return failed(context, media->lastError());
@@ -1262,7 +1408,8 @@ JSValue jsRecordWav(JSContext *context, JSValueConst, int argc,
   uint32_t duration = 0;
   if (argc < 2 || !stringArgument(context, argv[0], path, 4096) ||
       !uint32Argument(context, argv[1], duration) || duration > kMaximumWaitMs)
-    return JS_ThrowTypeError(context, "recordWav expects path and bounded duration");
+    return JS_ThrowTypeError(context,
+                             "recordWav expects path and bounded duration");
   const uint32_t permission =
       apps::permissionBit(apps::DeviceServicePermission::AudioCapture);
   JSValue failure = JS_UNDEFINED;
@@ -1286,10 +1433,12 @@ JSValue jsRecordWav(JSContext *context, JSValueConst, int argc,
 JSValue jsAudioLastError(JSContext *context, JSValueConst, int,
                          JSValueConst *) {
   ApplicationContext *application = applicationFor(context);
-  media::MediaService *media = application ? application->activeMedia() : nullptr;
+  media::MediaService *media =
+      application ? application->activeMedia() : nullptr;
   if (media && !media->lastError().empty())
     return JS_NewString(context, media->lastError().c_str());
-  device::ServiceProvider *service = application ? application->services() : nullptr;
+  device::ServiceProvider *service =
+      application ? application->services() : nullptr;
   const std::string value = !service ? "service unavailable"
                             : service->lastError().empty()
                                 ? "service ready"
@@ -1300,7 +1449,8 @@ JSValue jsAudioLastError(JSContext *context, JSValueConst, int,
 JSValue jsServiceLastError(JSContext *context, JSValueConst, int,
                            JSValueConst *) {
   ApplicationContext *application = applicationFor(context);
-  device::ServiceProvider *service = application ? application->services() : nullptr;
+  device::ServiceProvider *service =
+      application ? application->services() : nullptr;
   const std::string value = !service ? "service unavailable"
                             : service->lastError().empty()
                                 ? "service ready"
@@ -1349,9 +1499,8 @@ JSValue jsCameraTorch(JSContext *context, JSValueConst, int argc,
   auto *service = serviceFor(context, permission, "camera", failure);
   if (!service)
     return failure;
-  return service->setTorch(id, enabled)
-             ? JS_UNDEFINED
-             : failed(context, service->lastError());
+  return service->setTorch(id, enabled) ? JS_UNDEFINED
+                                        : failed(context, service->lastError());
 }
 
 JSValue jsCameraCapture(JSContext *context, JSValueConst, int argc,
@@ -1457,7 +1606,8 @@ JSValue jsPowerOperation(JSContext *context, JSValueConst, int argc,
   case PowerOperation::AcquireWakeLock:
   case PowerOperation::ReleaseWakeLock: {
     std::string name;
-    if (argc < 1 || !stringArgument(context, argv[0], name, 128) || name.empty())
+    if (argc < 1 || !stringArgument(context, argv[0], name, 128) ||
+        name.empty())
       return JS_ThrowTypeError(context, "wake lock expects a bounded name");
     success = operation == PowerOperation::AcquireWakeLock
                   ? application->acquireWakeLock(name)
@@ -1537,7 +1687,7 @@ JSValue wifiStatusObject(JSContext *context,
   return result;
 }
 
-enum class WifiQuery { Status, Scan, Networks };
+enum class WifiQuery { Enabled, Status, Scan, Networks };
 
 JSValue jsWifiQuery(JSContext *context, JSValueConst, int argc,
                     JSValueConst *argv, int magic) {
@@ -1548,6 +1698,12 @@ JSValue jsWifiQuery(JSContext *context, JSValueConst, int argc,
   if (!service)
     return failure;
   const auto operation = static_cast<WifiQuery>(magic);
+  if (operation == WifiQuery::Enabled) {
+    bool enabled = false;
+    return service->wifiEnabled(enabled)
+               ? JS_NewBool(context, enabled)
+               : failed(context, service->lastError());
+  }
   if (operation == WifiQuery::Status) {
     network::WifiStatus status;
     return service->wifiStatus(status) ? wifiStatusObject(context, status)
@@ -1588,7 +1744,15 @@ JSValue jsWifiQuery(JSContext *context, JSValueConst, int argc,
   return result;
 }
 
-enum class WifiAction { Connect, Disconnect, Reconnect, Forget, Save };
+enum class WifiAction {
+  SetEnabled,
+  Connect,
+  Disconnect,
+  Reconnect,
+  Select,
+  Forget,
+  Save
+};
 
 JSValue jsWifiAction(JSContext *context, JSValueConst, int argc,
                      JSValueConst *argv, int magic) {
@@ -1600,6 +1764,15 @@ JSValue jsWifiAction(JSContext *context, JSValueConst, int argc,
     return failure;
   const auto operation = static_cast<WifiAction>(magic);
   bool success = false;
+  if (operation == WifiAction::SetEnabled) {
+    if (argc < 1)
+      return JS_ThrowTypeError(context, "setEnabled expects a boolean");
+    const int enabled = JS_ToBool(context, argv[0]);
+    if (enabled < 0)
+      return JS_EXCEPTION;
+    success = service->wifiSetEnabled(enabled != 0);
+    return success ? JS_UNDEFINED : failed(context, service->lastError());
+  }
   if (operation == WifiAction::Connect) {
     std::string ssid;
     std::string credential;
@@ -1624,8 +1797,9 @@ JSValue jsWifiAction(JSContext *context, JSValueConst, int argc,
   else {
     int32_t network = -1;
     if (argc < 1 || !int32Argument(context, argv[0], network))
-      return JS_ThrowTypeError(context, "wifi forget expects a network id");
-    success = service->wifiForget(network);
+      return JS_ThrowTypeError(context, "wifi action expects a network id");
+    success = operation == WifiAction::Select ? service->wifiSelect(network)
+                                              : service->wifiForget(network);
   }
   return success ? JS_UNDEFINED : failed(context, service->lastError());
 }
@@ -1675,7 +1849,8 @@ JSValue jsIpDhcp(JSContext *context, JSValueConst, int argc,
 JSValue jsIpStatic(JSContext *context, JSValueConst, int argc,
                    JSValueConst *argv) {
   if (argc < 1 || !JS_IsObject(argv[0]))
-    return JS_ThrowTypeError(context, "useStatic expects a configuration object");
+    return JS_ThrowTypeError(context,
+                             "useStatic expects a configuration object");
   network::IpConfiguration configuration;
   uint32_t prefix = 0;
   if (!getStringProperty(context, argv[0], "interfaceName",
@@ -1716,8 +1891,8 @@ enum class BluetoothOperation {
 
 network::BluetoothProfile bluetoothProfile(uint32_t value) {
   return static_cast<network::BluetoothProfile>(value == 0   ? 0x03
-                                                   : value == 1 ? 0x05
-                                                                : 0x06);
+                                                : value == 1 ? 0x05
+                                                             : 0x06);
 }
 
 JSValue jsBluetooth(JSContext *context, JSValueConst, int argc,
@@ -1760,10 +1935,10 @@ JSValue jsBluetooth(JSContext *context, JSValueConst, int argc,
       setI32(context, item, "rssi", devices[index].rssi);
       setU32(context, item, "deviceClass", devices[index].device_class);
       setI32(context, item, "deviceType", devices[index].device_type);
-      JS_SetPropertyStr(
-          context, item, "advertisingData",
-          newBytes(context, devices[index].advertising_data.data(),
-                   devices[index].advertising_data.size()));
+      JS_SetPropertyStr(context, item, "advertisingData",
+                        newBytes(context,
+                                 devices[index].advertising_data.data(),
+                                 devices[index].advertising_data.size()));
       JS_SetPropertyUint32(context, result, index, item);
     }
     return result;
@@ -1797,16 +1972,17 @@ JSValue jsBluetooth(JSContext *context, JSValueConst, int argc,
     if (argc < 2 || !uint32Argument(context, argv[1], profile) || profile > 2)
       return JS_ThrowRangeError(context, "invalid bluetooth profile");
     if (operation == BluetoothOperation::ProfileConnect) {
-      success = service->bluetoothProfileConnect(address,
-                                                  bluetoothProfile(profile));
+      success =
+          service->bluetoothProfileConnect(address, bluetoothProfile(profile));
     } else if (operation == BluetoothOperation::ProfileDisconnect) {
-      success = service->bluetoothProfileDisconnect(
-          address, bluetoothProfile(profile));
+      success = service->bluetoothProfileDisconnect(address,
+                                                    bluetoothProfile(profile));
     } else {
       uint32_t hold = 0;
       if (argc < 3 || !uint32Argument(context, argv[2], hold) ||
           hold > kMaximumWaitMs)
-        return JS_ThrowRangeError(context, "invalid bluetooth profile hold time");
+        return JS_ThrowRangeError(context,
+                                  "invalid bluetooth profile hold time");
       success = service->bluetoothProfileConnectionCycle(
           address, bluetoothProfile(profile), hold);
     }
@@ -1852,7 +2028,8 @@ JSValue jsModemSnapshot(JSContext *context, JSValueConst, int argc,
   if (!service)
     return failure;
   modem::ModemSnapshot snapshot;
-  if (!service->modemSnapshot(snapshot, timeout) || snapshot.requests.size() > 256)
+  if (!service->modemSnapshot(snapshot, timeout) ||
+      snapshot.requests.size() > 256)
     return failed(context, service->lastError());
   JSValue result = JS_NewObject(context);
   setBool(context, result, "serviceConnected", snapshot.service_connected);
@@ -1911,7 +2088,8 @@ JSValue jsModemSnapshot(JSContext *context, JSValueConst, int argc,
          snapshot.voice_radio_technology);
   setI32(context, result, "currentCallCount", snapshot.current_call_count);
   setI32(context, result, "dataCallCount", snapshot.data_call_count);
-  setI32(context, result, "hardwareConfigCount", snapshot.hardware_config_count);
+  setI32(context, result, "hardwareConfigCount",
+         snapshot.hardware_config_count);
   setU32(context, result, "radioAccessFamily", snapshot.radio_access_family);
   setString(context, result, "logicalModemUuid", snapshot.logical_modem_uuid);
   JSValue requests = JS_NewArray(context);
@@ -1994,9 +2172,8 @@ struct Export {
       : name(next_name), function(next_function), arguments(next_arguments),
         magic(next_magic), uses_magic(next_uses_magic) {}
 
-  constexpr Export(const char *next_name,
-                   JSCFunctionMagic *next_function, int next_arguments,
-                   int next_magic, bool next_uses_magic)
+  constexpr Export(const char *next_name, JSCFunctionMagic *next_function,
+                   int next_arguments, int next_magic, bool next_uses_magic)
       : name(next_name), magic_function(next_function),
         arguments(next_arguments), magic(next_magic),
         uses_magic(next_uses_magic) {}
@@ -2027,8 +2204,8 @@ constexpr Export kStorageExports[] = {
      static_cast<int>(DatabaseOperation::BindText), true},
     {"statementBindBlob", jsDatabase, 3,
      static_cast<int>(DatabaseOperation::BindBlob), true},
-    {"statementStep", jsDatabase, 1,
-     static_cast<int>(DatabaseOperation::Step), true},
+    {"statementStep", jsDatabase, 1, static_cast<int>(DatabaseOperation::Step),
+     true},
     {"statementColumnCount", jsDatabase, 1,
      static_cast<int>(DatabaseOperation::ColumnCount), true},
     {"statementColumnKind", jsDatabase, 2,
@@ -2062,6 +2239,22 @@ constexpr Export kAssetExports[] = {
 };
 constexpr Export kSystemExports[] = {
     {"request", jsSystemRequest, 3, 0, false},
+};
+
+constexpr Export kApplicationsExports[] = {
+    {"list", jsApplicationsList, 0, 0, false},
+    {"launch", jsApplicationAction, 1, 0, true},
+    {"uninstall", jsApplicationAction, 1, 1, true},
+};
+
+constexpr Export kSystemUiExports[] = {
+    {"snapshot", jsSystemUiSnapshot, 0, 0, false},
+    {"setLocked", jsSystemUiSetLocked, 1, 0, false},
+};
+
+constexpr Export kSystemSettingsExports[] = {
+    {"getStatusBar", jsSystemSettingsGetStatusBar, 0, 0, false},
+    {"setStatusBar", jsSystemSettingsSetStatusBar, 3, 0, false},
 };
 
 constexpr Export kAudioExports[] = {
@@ -2133,16 +2326,16 @@ constexpr Export kPowerExports[] = {
      static_cast<int>(PowerOperation::ScheduleRtcWake), true},
     {"clearRtcWake", jsPowerOperation, 0,
      static_cast<int>(PowerOperation::ClearRtcWake), true},
-    {"suspend", jsPowerOperation, 1,
-     static_cast<int>(PowerOperation::Suspend), true},
+    {"suspend", jsPowerOperation, 1, static_cast<int>(PowerOperation::Suspend),
+     true},
     {"queryFlipState", jsPowerOperation, 0,
      static_cast<int>(PowerOperation::QueryFlipState), true},
     {"lastError", jsServiceLastError, 0, 0, false},
 };
 
 constexpr Export kVibratorExports[] = {
-    {"vibrate", jsVibrator, 1,
-     static_cast<int>(VibratorOperation::Vibrate), true},
+    {"vibrate", jsVibrator, 1, static_cast<int>(VibratorOperation::Vibrate),
+     true},
     {"stop", jsVibrator, 0, static_cast<int>(VibratorOperation::Stop), true},
     {"supportsAmplitudeControl", jsVibrator, 0,
      static_cast<int>(VibratorOperation::SupportsAmplitude), true},
@@ -2152,18 +2345,22 @@ constexpr Export kVibratorExports[] = {
 };
 
 constexpr Export kWifiExports[] = {
+    {"enabled", jsWifiQuery, 0, static_cast<int>(WifiQuery::Enabled), true},
     {"getStatus", jsWifiQuery, 0, static_cast<int>(WifiQuery::Status), true},
     {"scan", jsWifiQuery, 1, static_cast<int>(WifiQuery::Scan), true},
-    {"listNetworks", jsWifiQuery, 0,
-     static_cast<int>(WifiQuery::Networks), true},
+    {"listNetworks", jsWifiQuery, 0, static_cast<int>(WifiQuery::Networks),
+     true},
+    {"setEnabled", jsWifiAction, 1, static_cast<int>(WifiAction::SetEnabled),
+     true},
     {"connect", jsWifiAction, 3, static_cast<int>(WifiAction::Connect), true},
-    {"disconnect", jsWifiAction, 0,
-     static_cast<int>(WifiAction::Disconnect), true},
-    {"reconnect", jsWifiAction, 0,
-     static_cast<int>(WifiAction::Reconnect), true},
+    {"disconnect", jsWifiAction, 0, static_cast<int>(WifiAction::Disconnect),
+     true},
+    {"reconnect", jsWifiAction, 0, static_cast<int>(WifiAction::Reconnect),
+     true},
+    {"select", jsWifiAction, 1, static_cast<int>(WifiAction::Select), true},
     {"forget", jsWifiAction, 1, static_cast<int>(WifiAction::Forget), true},
-    {"saveConfiguration", jsWifiAction, 0,
-     static_cast<int>(WifiAction::Save), true},
+    {"saveConfiguration", jsWifiAction, 0, static_cast<int>(WifiAction::Save),
+     true},
     {"lastError", jsServiceLastError, 0, 0, false},
 };
 
@@ -2175,17 +2372,17 @@ constexpr Export kIpExports[] = {
 };
 
 constexpr Export kBluetoothExports[] = {
-    {"enable", jsBluetooth, 1,
-     static_cast<int>(BluetoothOperation::Enable), true},
-    {"disable", jsBluetooth, 1,
-     static_cast<int>(BluetoothOperation::Disable), true},
+    {"enable", jsBluetooth, 1, static_cast<int>(BluetoothOperation::Enable),
+     true},
+    {"disable", jsBluetooth, 1, static_cast<int>(BluetoothOperation::Disable),
+     true},
     {"classicScan", jsBluetooth, 1,
      static_cast<int>(BluetoothOperation::ClassicScan), true},
-    {"leScan", jsBluetooth, 1,
-     static_cast<int>(BluetoothOperation::LeScan), true},
+    {"leScan", jsBluetooth, 1, static_cast<int>(BluetoothOperation::LeScan),
+     true},
     {"pair", jsBluetooth, 2, static_cast<int>(BluetoothOperation::Pair), true},
-    {"unpair", jsBluetooth, 1,
-     static_cast<int>(BluetoothOperation::Unpair), true},
+    {"unpair", jsBluetooth, 1, static_cast<int>(BluetoothOperation::Unpair),
+     true},
     {"cancelPairing", jsBluetooth, 1,
      static_cast<int>(BluetoothOperation::CancelPairing), true},
     {"profileConnect", jsBluetooth, 2,
@@ -2232,6 +2429,10 @@ constexpr Module kModules[] = {
      std::size(kDeviceStorageExports)},
     {"oos:font-assets", kFontExports, std::size(kFontExports)},
     {"oos:assets", kAssetExports, std::size(kAssetExports)},
+    {"oos:applications", kApplicationsExports, std::size(kApplicationsExports)},
+    {"oos:system-ui", kSystemUiExports, std::size(kSystemUiExports)},
+    {"oos:system-settings", kSystemSettingsExports,
+     std::size(kSystemSettingsExports)},
     {"oos:system-services", kSystemExports, std::size(kSystemExports)},
 };
 
@@ -2271,9 +2472,9 @@ int initializeModule(JSContext *context, JSModuleDef *module) {
 
 JSModuleDef *loadJsRuntimeModule(JSContext *context) {
   constexpr const char *exports[] = {
-      "abiVersion",       "wallClockMinutes", "monotonicTimeUs",
-      "wallClockTimeMs",  "wakeMainThread",   "requestExit",
-      "setStatusBarStyle", "setSurfaceMode",    "log",
+      "abiVersion",        "wallClockMinutes", "monotonicTimeUs",
+      "wallClockTimeMs",   "wakeMainThread",   "requestExit",
+      "setStatusBarStyle", "setSurfaceMode",   "log",
   };
   JSModuleDef *module =
       JS_NewCModule(context, "oos:runtime", initializeRuntimeModule);
@@ -2298,8 +2499,8 @@ JSModuleDef *loadJsPlatformServiceModule(JSContext *context, const char *name) {
   if (!module)
     return nullptr;
   for (size_t index = 0; index < definition->export_count; ++index) {
-    if (JS_AddModuleExport(context, module,
-                           definition->exports[index].name) < 0)
+    if (JS_AddModuleExport(context, module, definition->exports[index].name) <
+        0)
       return nullptr;
   }
   return module;

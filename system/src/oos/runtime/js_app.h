@@ -42,6 +42,8 @@ public:
   bool dispatchKey(const input::KeyEvent &event, int64_t monotonic_us);
   bool render(int64_t monotonic_us, uint32_t &next_delay_ms);
   bool takeExitRequest();
+  std::string takeLaunchRequest();
+  std::string takeUninstallRequest();
   void setAudioFocused(bool focused);
   void shutdown();
 

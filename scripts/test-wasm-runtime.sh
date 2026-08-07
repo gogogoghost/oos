@@ -18,7 +18,7 @@ BUILD_DIR="$ROOT_DIR/build/host-wamr-runtime"
   "$ROOT_DIR/build/native-apps/c-production-libc-smoke.wasm" \
   "$ROOT_DIR/build/native-apps/c-production-libc-smoke.x86_64.aot"
 if command -v wasm-tools >/dev/null 2>&1 &&
-    [[ -f "$ROOT_DIR/build/native-apps/egui-demo.component.wasm" ]]; then
+    [[ -f "$ROOT_DIR/apps/tests/egui-demo/build/main.component.wasm" ]]; then
   "$ROOT_DIR/scripts/verify-wit-interfaces.sh"
 else
   echo "Skipping Component Model verification: wasm-tools/component output unavailable"
@@ -27,8 +27,8 @@ cmake -S "$ROOT_DIR/system/tests/host" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD_DIR"
 "$BUILD_DIR/oos_wasm_runtime_test" \
-  "$ROOT_DIR/build/native-apps/egui-demo" \
-  "$ROOT_DIR/build/native-apps/wit-smoke" \
+  "$ROOT_DIR/apps/tests/egui-demo/build/main" \
+  "$ROOT_DIR/apps/tests/wit-smoke/build/main" \
   "$ROOT_DIR/build/native-apps/c-thread-smoke" \
   "$ROOT_DIR/build/native-apps/c-worker-wit-trap" \
   "$ROOT_DIR/build/native-apps/c-exit-smoke" \
@@ -36,9 +36,9 @@ cmake --build "$BUILD_DIR"
   "$ROOT_DIR/build/native-apps/c-module-parent" \
   "$ROOT_DIR/build/native-apps/package-modules" \
   "$ROOT_DIR/build/native-apps/c-production-libc-smoke" \
-  "$ROOT_DIR/build/native-apps/lvgl-demo" \
-  "$ROOT_DIR/build/native-apps/clay-demo" \
-  "$ROOT_DIR/build/native-apps/solid-demo/main.mjs"
+  "$ROOT_DIR/apps/tests/lvgl-demo/build/main" \
+  "$ROOT_DIR/apps/tests/clay-demo/build/main" \
+  "$ROOT_DIR/apps/tests/solid-demo/build/main.mjs"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
 TEST_AOT_PACKAGE="$TEST_DIRECTORY/aot-only.zip"

@@ -17,6 +17,7 @@ public:
   virtual void onDeactivated() {}
   virtual bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) = 0;
   virtual std::string takeLaunchRequest() = 0;
+  virtual std::string takeUninstallRequest() = 0;
   virtual bool takeExitRequest() = 0;
 };
 

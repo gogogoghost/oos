@@ -19,6 +19,10 @@ enum class DeviceServicePermission : uint32_t {
   System = 1U << 9,
   ModemIdentity = 1U << 10,
   ModemRadioControl = 1U << 11,
+  AppsLaunch = 1U << 12,
+  AppsManagement = 1U << 13,
+  SystemUi = 1U << 14,
+  SystemSettings = 1U << 15,
 };
 
 constexpr uint32_t permissionBit(DeviceServicePermission permission) {
@@ -55,6 +59,14 @@ deviceServicePermissionMask(const std::vector<std::string> &permissions) {
       mask |= permissionBit(DeviceServicePermission::ModemIdentity);
     } else if (permission == "mobileconnection:radio-control") {
       mask |= permissionBit(DeviceServicePermission::ModemRadioControl);
+    } else if (permission == "apps-launch") {
+      mask |= permissionBit(DeviceServicePermission::AppsLaunch);
+    } else if (permission == "apps-management") {
+      mask |= permissionBit(DeviceServicePermission::AppsManagement);
+    } else if (permission == "system-ui") {
+      mask |= permissionBit(DeviceServicePermission::SystemUi);
+    } else if (permission == "system-settings") {
+      mask |= permissionBit(DeviceServicePermission::SystemSettings);
     }
   }
   return mask;

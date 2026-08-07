@@ -65,14 +65,17 @@ are invalid. A package may be AOT-only, but it launches only on a matching
 target; including `main.wasm` provides the portable fallback.
 
 IDs use lowercase reverse-domain notation with at least three components, such
-as `cc.jaxy.oos.launcher` or `com.example.weather`. A system role and requested
-permissions are optional functional metadata:
+as `com.example.launcher` or `com.example.weather-app`. Each component starts
+with a letter and may contain lowercase letters, digits, and internal hyphens.
+The runtime-configured Launcher and SystemUI IDs must resolve to installed
+packages with the required permissions. A role and requested permissions are
+optional metadata; they do not select a different package or UI implementation:
 
 ```json
 {
   "schema": 1,
-  "id": "cc.jaxy.oos.launcher",
-  "name": "Orange OS Launcher",
+  "id": "com.example.home",
+  "name": "Example Home",
   "version": "0.1.0",
   "role": "launcher",
   "entry": {"runtime": "js", "path": "app/main.mjs"},
@@ -84,6 +87,10 @@ The obsolete `format`, `package_kind`, `runtime_kind`, `api_profile`,
 `entrypoint`, `fallback_entrypoint`, `memory`, and `ui` fields are rejected.
 UI access follows imported APIs, just as browser code chooses elements or a
 canvas by what it creates, rather than by an application-level mode.
+
+Launcher, Settings, and SystemUI use this exact package format. Their current
+entries are C++/LVGL compiled to Wasm, and their extra authority is expressed
+only by manifest permissions. They are not linked into the OOS executable.
 
 ## JavaScript Build
 
@@ -118,15 +125,20 @@ Create a deterministic package with:
 ```sh
 ./scripts/package-oos-app.sh \
   --manifest apps/tests/egui-demo/manifest.json \
-  --wasm build/native-apps/egui-demo.wasm \
-  --aot armv7a=build/native-apps/egui-demo.armv7a.aot \
-  --aot cortex-a53=build/native-apps/egui-demo.cortex-a53.aot \
+  --wasm apps/tests/egui-demo/build/main.wasm \
+  --aot armv7a=apps/tests/egui-demo/build/main.armv7a.aot \
+  --aot cortex-a53=apps/tests/egui-demo/build/main.cortex-a53.aot \
   --module compiler=build/compiler.wasm \
   --module compiler=build/compiler.armv7a.aot \
   --module helpers=app/helpers.mjs \
   --assets path/to/assets \
   --output application.zip
 ```
+
+Applications in this repository expose their own `package.sh`; running it from
+any working directory keeps compiler output under that application's `build/`
+or `target/` directory and writes `dist/application.zip`. Repository-level
+scripts only invoke those application-owned commands.
 
 The ZIP reader validates central-directory records and CRCs, bounds expanded
 size and entry count, and rejects encryption, ZIP64, absolute paths, parent
@@ -176,16 +188,16 @@ Core modules must declare a maximum and all core/AOT instances are limited to
 ## Application Sessions
 
 Every launched application is represented by the same host-side application
-session contract, whether it is a trusted process-local application or a WAMR
-package. The session owns the application instance and a dedicated compositor
-layer. `ApplicationSessionManager::activate(id)` only hides the previous layer,
+session contract, whether its entry uses QuickJS, interpreted Wasm, or AOT. The
+session owns the application instance and a dedicated compositor layer.
+`ApplicationSessionManager::activate(id)` only hides the previous layer,
 reveals the requested layer, and redirects input; it does not reconstruct an
 existing application.
 
 Consequently, a background application retains its complete UI tree, Wasm
 linear memory, navigation model, cached data, and graphics resources. Only the
 foreground session receives input and frame callbacks. Session switching never
-branches on a particular application ID; built-in and package IDs are entries
+branches on a particular application ID; every ID is registered from a package
 in the same factory registry.
 
 OOS keeps a background session resident unless the application explicitly calls

@@ -1,6 +1,16 @@
 {
+  "schema": 1,
   "id": "cc.jaxy.oos.settings",
   "name": "Settings",
   "version": "0.1.0",
-  "role": "settings"
+  "entry": {
+    "runtime": "wasm",
+    "path": "app/main"
+  },
+  "permissions": {
+    "apps-management": {},
+    "device-storage:read": {},
+    "system-settings": {},
+    "wifi-manage": {}
+  }
 }

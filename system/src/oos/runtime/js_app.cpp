@@ -2297,6 +2297,18 @@ bool JsApp::takeExitRequest() {
   return requested;
 }
 
+std::string JsApp::takeLaunchRequest() {
+  return impl_->application
+             ? impl_->application->takeApplicationLaunchRequest()
+             : std::string();
+}
+
+std::string JsApp::takeUninstallRequest() {
+  return impl_->application
+             ? impl_->application->takeApplicationUninstallRequest()
+             : std::string();
+}
+
 void JsApp::setAudioFocused(bool focused) {
   impl_->audio_focused = focused;
   if (impl_->application)

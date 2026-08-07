@@ -11,8 +11,9 @@ The host owns display lifecycle, EGL/GLES, HWC, key devices, clocks, and phone
 services. A guest can only reach interfaces in the versioned
 `oos:platform@0.3.0` WIT package.
 
-The production SystemUI is a trusted, process-local LVGL component. QuickJS is
-built into OOS from `third_party/quickjs` without `quickjs-libc`; applications
+The production SystemUI is an LVGL Wasm package with the `system-ui`
+permission. QuickJS is built into OOS from `third_party/quickjs` without
+`quickjs-libc`; applications
 receive restricted platform modules and no DOM, filesystem, shell, or browser
 globals. Solid renders through the host tree transport, while Clay compiles
 into Wasm and targets the same Canvas2D backend.
@@ -40,8 +41,8 @@ The generated core-Wasm export names are versioned, for example
 `oos:platform/lifecycle@0.3.0#frame`. Applications use generated bindings and
 must not depend on those lowered names directly.
 
-`ApplicationSessionManager` applies the same lifecycle to built-in, QuickJS,
-and WAMR applications. Every resident session owns its runtime instance and an
+`ApplicationSessionManager` applies the same lifecycle to QuickJS and WAMR
+applications. Every resident session owns its runtime instance and an
 independent compositor `GraphicsHost`, so VM memory, UI state, retained draw
 state, and texture namespaces survive foreground switches without colliding. The manager
 and every WIT import run on the OOS event-loop thread. A non-zero
@@ -238,7 +239,7 @@ press, repeat, and release state and builds correctly scaled `RawInput` values.
 The renderer returns non-painting egui output for the application/SystemUI
 integration to handle explicitly.
 
-The built-in LVGL display and keypad ports target `GraphicsHost` without
+The LVGL display and keypad ports target `GraphicsHost` without
 exposing Linux devices. LVGL renders into two 32-row RGB565 buffers, uploads
 only invalidated rectangles, and presents one GPU-composited quad. The
 backend is device-independent and therefore runs unchanged on the 2780, 8110,

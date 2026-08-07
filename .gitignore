@@ -8,6 +8,10 @@
 /dist/
 /sdk/js-vite-plugin/dist/
 /apps/target/
+/apps/*/build/
+/apps/*/dist/
+/apps/tests/*/build/
+/apps/tests/*/dist/
 /target/
 node_modules/
 **/target/

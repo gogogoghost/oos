@@ -202,6 +202,12 @@ std::string ApplicationSessionManager::takeLaunchRequest() {
              : std::string();
 }
 
+std::string ApplicationSessionManager::takeUninstallRequest() {
+  return impl_->active && impl_->active->session
+             ? impl_->active->session->takeUninstallRequest()
+             : std::string();
+}
+
 bool ApplicationSessionManager::takeExitRequest() {
   return impl_->active && impl_->active->session &&
          impl_->active->session->takeExitRequest();
@@ -235,6 +241,25 @@ bool ApplicationSessionManager::destroy(const std::string &id) {
         immersive ? impl_->compositor.height() : impl_->height);
   });
   return true;
+}
+
+bool ApplicationSessionManager::unregisterFactory(const std::string &id) {
+  impl_->error.clear();
+  for (auto entry = impl_->entries.begin(); entry != impl_->entries.end();
+       ++entry) {
+    if ((*entry)->id != id)
+      continue;
+    if (impl_->active == entry->get()) {
+      impl_->error = "cannot unregister the active application session";
+      return false;
+    }
+    if ((*entry)->session)
+      (*entry)->session->shutdown();
+    impl_->entries.erase(entry);
+    return true;
+  }
+  impl_->error = "application session is not registered: " + id;
+  return false;
 }
 
 void ApplicationSessionManager::shutdown() {

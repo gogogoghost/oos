@@ -60,5 +60,5 @@ oos_test_nokia_8110_key_input 30 raw
 oos_test_nokia_8110_key_input 30 debounced
 ```
 
-On both devices, the built-in LVGL SystemUI is the end-to-end validation for
+On both devices, the packaged LVGL SystemUI is the end-to-end validation for
 evdev discovery, normalized WIT delivery, and UI focus handling.

@@ -42,6 +42,8 @@
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
 #include "oos/ui/status_bar_appearance.h"
+#include "oos/ui/system_ui_settings.h"
+#include "oos/ui/system_ui_state.h"
 
 namespace oos::runtime {
 namespace {
@@ -75,6 +77,11 @@ constexpr const char *kFontAssetsInterface = "oos:platform/font-assets@0.3.0";
 constexpr const char *kAssetsInterface = "oos:platform/assets@0.3.0";
 constexpr const char *kSystemServicesInterface =
     "oos:platform/system-services@0.3.0";
+constexpr const char *kApplicationsInterface =
+    "oos:platform/applications@0.3.0";
+constexpr const char *kSystemUiInterface = "oos:platform/system-ui@0.3.0";
+constexpr const char *kSystemSettingsInterface =
+    "oos:platform/system-settings@0.3.0";
 constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.3.0#init";
 constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.3.0#event";
 constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.3.0#frame";
@@ -1050,6 +1057,88 @@ bool guestString(wasm_exec_env_t environment, uint32_t offset, uint32_t length,
     return false;
   value.assign(length ? bytes : "", length);
   return true;
+}
+
+WitError applicationContextError(const ApplicationContext *application) {
+  return application && application->lastError().find("permission denied") !=
+                            std::string::npos
+             ? WitError::PermissionDenied
+             : WitError::Unavailable;
+}
+
+void nativeApplicationsEnumerate(wasm_exec_env_t environment,
+                                 uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 12);
+  AppHostContext *host = hostFor(environment);
+  ApplicationContext *application = host ? host->application : nullptr;
+  std::vector<ApplicationInfo> applications;
+  if (!application || !application->listApplications(applications)) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(applicationContextError(application));
+    return;
+  }
+  constexpr uint32_t kRecordSize = 28;
+  if (applications.size() > 4096) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::LimitExceeded);
+    return;
+  }
+  const uint32_t count = static_cast<uint32_t>(applications.size());
+  const uint32_t bytes = count * kRecordSize;
+  const uint32_t pointer =
+      count ? guestRealloc(environment, 0, 0, 4, bytes) : 4;
+  uint8_t *records = count ? appMutableArray<uint8_t>(environment, pointer,
+                                                      bytes, 4096 * kRecordSize)
+                           : reinterpret_cast<uint8_t *>(1);
+  if (!pointer || !records) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower application list");
+    return;
+  }
+  if (count)
+    std::memset(records, 0, bytes);
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *record = records + index * kRecordSize;
+    const ApplicationInfo &info = applications[index];
+    if (!lowerStringAt(environment, info.id.c_str(), record, 0) ||
+        !lowerStringAt(environment, info.name.c_str(), record, 8) ||
+        !lowerStringAt(environment, info.version.c_str(), record, 16)) {
+      wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                                 "failed to lower application metadata");
+      return;
+    }
+    record[24] = info.runtime == apps::AppRuntimeKind::JavaScript ? 0 : 1;
+    record[25] = info.enabled ? 1 : 0;
+  }
+  result[0] = 0;
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, count);
+}
+
+void nativeApplicationAction(wasm_exec_env_t environment,
+                             uint32_t app_id_offset, uint32_t app_id_length,
+                             uint32_t result_offset) {
+  std::string app_id;
+  AppHostContext *host = hostFor(environment);
+  ApplicationContext *application = host ? host->application : nullptr;
+  const bool valid =
+      guestString(environment, app_id_offset, app_id_length, app_id, 128);
+  const bool uninstall =
+      reinterpret_cast<uintptr_t>(
+          wasm_runtime_get_function_attachment(environment)) != 0;
+  const bool success =
+      valid && application &&
+      (uninstall ? application->requestApplicationUninstall(app_id)
+                 : application->requestApplicationLaunch(app_id));
+  writeResult(environment, result_offset, success,
+              !valid ? WitError::InvalidArgument
+                     : applicationContextError(application));
 }
 
 void nativeModulesEnumerate(wasm_exec_env_t environment,
@@ -2623,6 +2712,29 @@ void nativeWifiStatus(wasm_exec_env_t environment, uint32_t result_offset) {
   storeCanonical<int32_t>(result, 36, status.network_id);
 }
 
+void nativeWifiEnabled(wasm_exec_env_t environment, uint32_t result_offset) {
+  uint8_t *result = serviceResultArea(environment, result_offset, 2);
+  if (!result)
+    return;
+  bool enabled = false;
+  if (!servicesFor(environment)->wifiEnabled(enabled)) {
+    failServiceResult(result, 1);
+    return;
+  }
+  result[1] = enabled;
+}
+
+void nativeWifiSetEnabled(wasm_exec_env_t environment, uint32_t enabled,
+                          uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  const bool valid = enabled <= 1;
+  writeResult(environment, result_offset,
+              services && valid && services->wifiSetEnabled(enabled != 0),
+              !services ? serviceAccessError(environment)
+              : valid   ? WitError::Io
+                        : WitError::InvalidArgument);
+}
+
 void nativeWifiScan(wasm_exec_env_t environment, uint32_t wait_ms,
                     uint32_t result_offset) {
   uint8_t *result = serviceResultArea(environment, result_offset, 12);
@@ -2730,6 +2842,14 @@ void nativeWifiDisconnect(wasm_exec_env_t environment, uint32_t result_offset) {
   device::ServiceProvider *services = servicesFor(environment);
   writeResult(environment, result_offset,
               services && services->wifiDisconnect(),
+              services ? WitError::Io : serviceAccessError(environment));
+}
+
+void nativeWifiSelect(wasm_exec_env_t environment, uint32_t network_id,
+                      uint32_t result_offset) {
+  device::ServiceProvider *services = servicesFor(environment);
+  writeResult(environment, result_offset,
+              services && services->wifiSelect(static_cast<int>(network_id)),
               services ? WitError::Io : serviceAccessError(environment));
 }
 
@@ -3249,6 +3369,121 @@ void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
                    wit_error);
 }
 
+void nativeSystemUiSnapshot(wasm_exec_env_t environment,
+                            uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 56, 56);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 56);
+  AppHostContext *host = hostFor(environment);
+  ApplicationContext *application = host ? host->application : nullptr;
+  const bool permitted =
+      application && application->permissionGranted(apps::permissionBit(
+                         apps::DeviceServicePermission::SystemUi));
+  ui::SystemUiState *state = permitted ? application->systemUiState() : nullptr;
+  if (!state) {
+    result[0] = 1;
+    result[8] = static_cast<uint8_t>(permitted ? WitError::Unavailable
+                                               : WitError::PermissionDenied);
+    return;
+  }
+  const ui::SystemUiSnapshot snapshot = state->snapshot();
+  storeCanonical<uint64_t>(result, 8, snapshot.revision);
+  result[16] = snapshot.status_bar_visible;
+  result[17] = snapshot.locked;
+  storeCanonical<uint32_t>(result, 20, snapshot.appearance.background_rgb);
+  result[24] = snapshot.appearance.dark_icons;
+  result[25] = snapshot.preferences.show_clock;
+  result[26] = snapshot.preferences.show_network;
+  result[27] = snapshot.preferences.show_battery_percentage;
+  result[28] = snapshot.status.battery_available;
+  storeCanonical<int32_t>(result, 32, snapshot.status.battery_percent);
+  result[36] = snapshot.status.charging;
+  result[37] = snapshot.status.wifi_available;
+  result[38] = snapshot.status.wifi_connected;
+  result[39] = snapshot.status.cellular_available;
+  result[40] = snapshot.status.cellular_registered;
+  result[41] = snapshot.status.roaming;
+  storeCanonical<int32_t>(result, 44, snapshot.status.signal_bars);
+  if (!lowerStringAt(environment, snapshot.status.radio_technology.c_str(),
+                     result, 48))
+    trapInvalidReturnArea(environment);
+}
+
+void nativeSystemUiSetLocked(wasm_exec_env_t environment, uint32_t locked,
+                             uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  ApplicationContext *application = host ? host->application : nullptr;
+  const bool permitted =
+      application && application->permissionGranted(apps::permissionBit(
+                         apps::DeviceServicePermission::SystemUi));
+  ui::SystemUiState *state = permitted ? application->systemUiState() : nullptr;
+  const bool valid = locked <= 1;
+  if (state && valid)
+    state->setLocked(locked != 0);
+  writeResult(environment, result_offset, state && valid,
+              !valid      ? WitError::InvalidArgument
+              : permitted ? WitError::Unavailable
+                          : WitError::PermissionDenied);
+}
+
+void nativeSystemSettingsGetStatusBar(wasm_exec_env_t environment,
+                                      uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 24, 24);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 24);
+  AppHostContext *host = hostFor(environment);
+  const bool permitted = servicePermissionGranted(
+      environment, WasmServicePermission::SystemSettings);
+  ui::SystemUiSettings *settings = permitted && host && host->application
+                                       ? host->application->systemUiSettings()
+                                       : nullptr;
+  if (!settings) {
+    result[0] = 1;
+    result[8] = static_cast<uint8_t>(permitted ? WitError::Unavailable
+                                               : WitError::PermissionDenied);
+    return;
+  }
+  const ui::StatusBarPreferences &preferences = settings->statusBar();
+  result[8] = preferences.show_clock;
+  result[9] = preferences.show_network;
+  result[10] = preferences.show_battery_percentage;
+  storeCanonical<uint64_t>(result, 16, preferences.revision);
+}
+
+void nativeSystemSettingsSetStatusBar(wasm_exec_env_t environment,
+                                      uint32_t show_clock,
+                                      uint32_t show_network,
+                                      uint32_t show_battery_percentage,
+                                      uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  ui::SystemUiSettings *settings =
+      host && host->application &&
+              servicePermissionGranted(environment,
+                                       WasmServicePermission::SystemSettings)
+          ? host->application->systemUiSettings()
+          : nullptr;
+  const bool valid =
+      show_clock <= 1 && show_network <= 1 && show_battery_percentage <= 1;
+  const bool success =
+      settings && valid &&
+      settings->setStatusBar(show_clock != 0, show_network != 0,
+                             show_battery_percentage != 0);
+  writeResult(environment, result_offset, success,
+              !valid ? WitError::InvalidArgument
+              : servicePermissionGranted(environment,
+                                         WasmServicePermission::SystemSettings)
+                  ? settings ? WitError::Io : WitError::Unavailable
+                  : WitError::PermissionDenied);
+}
+
 NativeSymbol kRuntimeSymbols[] = {
     {"abi-version", reinterpret_cast<void *>(nativeAbiVersion), "()i", nullptr},
     {"wall-clock-minutes", reinterpret_cast<void *>(nativeWallClockMinutes),
@@ -3453,12 +3688,18 @@ NativeSymbol kVibratorSymbols[] = {
 NativeSymbol kWifiSymbols[] = {
     {"get-status", reinterpret_cast<void *>(nativeWifiStatus), "(i)",
      serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"enabled", reinterpret_cast<void *>(nativeWifiEnabled), "(i)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
+    {"set-enabled", reinterpret_cast<void *>(nativeWifiSetEnabled), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
     {"scan", reinterpret_cast<void *>(nativeWifiScan), "(ii)",
      serviceAttachment(4, WasmServicePermission::Wifi)},
     {"list-networks", reinterpret_cast<void *>(nativeWifiNetworks), "(i)",
      serviceAttachment(4, WasmServicePermission::Wifi)},
     {"connect", reinterpret_cast<void *>(nativeWifiConnect), "(iiiiii)",
      serviceAttachment(4, WasmServicePermission::Wifi)},
+    {"select", reinterpret_cast<void *>(nativeWifiSelect), "(ii)",
+     serviceAttachment(1, WasmServicePermission::Wifi)},
     {"disconnect", reinterpret_cast<void *>(nativeWifiDisconnect), "(i)",
      serviceAttachment(1, WasmServicePermission::Wifi)},
     {"reconnect", reinterpret_cast<void *>(nativeWifiReconnect), "(i)",
@@ -3595,6 +3836,31 @@ NativeSymbol kSystemServicesSymbols[] = {
      serviceAttachment(4, WasmServicePermission::System)},
 };
 
+NativeSymbol kApplicationsSymbols[] = {
+    {"enumerate", reinterpret_cast<void *>(nativeApplicationsEnumerate), "(i)",
+     nullptr},
+    {"launch", reinterpret_cast<void *>(nativeApplicationAction), "(iii)",
+     reinterpret_cast<void *>(0)},
+    {"uninstall", reinterpret_cast<void *>(nativeApplicationAction), "(iii)",
+     reinterpret_cast<void *>(1)},
+};
+
+NativeSymbol kSystemUiSymbols[] = {
+    {"snapshot", reinterpret_cast<void *>(nativeSystemUiSnapshot), "(i)",
+     nullptr},
+    {"set-locked", reinterpret_cast<void *>(nativeSystemUiSetLocked), "(ii)",
+     nullptr},
+};
+
+NativeSymbol kSystemSettingsSymbols[] = {
+    {"get-status-bar",
+     reinterpret_cast<void *>(nativeSystemSettingsGetStatusBar), "(i)",
+     serviceAttachment(8, WasmServicePermission::SystemSettings)},
+    {"set-status-bar",
+     reinterpret_cast<void *>(nativeSystemSettingsSetStatusBar), "(iiii)",
+     serviceAttachment(1, WasmServicePermission::SystemSettings)},
+};
+
 NativeSymbol kModulesSymbols[] = {
     {"enumerate", reinterpret_cast<void *>(nativeModulesEnumerate), "(i)",
      nullptr},
@@ -3654,24 +3920,34 @@ bool acquireRuntime(std::string &error) {
       error = "WAMR initialization failed";
       return false;
     }
-    bool registered = wasm_runtime_register_natives(
-                          kGraphicsInterface, kGraphicsSymbols,
-                          static_cast<uint32_t>(std::size(kGraphicsSymbols))) &&
-                      wasm_runtime_register_natives(
-                          kCanvasInterface, kCanvasSymbols,
-                          static_cast<uint32_t>(std::size(kCanvasSymbols))) &&
-                      wasm_runtime_register_natives(
-                          kUiInterface, kUiSymbols,
-                          static_cast<uint32_t>(std::size(kUiSymbols))) &&
-                      wasm_runtime_register_natives(
-                          kModulesInterface, kModulesSymbols,
-                          static_cast<uint32_t>(std::size(kModulesSymbols))) &&
-                      wasm_runtime_register_natives(
-                          kGlesInterface, kGlesSymbols,
-                          static_cast<uint32_t>(std::size(kGlesSymbols))) &&
-                      wasm_runtime_register_natives(
-                          kDeviceInterface, kDeviceSymbols,
-                          static_cast<uint32_t>(std::size(kDeviceSymbols)));
+    bool registered =
+        wasm_runtime_register_natives(
+            kGraphicsInterface, kGraphicsSymbols,
+            static_cast<uint32_t>(std::size(kGraphicsSymbols))) &&
+        wasm_runtime_register_natives(
+            kCanvasInterface, kCanvasSymbols,
+            static_cast<uint32_t>(std::size(kCanvasSymbols))) &&
+        wasm_runtime_register_natives(
+            kUiInterface, kUiSymbols,
+            static_cast<uint32_t>(std::size(kUiSymbols))) &&
+        wasm_runtime_register_natives(
+            kModulesInterface, kModulesSymbols,
+            static_cast<uint32_t>(std::size(kModulesSymbols))) &&
+        wasm_runtime_register_natives(
+            kApplicationsInterface, kApplicationsSymbols,
+            static_cast<uint32_t>(std::size(kApplicationsSymbols))) &&
+        wasm_runtime_register_natives(
+            kSystemUiInterface, kSystemUiSymbols,
+            static_cast<uint32_t>(std::size(kSystemUiSymbols))) &&
+        wasm_runtime_register_natives(
+            kSystemSettingsInterface, kSystemSettingsSymbols,
+            static_cast<uint32_t>(std::size(kSystemSettingsSymbols))) &&
+        wasm_runtime_register_natives(
+            kGlesInterface, kGlesSymbols,
+            static_cast<uint32_t>(std::size(kGlesSymbols))) &&
+        wasm_runtime_register_natives(
+            kDeviceInterface, kDeviceSymbols,
+            static_cast<uint32_t>(std::size(kDeviceSymbols)));
     for (const WitNativeInterface &interface : kOptionalInterfaces) {
       registered =
           registered && wasm_runtime_register_natives(
@@ -4703,6 +4979,17 @@ bool WasmApp::takeExitRequest() {
   const bool requested = impl_->exit_requested;
   impl_->exit_requested = false;
   return requested;
+}
+
+std::string WasmApp::takeLaunchRequest() {
+  return impl_->application ? impl_->application->takeApplicationLaunchRequest()
+                            : std::string();
+}
+
+std::string WasmApp::takeUninstallRequest() {
+  return impl_->application
+             ? impl_->application->takeApplicationUninstallRequest()
+             : std::string();
 }
 
 void WasmApp::setAudioFocused(bool focused) {

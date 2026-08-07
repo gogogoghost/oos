@@ -10,8 +10,9 @@ core-Wasm in that order.
 This branch is deliberately browser-free. QuickJS provides restricted ES
 modules without a DOM, HTML engine, browser Web APIs, or KaiOS Web application
 compatibility layer.
-The production Launcher is a process-local C++/LVGL application. SystemUI is a
-separate process-local application that owns the status and overlay surfaces.
+The production Launcher, Settings, and SystemUI keep their C++/LVGL UIs and are
+packaged as ordinary WAMR applications. SystemUI receives the permission needed
+to own global status and overlay behavior.
 Solid uses the host layout/Tailwind renderer, Clay uses the same native drawing
 backend from Wasm, and Rust/egui remains a small WIT mesh example.
 The phone shell uses `#E65100` as its single interaction accent and obtains
@@ -70,10 +71,11 @@ make system DEVICE=nokia-8110-4g
 
 Useful outputs are:
 
-- `build/native-apps/egui-demo.wasm`: portable egui SDK test module.
-- `build/native-apps/egui-demo.armv7a.aot`: optimized ARMv7 WAMR AOT test module.
-- `build/native-apps/egui-demo.cortex-a7.aot` and
-  `egui-demo.cortex-a53.aot`: CPU-tuned WAMR AOT test modules.
+- `apps/tests/egui-demo/build/main.wasm`: portable egui SDK test module.
+- `apps/tests/egui-demo/build/main.armv7a.aot`: optimized ARMv7 WAMR AOT test module.
+- `apps/tests/egui-demo/build/main.cortex-a7.aot` and
+  `main.cortex-a53.aot`: CPU-tuned WAMR AOT test modules.
+- `apps/tests/*/dist/application.zip`: independently packaged test apps.
 - `build/android-<device>/bin/oos`: device-specific system process.
 - `build/android-<device>/bin/tests/<device>/`: device tests, when enabled.
 
@@ -139,9 +141,9 @@ resource directory:
 The resource package contains `oos`, its embedded General MIDI SoundFont, the
 reduced shared media-codec libraries, and their licenses. UI and WAMR
 applications use the phone's system fonts.
-The LVGL SystemUI and boot splash are compiled into `oos`; they are not
-deployed as separate files. The package does not contain a browser engine or
-Web helper processes.
+Launcher, Settings, and the LVGL SystemUI are deployed as standard application
+ZIPs beside the runtime. The boot splash remains embedded in `oos`. The package
+does not contain a browser engine or Web helper processes.
 See [docs/deployment.md](docs/deployment.md) for the mount and upgrade contract,
 [docs/applications.md](docs/applications.md) for the ZIP/registry format, and
 [docs/wasm-runtime.md](docs/wasm-runtime.md) for the WIT/WAMR architecture.

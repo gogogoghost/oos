@@ -11,16 +11,23 @@
 #include "oos/ui/status_bar_appearance.h"
 #include "oos/ui/system_ui_settings.h"
 
+#ifdef OOS_WASM_GUEST
+#include "app.h"
+#endif
+
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <utility>
+#include <vector>
+
+#ifndef OOS_WASM_GUEST
+#include <chrono>
 #include <mutex>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <thread>
-#include <utility>
-#include <vector>
+#endif
 
 namespace oos::apps::settings {
 namespace {
@@ -84,10 +91,15 @@ std::string formatBytes(uint64_t bytes) {
 }
 
 std::string fileSize(const std::string &path) {
+#ifdef OOS_WASM_GUEST
+  (void)path;
+  return "Unknown";
+#else
   struct stat status = {};
   return stat(path.c_str(), &status) == 0 && status.st_size >= 0
              ? formatBytes(static_cast<uint64_t>(status.st_size))
              : "Unknown";
+#endif
 }
 
 } // namespace
@@ -268,8 +280,10 @@ public:
   }
 
   void shutdown() {
+#ifndef OOS_WASM_GUEST
     if (wifi_worker.joinable())
       wifi_worker.join();
+#endif
     backend.shutdown();
     root = nullptr;
     content_host = nullptr;
@@ -301,7 +315,13 @@ public:
       result.error = services.lastError();
       return false;
     }
-    if (include_scan && !services.wifiScan(result.access_points, 1500)) {
+    if (include_scan && !services.wifiScan(result.access_points,
+#ifdef OOS_WASM_GUEST
+                                           1000
+#else
+                                           1500
+#endif
+                                           )) {
       result.error = services.lastError();
       return false;
     }
@@ -309,6 +329,19 @@ public:
   }
 
   bool waitForWifiConnection(WifiTaskResult &result) {
+#ifdef OOS_WASM_GUEST
+    network::WifiStatus status;
+    if (!services.wifiStatus(status)) {
+      result.error = services.lastError();
+      return false;
+    }
+    if (status.state == "COMPLETED" && !status.ssid.empty() &&
+        !services.ipUseDhcp(1000)) {
+      result.error = services.lastError();
+      return false;
+    }
+    return true;
+#else
     for (int attempt = 0; attempt < 40; ++attempt) {
       network::WifiStatus status;
       if (services.wifiStatus(status) && status.state == "COMPLETED" &&
@@ -323,6 +356,7 @@ public:
     }
     result.error = "Connection timed out";
     return false;
+#endif
   }
 
   void
@@ -331,12 +365,14 @@ public:
                 std::string credential = {}, int network_id = -1) {
     if (wifi_busy)
       return;
+#ifndef OOS_WASM_GUEST
     if (wifi_worker.joinable())
       wifi_worker.join();
+#endif
     wifi_busy = true;
-    wifi_worker = std::thread([this, task, ssid = std::move(ssid), security,
-                               credential = std::move(credential),
-                               network_id]() mutable {
+    auto perform = [this, task, ssid = std::move(ssid), security,
+                    credential = std::move(credential),
+                    network_id]() mutable {
       WifiTaskResult result;
       result.task = task;
       bool success = true;
@@ -383,10 +419,17 @@ public:
       if (success)
         success = collectWifiState(result, task == WifiTask::Scan);
       result.success = success;
+#ifndef OOS_WASM_GUEST
       std::lock_guard<std::mutex> lock(wifi_mutex);
+#endif
       wifi_result = std::move(result);
       wifi_result_ready = true;
-    });
+    };
+#ifdef OOS_WASM_GUEST
+    perform();
+#else
+    wifi_worker = std::thread(std::move(perform));
+#endif
   }
 
   void setSoftkeys(const char *left, const char *center, const char *right) {
@@ -956,27 +999,10 @@ public:
     needs_refresh = true;
   }
 
-  AppRecord builtin(const char *id, const char *name, const char *role) {
-    AppRecord result;
-    result.manifest.id = id;
-    result.manifest.name = name;
-    result.manifest.version = "0.1.0";
-    result.manifest.role = role;
-    return result;
-  }
-
   void showApplications() {
     view = View::Applications;
     beginPage("Applications");
     managed_apps.clear();
-    managed_apps.push_back(
-        {builtin("cc.jaxy.oos.launcher", "Orange OS Launcher", "launcher"),
-         true});
-    managed_apps.push_back(
-        {builtin("cc.jaxy.oos.settings", "Settings", "settings"), true});
-    managed_apps.push_back(
-        {builtin("cc.jaxy.oos.systemui", "Orange OS SystemUI", "systemui"),
-         true});
     std::vector<AppRecord> installed;
     const bool list_ready = repository.list(installed);
     if (!list_ready) {
@@ -991,7 +1017,7 @@ public:
     for (size_t index = 0; index < managed_apps.size(); ++index) {
       const ManagedApp &app = managed_apps[index];
       const std::string subtitle =
-          app.builtin ? "System app" : "Version " + app.record.manifest.version;
+          "Version " + app.record.manifest.version;
       addRow(Action::Application, app.record.manifest.name.c_str(),
              subtitle.c_str(), LV_SYMBOL_FILE, y, index);
     }
@@ -1044,18 +1070,17 @@ public:
     addInformationRow("Application ID", app.record.manifest.id, y);
     addInformationRow("Version", app.record.manifest.version, y);
     addInformationRow(
-        "Type", app.builtin ? "Built-in native app" : "WAMR application", y);
-    addInformationRow("Package size",
-                      app.builtin ? "Compiled into OOS"
-                                  : fileSize(app.record.package_path),
-                      y);
+        "Type", app.record.manifest.entry.runtime == AppRuntimeKind::JavaScript
+                    ? "JavaScript application"
+                    : "WebAssembly application",
+        y);
+    addInformationRow("Package size", fileSize(app.record.package_path), y);
     finishInformation(y);
-    setSoftkeys(app.builtin ? "" : "Uninstall", "", "Back");
+    setSoftkeys("Uninstall", "", "Back");
   }
 
   void showConfirmUninstall() {
-    if (selected_app >= managed_apps.size() ||
-        managed_apps[selected_app].builtin)
+    if (selected_app >= managed_apps.size())
       return;
     view = View::ConfirmUninstall;
     const ManagedApp &app = managed_apps[selected_app];
@@ -1075,8 +1100,7 @@ public:
   }
 
   void uninstallSelected() {
-    if (selected_app >= managed_apps.size() ||
-        managed_apps[selected_app].builtin)
+    if (selected_app >= managed_apps.size())
       return;
     const std::string id = managed_apps[selected_app].record.manifest.id;
     if (!repository.uninstall(id.c_str())) {
@@ -1093,8 +1117,28 @@ public:
   void showStorage() {
     view = View::Storage;
     beginPage("Storage");
-    struct statvfs status = {};
     int y = 0;
+#ifdef OOS_WASM_GUEST
+    uint64_t free = 0;
+    uint64_t used = 0;
+    oos_platform_device_storage_error_code_t storage_error{};
+    if (oos_platform_device_storage_free_space(
+            OOS_PLATFORM_DEVICE_STORAGE_VOLUME_INTERNAL, &free,
+            &storage_error) &&
+        oos_platform_device_storage_used_space(
+            OOS_PLATFORM_DEVICE_STORAGE_VOLUME_INTERNAL, &used,
+            &storage_error)) {
+      const uint64_t total = used + free;
+      addInformationRow("Total", formatBytes(total), y);
+      addInformationRow("Used", formatBytes(used), y);
+      addInformationRow("Available", formatBytes(free), y);
+      const int percent = total ? static_cast<int>(used * 100 / total) : 0;
+      addInformationRow("Usage", std::to_string(percent) + "%", y);
+    } else {
+      addInformationRow("Storage", "Unavailable", y);
+    }
+#else
+    struct statvfs status = {};
     if (statvfs(data_root.c_str(), &status) == 0) {
       const uint64_t total = static_cast<uint64_t>(status.f_blocks) *
                              static_cast<uint64_t>(status.f_frsize);
@@ -1109,6 +1153,7 @@ public:
     } else {
       addInformationRow("Storage", "Unavailable", y);
     }
+#endif
     finishInformation(y);
     setSoftkeys("", "", "Back");
   }
@@ -1383,6 +1428,7 @@ public:
       return false;
     WifiTaskResult completed;
     bool has_wifi_result = false;
+#ifndef OOS_WASM_GUEST
     {
       std::lock_guard<std::mutex> lock(wifi_mutex);
       if (wifi_result_ready) {
@@ -1391,9 +1437,18 @@ public:
         has_wifi_result = true;
       }
     }
+#else
+    if (wifi_result_ready) {
+      completed = std::move(wifi_result);
+      wifi_result_ready = false;
+      has_wifi_result = true;
+    }
+#endif
     if (has_wifi_result) {
+#ifndef OOS_WASM_GUEST
       if (wifi_worker.joinable())
         wifi_worker.join();
+#endif
       wifi_busy = false;
       if (view == View::WifiDetails)
         popToView(View::Wifi);
@@ -1478,8 +1533,10 @@ public:
   std::vector<RetainedPage> navigation_stack;
   RebuildState rebuild_state;
   network::WifiStatus wifi_status;
+#ifndef OOS_WASM_GUEST
   std::thread wifi_worker;
   std::mutex wifi_mutex;
+#endif
   WifiTaskResult wifi_result;
   std::string launch_request;
   std::string error;

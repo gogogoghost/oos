@@ -79,6 +79,8 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/src/oos/storage/filesystem.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/storage/sqlite.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/ui/system_ui_settings.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/ui/system_ui_state.cpp"
   "${OOS_SYSTEM_ROOT}/devices/local/src/service_provider.cpp")
 target_include_directories(oos_wasm_runtime_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src"

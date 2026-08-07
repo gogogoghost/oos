@@ -8,6 +8,10 @@
 #include "oos/sdk/ui/theme.h"
 #include "oos/ui/status_bar_appearance.h"
 
+#ifdef OOS_WASM_GUEST
+#include "oos/sdk/guest/platform.h"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -76,18 +80,33 @@ void constrainLabel(lv_obj_t *label, int width, lv_text_align_t alignment) {
 }
 
 std::string currentTime() {
+#ifdef OOS_WASM_GUEST
+  const uint32_t minutes = sdk::guest::wallClockMinute();
+  char value[6] = {};
+  std::snprintf(value, sizeof(value), "%02u:%02u", (minutes / 60) % 24,
+                minutes % 60);
+  return value;
+#else
   const std::time_t now = std::time(nullptr);
   std::tm local = {};
   localtime_r(&now, &local);
   char value[6] = {};
   std::strftime(value, sizeof(value), "%H:%M", &local);
   return value;
+#endif
 }
 
 std::string currentDate() {
+#ifdef OOS_WASM_GUEST
+  const std::time_t now =
+      static_cast<std::time_t>(sdk::guest::wallClockSeconds());
+  std::tm local = {};
+  gmtime_r(&now, &local);
+#else
   const std::time_t now = std::time(nullptr);
   std::tm local = {};
   localtime_r(&now, &local);
+#endif
   char value[24] = {};
   std::strftime(value, sizeof(value), "%a, %b %d", &local);
   return value;
@@ -260,7 +279,11 @@ public:
   }
 
   void updateClock() {
+#ifdef OOS_WASM_GUEST
+    const int64_t minute = sdk::guest::wallClockMinute();
+#else
     const int64_t minute = static_cast<int64_t>(std::time(nullptr) / 60);
+#endif
     if (minute == last_minute)
       return;
     last_minute = minute;
@@ -364,7 +387,12 @@ public:
       }
       needs_refresh = false;
     }
+#ifdef OOS_WASM_GUEST
+    const uint32_t seconds =
+        static_cast<uint32_t>(sdk::guest::wallClockSeconds() % 60);
+#else
     const uint32_t seconds = static_cast<uint32_t>(std::time(nullptr) % 60);
+#endif
     next_delay_ms = std::max(1u, (60u - seconds) * 1000u);
     if (notice && notice_until_us > monotonic_us)
       next_delay_ms = std::min(

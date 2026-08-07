@@ -828,9 +828,12 @@ interface wifi {
   }
 
   get-status: func() -> result<status, error-code>;
+  enabled: func() -> result<bool, error-code>;
+  set-enabled: func(enabled: bool) -> result<_, error-code>;
   scan: func(wait-ms: u32) -> result<list<access-point>, error-code>;
   list-networks: func() -> result<list<network>, error-code>;
   connect: func(ssid: string, security: security, credential: string) -> result<s32, error-code>;
+  select: func(network-id: s32) -> result<_, error-code>;
   disconnect: func() -> result<_, error-code>;
   reconnect: func() -> result<_, error-code>;
   forget: func(network-id: s32) -> result<_, error-code>;
@@ -1130,6 +1133,79 @@ interface system-services {
   ) -> result<string, error-code>;
 }
 
+/// Bulk application discovery and user-initiated lifecycle requests. Access is
+/// granted independently through `apps-launch` and `apps-management`.
+interface applications {
+  use types.{error-code};
+
+  enum runtime-kind {
+    js,
+    wasm,
+  }
+
+  record application-info {
+    id: string,
+    name: string,
+    version: string,
+    runtime: runtime-kind,
+    enabled: bool,
+  }
+
+  enumerate: func() -> result<list<application-info>, error-code>;
+  launch: func(app-id: string) -> result<_, error-code>;
+  uninstall: func(app-id: string) -> result<_, error-code>;
+}
+
+/// Privileged bridge used by the packaged SystemUI application. The complete
+/// status snapshot crosses the runtime boundary in one call.
+interface system-ui {
+  use types.{error-code};
+
+  record status-snapshot {
+    revision: u64,
+    status-bar-visible: bool,
+    locked: bool,
+    background-rgb: u32,
+    dark-icons: bool,
+    show-clock: bool,
+    show-network: bool,
+    show-battery-percentage: bool,
+    battery-available: bool,
+    battery-percent: s32,
+    charging: bool,
+    wifi-available: bool,
+    wifi-connected: bool,
+    cellular-available: bool,
+    cellular-registered: bool,
+    roaming: bool,
+    signal-bars: s32,
+    radio-technology: string,
+  }
+
+  snapshot: func() -> result<status-snapshot, error-code>;
+  set-locked: func(locked: bool) -> result<_, error-code>;
+}
+
+/// Persistent user-facing shell preferences. This is separate from SystemUI's
+/// privileged status snapshot so Settings does not receive overlay authority.
+interface system-settings {
+  use types.{error-code};
+
+  record status-bar-preferences {
+    show-clock: bool,
+    show-network: bool,
+    show-battery-percentage: bool,
+    revision: u64,
+  }
+
+  get-status-bar: func() -> result<status-bar-preferences, error-code>;
+  set-status-bar: func(
+    show-clock: bool,
+    show-network: bool,
+    show-battery-percentage: bool,
+  ) -> result<_, error-code>;
+}
+
 /// Lifecycle exported by every OOS application.
 interface lifecycle {
   use types.{error-code};
@@ -1175,6 +1251,9 @@ world app {
   import font-assets;
   import assets;
   import system-services;
+  import applications;
+  import system-ui;
+  import system-settings;
   import modules;
 
   export lifecycle;

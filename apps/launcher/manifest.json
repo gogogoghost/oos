@@ -1,6 +1,13 @@
 {
+  "schema": 1,
   "id": "cc.jaxy.oos.launcher",
   "name": "Orange OS Launcher",
   "version": "0.1.0",
-  "role": "launcher"
+  "entry": {
+    "runtime": "wasm",
+    "path": "app/main"
+  },
+  "permissions": {
+    "apps-launch": {}
+  }
 }

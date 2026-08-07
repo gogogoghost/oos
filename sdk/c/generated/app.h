@@ -824,6 +824,21 @@ typedef struct {
 } oos_platform_wifi_result_status_error_code_t;
 
 typedef struct {
+  bool is_err;
+  union {
+    bool ok;
+    oos_platform_wifi_error_code_t err;
+  } val;
+} oos_platform_wifi_result_bool_error_code_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_wifi_error_code_t err;
+  } val;
+} oos_platform_wifi_result_void_error_code_t;
+
+typedef struct {
   oos_platform_wifi_access_point_t *ptr;
   size_t len;
 } oos_platform_wifi_list_access_point_t;
@@ -856,13 +871,6 @@ typedef struct {
     oos_platform_wifi_error_code_t err;
   } val;
 } oos_platform_wifi_result_s32_error_code_t;
-
-typedef struct {
-  bool is_err;
-  union {
-    oos_platform_wifi_error_code_t err;
-  } val;
-} oos_platform_wifi_result_void_error_code_t;
 
 typedef oos_platform_types_error_code_t oos_platform_ip_error_code_t;
 
@@ -1262,6 +1270,103 @@ typedef struct {
   } val;
 } oos_platform_system_services_result_string_error_code_t;
 
+typedef oos_platform_types_error_code_t oos_platform_applications_error_code_t;
+
+typedef uint8_t oos_platform_applications_runtime_kind_t;
+
+#define OOS_PLATFORM_APPLICATIONS_RUNTIME_KIND_JS 0
+#define OOS_PLATFORM_APPLICATIONS_RUNTIME_KIND_WASM 1
+
+typedef struct oos_platform_applications_application_info_t {
+  app_string_t   id;
+  app_string_t   name;
+  app_string_t   version;
+  oos_platform_applications_runtime_kind_t   runtime;
+  bool   enabled;
+} oos_platform_applications_application_info_t;
+
+typedef struct {
+  oos_platform_applications_application_info_t *ptr;
+  size_t len;
+} oos_platform_applications_list_application_info_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_applications_list_application_info_t ok;
+    oos_platform_applications_error_code_t err;
+  } val;
+} oos_platform_applications_result_list_application_info_error_code_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_applications_error_code_t err;
+  } val;
+} oos_platform_applications_result_void_error_code_t;
+
+typedef oos_platform_types_error_code_t oos_platform_system_ui_error_code_t;
+
+typedef struct oos_platform_system_ui_status_snapshot_t {
+  uint64_t   revision;
+  bool   status_bar_visible;
+  bool   locked;
+  uint32_t   background_rgb;
+  bool   dark_icons;
+  bool   show_clock;
+  bool   show_network;
+  bool   show_battery_percentage;
+  bool   battery_available;
+  int32_t   battery_percent;
+  bool   charging;
+  bool   wifi_available;
+  bool   wifi_connected;
+  bool   cellular_available;
+  bool   cellular_registered;
+  bool   roaming;
+  int32_t   signal_bars;
+  app_string_t   radio_technology;
+} oos_platform_system_ui_status_snapshot_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_system_ui_status_snapshot_t ok;
+    oos_platform_system_ui_error_code_t err;
+  } val;
+} oos_platform_system_ui_result_status_snapshot_error_code_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_system_ui_error_code_t err;
+  } val;
+} oos_platform_system_ui_result_void_error_code_t;
+
+typedef oos_platform_types_error_code_t oos_platform_system_settings_error_code_t;
+
+typedef struct oos_platform_system_settings_status_bar_preferences_t {
+  bool   show_clock;
+  bool   show_network;
+  bool   show_battery_percentage;
+  uint64_t   revision;
+} oos_platform_system_settings_status_bar_preferences_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_system_settings_status_bar_preferences_t ok;
+    oos_platform_system_settings_error_code_t err;
+  } val;
+} oos_platform_system_settings_result_status_bar_preferences_error_code_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    oos_platform_system_settings_error_code_t err;
+  } val;
+} oos_platform_system_settings_result_void_error_code_t;
+
 typedef oos_platform_types_error_code_t oos_platform_modules_error_code_t;
 
 typedef uint8_t oos_platform_modules_module_kind_t;
@@ -1443,9 +1548,12 @@ extern void oos_platform_vibrator_last_error(app_string_t *ret);
 
 // Imported Functions from `oos:platform/wifi@0.3.0`
 extern bool oos_platform_wifi_get_status(oos_platform_wifi_status_t *ret, oos_platform_wifi_error_code_t *err);
+extern bool oos_platform_wifi_enabled(bool *ret, oos_platform_wifi_error_code_t *err);
+extern bool oos_platform_wifi_set_enabled(bool enabled, oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_scan(uint32_t wait_ms, oos_platform_wifi_list_access_point_t *ret, oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_list_networks(oos_platform_wifi_list_network_t *ret, oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_connect(app_string_t *ssid, oos_platform_wifi_security_t security, app_string_t *credential, int32_t *ret, oos_platform_wifi_error_code_t *err);
+extern bool oos_platform_wifi_select(int32_t network_id, oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_disconnect(oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_reconnect(oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_forget(int32_t network_id, oos_platform_wifi_error_code_t *err);
@@ -1527,6 +1635,19 @@ extern bool oos_platform_assets_close(uint32_t handle, oos_platform_assets_error
 
 // Imported Functions from `oos:platform/system-services@0.3.0`
 extern bool oos_platform_system_services_request(app_string_t *service, app_string_t *operation, app_string_t *payload, app_string_t *ret, oos_platform_system_services_error_code_t *err);
+
+// Imported Functions from `oos:platform/applications@0.3.0`
+extern bool oos_platform_applications_enumerate(oos_platform_applications_list_application_info_t *ret, oos_platform_applications_error_code_t *err);
+extern bool oos_platform_applications_launch(app_string_t *app_id, oos_platform_applications_error_code_t *err);
+extern bool oos_platform_applications_uninstall(app_string_t *app_id, oos_platform_applications_error_code_t *err);
+
+// Imported Functions from `oos:platform/system-ui@0.3.0`
+extern bool oos_platform_system_ui_snapshot(oos_platform_system_ui_status_snapshot_t *ret, oos_platform_system_ui_error_code_t *err);
+extern bool oos_platform_system_ui_set_locked(bool locked, oos_platform_system_ui_error_code_t *err);
+
+// Imported Functions from `oos:platform/system-settings@0.3.0`
+extern bool oos_platform_system_settings_get_status_bar(oos_platform_system_settings_status_bar_preferences_t *ret, oos_platform_system_settings_error_code_t *err);
+extern bool oos_platform_system_settings_set_status_bar(bool show_clock, bool show_network, bool show_battery_percentage, oos_platform_system_settings_error_code_t *err);
 
 // Imported Functions from `oos:platform/modules@0.3.0`
 extern void oos_platform_modules_enumerate(oos_platform_modules_list_module_info_t *ret);
@@ -1630,6 +1751,10 @@ void oos_platform_wifi_network_free(oos_platform_wifi_network_t *ptr);
 
 void oos_platform_wifi_result_status_error_code_free(oos_platform_wifi_result_status_error_code_t *ptr);
 
+void oos_platform_wifi_result_bool_error_code_free(oos_platform_wifi_result_bool_error_code_t *ptr);
+
+void oos_platform_wifi_result_void_error_code_free(oos_platform_wifi_result_void_error_code_t *ptr);
+
 void oos_platform_wifi_list_access_point_free(oos_platform_wifi_list_access_point_t *ptr);
 
 void oos_platform_wifi_result_list_access_point_error_code_free(oos_platform_wifi_result_list_access_point_error_code_t *ptr);
@@ -1639,8 +1764,6 @@ void oos_platform_wifi_list_network_free(oos_platform_wifi_list_network_t *ptr);
 void oos_platform_wifi_result_list_network_error_code_free(oos_platform_wifi_result_list_network_error_code_t *ptr);
 
 void oos_platform_wifi_result_s32_error_code_free(oos_platform_wifi_result_s32_error_code_t *ptr);
-
-void oos_platform_wifi_result_void_error_code_free(oos_platform_wifi_result_void_error_code_t *ptr);
 
 void oos_platform_ip_configuration_free(oos_platform_ip_configuration_t *ptr);
 
@@ -1717,6 +1840,24 @@ void oos_platform_assets_result_list_u8_error_code_free(oos_platform_assets_resu
 void oos_platform_assets_result_void_error_code_free(oos_platform_assets_result_void_error_code_t *ptr);
 
 void oos_platform_system_services_result_string_error_code_free(oos_platform_system_services_result_string_error_code_t *ptr);
+
+void oos_platform_applications_application_info_free(oos_platform_applications_application_info_t *ptr);
+
+void oos_platform_applications_list_application_info_free(oos_platform_applications_list_application_info_t *ptr);
+
+void oos_platform_applications_result_list_application_info_error_code_free(oos_platform_applications_result_list_application_info_error_code_t *ptr);
+
+void oos_platform_applications_result_void_error_code_free(oos_platform_applications_result_void_error_code_t *ptr);
+
+void oos_platform_system_ui_status_snapshot_free(oos_platform_system_ui_status_snapshot_t *ptr);
+
+void oos_platform_system_ui_result_status_snapshot_error_code_free(oos_platform_system_ui_result_status_snapshot_error_code_t *ptr);
+
+void oos_platform_system_ui_result_void_error_code_free(oos_platform_system_ui_result_void_error_code_t *ptr);
+
+void oos_platform_system_settings_result_status_bar_preferences_error_code_free(oos_platform_system_settings_result_status_bar_preferences_error_code_t *ptr);
+
+void oos_platform_system_settings_result_void_error_code_free(oos_platform_system_settings_result_void_error_code_t *ptr);
 
 void oos_platform_modules_module_info_free(oos_platform_modules_module_info_t *ptr);
 

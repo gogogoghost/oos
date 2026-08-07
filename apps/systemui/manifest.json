@@ -1,6 +1,14 @@
 {
+  "schema": 1,
   "id": "cc.jaxy.oos.systemui",
   "name": "Orange OS SystemUI",
   "version": "0.1.0",
-  "role": "systemui"
+  "entry": {
+    "runtime": "wasm",
+    "path": "app/main"
+  },
+  "permissions": {
+    "system-ui": {},
+    "system-settings": {}
+  }
 }

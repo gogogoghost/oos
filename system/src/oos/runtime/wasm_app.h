@@ -50,6 +50,8 @@ public:
     return render(monotonic_us, ignored_delay);
   }
   bool takeExitRequest();
+  std::string takeLaunchRequest();
+  std::string takeUninstallRequest();
   void setAudioFocused(bool focused);
   void shutdown();
 

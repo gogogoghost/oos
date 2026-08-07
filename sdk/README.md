@@ -75,7 +75,7 @@ workspace or lock file. Each application locks its complete dependency graph in
 its own directory and can use these crates through a path dependency.
 
 The production WAMR 2.4.4 runtime loads the generated Canonical ABI core Wasm
-or ARMv7 AOT file. `build-native-apps.sh` also wraps the same module as a real
+or ARMv7 AOT file. The egui demo's `package.sh` also wraps the same module as a real
 Component Model artifact for runtimes that support components. WAMR 2.4.4 does
 not itself load component binaries.
 

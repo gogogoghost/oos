@@ -77,6 +77,9 @@ SONIVOX_NOTICE="$ROOT_DIR/third_party/sonivox/NOTICE"
 FLUIDLITE_LICENSE="$ROOT_DIR/third_party/fluidlite/LICENSE"
 TML_LICENSE="$ROOT_DIR/system/licenses/TinyMidiLoader-Zlib.txt"
 GENERALUSER_GS_LICENSE="$ROOT_DIR/third_party/generaluser-gs/documentation/LICENSE.txt"
+LAUNCHER_PACKAGE="$ROOT_DIR/apps/launcher/dist/application.zip"
+SETTINGS_PACKAGE="$ROOT_DIR/apps/settings/dist/application.zip"
+SYSTEM_UI_PACKAGE="$ROOT_DIR/apps/systemui/dist/application.zip"
 MEDIA_CODEC_LIB="$ROOT_DIR/build/media-codecs/$DEVICE/install/lib"
 FLUIDLITE_LIB="$ROOT_DIR/build/android-$DEVICE/third_party/fluidlite"
 
@@ -96,6 +99,9 @@ package_require_file "$SONIVOX_NOTICE"
 package_require_file "$FLUIDLITE_LICENSE"
 package_require_file "$TML_LICENSE"
 package_require_file "$GENERALUSER_GS_LICENSE"
+package_require_file "$LAUNCHER_PACKAGE"
+package_require_file "$SETTINGS_PACKAGE"
+package_require_file "$SYSTEM_UI_PACKAGE"
 package_require_file "$MEDIA_CODEC_LIB/libavformat.so"
 package_require_file "$FLUIDLITE_LIB/libfluidlite.so"
 
@@ -109,7 +115,10 @@ cleanup() {
 trap cleanup EXIT
 STAGING="$STAGING_ROOT/$RES_NAME"
 mkdir -p "$STAGING/bin" "$STAGING/lib" "$STAGING/libexec" \
-  "$STAGING/share/licenses/oos"
+  "$STAGING/share/licenses/oos" \
+  "$STAGING/packages/cc.jaxy.oos.launcher" \
+  "$STAGING/packages/cc.jaxy.oos.settings" \
+  "$STAGING/packages/cc.jaxy.oos.systemui"
 
 install -m 0755 "$OOS_BINARY" "$STAGING/bin/oos"
 if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
@@ -139,6 +148,12 @@ install -m 0644 "$TML_LICENSE" \
   "$STAGING/share/licenses/oos/TinyMidiLoader-Zlib.txt"
 install -m 0644 "$GENERALUSER_GS_LICENSE" \
   "$STAGING/share/licenses/oos/GeneralUser-GS.txt"
+install -m 0644 "$LAUNCHER_PACKAGE" \
+  "$STAGING/packages/cc.jaxy.oos.launcher/application.zip"
+install -m 0644 "$SETTINGS_PACKAGE" \
+  "$STAGING/packages/cc.jaxy.oos.settings/application.zip"
+install -m 0644 "$SYSTEM_UI_PACKAGE" \
+  "$STAGING/packages/cc.jaxy.oos.systemui/application.zip"
 cp -a "$FLUIDLITE_LIB/libfluidlite.so"* "$STAGING/lib/"
 for library in avformat avcodec swresample avutil; do
   cp -a "$MEDIA_CODEC_LIB/lib${library}.so"* "$STAGING/lib/"
@@ -184,7 +199,7 @@ printf '%s\n' \
   "system_font=/system/fonts/Roboto-Regular.ttf" \
   "system_font_fallback=/system/fonts/DroidSansFallback.ttf" \
   "system_icons=font-awesome-5-free" \
-  "system_ui=lvgl-${LVGL_VERSION#v}" \
+  "system_ui=lvgl-wasm-package" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   >"$STAGING/manifest.env"

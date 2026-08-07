@@ -57,11 +57,30 @@ if(OOS_BUILD_DEVICE_TESTS)
   add_test(NAME supplicant-text COMMAND oos_test_supplicant_text)
 
   add_executable(oos_test_ui_backends
-    "${CMAKE_SOURCE_DIR}/tests/host/ui_backend_test.cpp")
+    "${CMAKE_SOURCE_DIR}/tests/host/ui_backend_test.cpp"
+    "${OOS_REPO_ROOT}/apps/launcher/src/launcher.cpp"
+    "${OOS_REPO_ROOT}/apps/settings/src/settings.cpp"
+    "${OOS_REPO_ROOT}/apps/systemui/src/system_ui.cpp")
+  set(OOS_TEST_LAUNCHER_LOGO
+      "${OOS_REPO_ROOT}/apps/launcher/assets/oos-logo-32-bgra.bin")
+  file(READ "${OOS_TEST_LAUNCHER_LOGO}" OOS_LAUNCHER_LOGO_HEX HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1,"
+    OOS_LAUNCHER_LOGO_BYTES "${OOS_LAUNCHER_LOGO_HEX}")
+  configure_file(
+    "${OOS_REPO_ROOT}/apps/launcher/src/embedded_logo.cpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/test_embedded_logo.cpp" @ONLY)
+  target_sources(oos_test_ui_backends PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/test_embedded_logo.cpp")
+  unset(OOS_LAUNCHER_LOGO_HEX)
+  unset(OOS_LAUNCHER_LOGO_BYTES)
+  target_include_directories(oos_test_ui_backends PRIVATE
+    "${OOS_REPO_ROOT}/apps/launcher/include"
+    "${OOS_REPO_ROOT}/apps/settings/include"
+    "${OOS_REPO_ROOT}/apps/systemui/include")
   target_compile_options(oos_test_ui_backends PRIVATE -UNDEBUG)
   target_link_libraries(oos_test_ui_backends PRIVATE
-    oos_sdk_ui oos_launcher_app oos_settings_app oos_systemui_app
-    oos_system_settings oos_app_sessions oos::platform)
+    oos_sdk_ui oos_system_settings oos_app_sessions oos_app_runtime
+    oos::platform)
   add_test(NAME ui-backends COMMAND oos_test_ui_backends)
 
   add_executable(oos_test_js_runtime

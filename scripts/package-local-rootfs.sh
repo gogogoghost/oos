@@ -9,6 +9,9 @@ OOS_PREFIX="$ROOTFS/opt/oos"
 
 required=(
   "$ROOT_DIR/build/local/bin/oos"
+  "$ROOT_DIR/apps/launcher/dist/application.zip"
+  "$ROOT_DIR/apps/settings/dist/application.zip"
+  "$ROOT_DIR/apps/systemui/dist/application.zip"
   "$ROOT_DIR/system/devices/local/config/keymap.conf"
   "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
   "$ROOT_DIR/third_party/quickjs/LICENSE"
@@ -45,11 +48,11 @@ install -m 0755 "$ROOT_DIR/build/local/bin/oos" "$OOS_PREFIX/bin/oos"
 rm -f "$OOS_PREFIX/share/fonts/ui-proportional.otf" \
   "$OOS_PREFIX/share/licenses/oos/RedHatFonts.txt"
 rmdir "$OOS_PREFIX/share/fonts" 2>/dev/null || true
-for launcher_id in org.orangeos.launcher cc.jaxy.oos.launcher; do
-  rm -f "$OOS_PREFIX/packages/$launcher_id/application.zip"
-  rmdir "$OOS_PREFIX/packages/$launcher_id" 2>/dev/null || true
+for app_id in cc.jaxy.oos.launcher cc.jaxy.oos.settings cc.jaxy.oos.systemui; do
+  mkdir -p "$OOS_PREFIX/packages/$app_id"
+  install -m 0644 "$ROOT_DIR/apps/${app_id##*.}/dist/application.zip" \
+    "$OOS_PREFIX/packages/$app_id/application.zip"
 done
-rmdir "$OOS_PREFIX/packages" 2>/dev/null || true
 install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
   "$OOS_PREFIX/etc/local-keymap.conf"
 install -m 0644 "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE" \
@@ -97,7 +100,7 @@ printf '%s\n' \
   "media_sonivox=${SONIVOX_VERSION}" \
   "media_fluidlite=${FLUIDLITE_VERSION}" \
   "media_generaluser_gs=${GENERALUSER_GS_VERSION}" \
-  "system_ui=lvgl" \
+  "system_ui=lvgl-wasm-package" \
   "system_icons=font-awesome-5-free" \
   "system_font=host-system-font" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \

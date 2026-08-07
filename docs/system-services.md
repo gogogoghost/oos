@@ -1,7 +1,7 @@
 # System Services
 
 `oos::services::SystemServiceHub` is the device-independent policy and state
-broker used by trusted native applications through
+broker used by permission-granted applications through
 `oos:platform/system-services@0.3.0`. It stores bounded JSON state in
 `/data/system/services.sqlite3`.
 

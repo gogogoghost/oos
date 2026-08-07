@@ -9,12 +9,13 @@ sdk/     public WIT/Rust/JS SDK plus Solid, Clay, egui, and LVGL backends
 apps/    one directory per application
 ```
 
-The production shell currently compiles three trusted applications into the
-OOS process. `apps/launcher` and `apps/settings` each retain an independent
-240x298 application surface. The generic application session manager makes
-only the foreground surface visible. `apps/systemui` owns only global UI: the
-22-pixel status bar and the full content-area overlay used by notifications and
-the lock screen. None of these applications is implemented inside `system/`.
+The production shell installs three LVGL Wasm packages. `apps/launcher` and
+`apps/settings` each retain an independent 240x298 application surface. The
+generic application session manager makes only the foreground surface visible.
+`apps/systemui` receives a transparent 240x320 surface above application
+sessions and draws only global UI: the 22-pixel status bar plus notifications
+and the lock screen. None of these applications is implemented inside
+`system/`.
 
 System-owned LVGL surfaces use the platform system font. On Android,
 Roboto is the primary face and DroidSansFallback supplies missing CJK glyphs
@@ -27,8 +28,7 @@ device:
 | Layer | Bounds | Z | Owner |
 | --- | --- | ---: | --- |
 | Application sessions | `0,22 240x298` | 0 | One layer per resident app; one visible |
-| System overlay | `0,22 240x298` | 100 | SystemUI |
-| Status bar | `0,0 240x22` | 200 | SystemUI |
+| System status/overlay | `0,0 240x320` | 200 | SystemUI package |
 
 Each session layer receives its own `GraphicsHost`. Texture handles are translated to
 compositor-owned handles, retained draw lists are clipped and offset into

@@ -32,8 +32,10 @@ public:
   bool activate(const std::string &id);
   bool frame(int64_t monotonic_us, uint32_t &next_delay_ms);
   std::string takeLaunchRequest();
+  std::string takeUninstallRequest();
   bool takeExitRequest();
   bool destroy(const std::string &id);
+  bool unregisterFactory(const std::string &id);
   void shutdown();
 
   bool dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) override;

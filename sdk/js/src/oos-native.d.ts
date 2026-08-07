@@ -11,6 +11,60 @@ declare module "oos:runtime" {
   export function log(level: LogLevel, message: string): void;
 }
 
+declare module "oos:applications" {
+  export type ApplicationRuntime = "js" | "wasm";
+  export interface ApplicationInfo {
+    id: string;
+    name: string;
+    version: string;
+    runtime: ApplicationRuntime;
+    enabled: boolean;
+  }
+  export function list(): ApplicationInfo[];
+  export function launch(appId: string): void;
+  export function uninstall(appId: string): void;
+}
+
+declare module "oos:system-ui" {
+  export interface SystemUiSnapshot {
+    revision: number;
+    statusBarVisible: boolean;
+    locked: boolean;
+    showClock: boolean;
+    showNetwork: boolean;
+    showBatteryPercentage: boolean;
+    backgroundRgb: number;
+    darkIcons: boolean;
+    batteryAvailable: boolean;
+    batteryPercent: number;
+    charging: boolean;
+    wifiAvailable: boolean;
+    wifiConnected: boolean;
+    cellularAvailable: boolean;
+    cellularRegistered: boolean;
+    roaming: boolean;
+    signalBars: number;
+    radioTechnology: string;
+  }
+  export function snapshot(): string;
+  export function setLocked(locked: boolean): void;
+}
+
+declare module "oos:system-settings" {
+  export interface StatusBarPreferences {
+    showClock: boolean;
+    showNetwork: boolean;
+    showBatteryPercentage: boolean;
+    revision: bigint;
+  }
+  export function getStatusBar(): StatusBarPreferences;
+  export function setStatusBar(
+    showClock: boolean,
+    showNetwork: boolean,
+    showBatteryPercentage: boolean,
+  ): void;
+}
+
 declare module "oos:modules" {
   export type ModuleKind = "js" | "wasm";
   export interface ModuleInfo { name: string; runtime: ModuleKind }
@@ -275,12 +329,15 @@ declare module "oos:wifi" {
   export interface Status { state: string; ssid: string; bssid: string; ipAddress: string; networkId: number }
   export interface AccessPoint { bssid: string; frequencyMhz: number; signalDbm: number; capabilities: string; ssid: string }
   export interface Network { id: number; ssid: string; bssid: string; capabilities: string }
+  export function enabled(): boolean;
+  export function setEnabled(enabled: boolean): void;
   export function getStatus(): Status;
   export function scan(waitMs: number): AccessPoint[];
   export function listNetworks(): Network[];
   export function connect(ssid: string, security: number, credential: string): number;
   export function disconnect(): void;
   export function reconnect(): void;
+  export function select(networkId: number): void;
   export function forget(networkId: number): void;
   export function saveConfiguration(): void;
   export function lastError(): string;

@@ -226,18 +226,16 @@ add_library(oos_app_runtime STATIC
   src/oos/runtime/module_host.cpp
   src/oos/runtime/native_ui.cpp
   src/oos/runtime/native_app_manager.cpp
-  src/oos/runtime/wasm_app.cpp)
+  src/oos/runtime/wasm_app.cpp
+  src/oos/ui/system_ui_state.cpp)
 target_include_directories(oos_app_runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_include_directories(oos_app_runtime SYSTEM PRIVATE "${OOS_STB_DIR}")
 target_link_libraries(oos_app_runtime PUBLIC
   oos_quickjs oos_wamr oos_input oos_app_model oos_device_storage oos_font_assets
-  oos_system_services oos_media)
+  oos_system_services oos_system_settings oos_media)
 target_link_libraries(oos_window PUBLIC
   oos_input)
-
-add_subdirectory("${OOS_REPO_ROOT}/apps"
-                 "${CMAKE_CURRENT_BINARY_DIR}/apps")
 
 set(OOS_BOOT_SPLASH_SOURCE
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/boot/nokia-2780-flip/boot-splash.png")
@@ -269,8 +267,7 @@ if(NOT BUILD_LOCAL)
 endif()
 target_link_libraries(oos PRIVATE
   oos_device_api oos_compositor oos_app_model oos_device_storage oos_sdk_ui
-  oos_window oos_app_sessions oos_app_runtime oos_system_settings oos_launcher_app
-  oos_settings_app oos_systemui_app)
+  oos_window oos_app_sessions oos_app_runtime oos_system_settings)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 

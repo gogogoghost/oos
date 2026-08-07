@@ -14,10 +14,7 @@
 #include <vector>
 
 #include "oos/apps/app_repository.h"
-#include "oos/apps/launcher/launcher.h"
 #include "oos/apps/permissions.h"
-#include "oos/apps/settings/settings.h"
-#include "oos/apps/systemui/system_ui.h"
 #include "oos/compositor/compositor.h"
 #include "oos/device/device.h"
 #include "oos/device/display.h"
@@ -27,8 +24,8 @@
 #include "oos/runtime/application_session_manager.h"
 #include "oos/runtime/js_app.h"
 #include "oos/runtime/wasm_app.h"
-#include "oos/sdk/ui/theme.h"
 #include "oos/ui/system_status.h"
+#include "oos/ui/system_ui_state.h"
 #include "oos/ui/system_ui_settings.h"
 #include "oos/window/input_router.h"
 
@@ -49,57 +46,7 @@ using oos::runtime::WasmApp;
 using oos::runtime::WasmAppOptions;
 
 constexpr int kFrameIntervalMs = 33;
-constexpr const char *kLauncherId = "cc.jaxy.oos.launcher";
-constexpr const char *kSettingsId = "cc.jaxy.oos.settings";
-
-class LauncherSession final : public ApplicationSession {
-public:
-  LauncherSession(GraphicsHost &graphics, oos::apps::AppRepository &repository,
-                  oos::ui::StatusBarAppearanceController &status_bar)
-      : app_(graphics, repository, status_bar) {}
-
-  bool dispatchKey(const KeyEvent &event, int64_t monotonic_us) override {
-    return app_.dispatchKey(event, monotonic_us);
-  }
-  bool initialize() override { return app_.initialize(); }
-  void shutdown() override { app_.shutdown(); }
-  bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) override {
-    return app_.frame(monotonic_us, next_delay_ms);
-  }
-  std::string takeLaunchRequest() override { return app_.takeLaunchRequest(); }
-  bool takeExitRequest() override { return false; }
-  const char *lastError() const override { return app_.lastError(); }
-
-private:
-  oos::apps::launcher::Launcher app_;
-};
-
-class SettingsSession final : public ApplicationSession {
-public:
-  SettingsSession(GraphicsHost &graphics, oos::apps::AppRepository &repository,
-                  const oos::device::Device &device,
-                  oos::ui::SystemUiSettings &system,
-                  oos::ui::StatusBarAppearanceController &status_bar,
-                  std::string data_root)
-      : app_(graphics, repository, device, system, status_bar,
-             std::move(data_root)) {}
-
-  bool dispatchKey(const KeyEvent &event, int64_t monotonic_us) override {
-    return app_.dispatchKey(event, monotonic_us);
-  }
-  bool initialize() override { return app_.initialize(); }
-  void shutdown() override { app_.shutdown(); }
-  bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) override {
-    return app_.frame(monotonic_us, next_delay_ms);
-  }
-  std::string takeLaunchRequest() override { return app_.takeLaunchRequest(); }
-  bool takeExitRequest() override { return false; }
-  const char *lastError() const override { return app_.lastError(); }
-
-private:
-  oos::apps::settings::Settings app_;
-};
-
+int64_t monotonicMicros();
 struct PackagedSessionConfig {
   oos::apps::AppRuntimeKind runtime = oos::apps::AppRuntimeKind::WebAssembly;
   std::string executable_path;
@@ -107,6 +54,7 @@ struct PackagedSessionConfig {
   std::string application_directory;
   std::string module_directory;
   std::vector<oos::apps::AppModule> modules;
+  uint32_t permission_mask = 0;
 };
 
 class PackagedSession final : public ApplicationSession {
@@ -157,7 +105,12 @@ public:
                               : wasm_->render(monotonic_us, next_delay_ms);
     return rendered && scene_.present();
   }
-  std::string takeLaunchRequest() override { return {}; }
+  std::string takeLaunchRequest() override {
+    return js_ ? js_->takeLaunchRequest() : wasm_->takeLaunchRequest();
+  }
+  std::string takeUninstallRequest() override {
+    return js_ ? js_->takeUninstallRequest() : wasm_->takeUninstallRequest();
+  }
   bool takeExitRequest() override {
     return js_ ? js_->takeExitRequest() : wasm_->takeExitRequest();
   }
@@ -178,6 +131,29 @@ private:
   oos::apps::AppRuntimeKind runtime_;
   std::unique_ptr<JsApp> js_;
   std::unique_ptr<WasmApp> wasm_;
+};
+
+class SystemUiInputTarget final : public oos::window::SystemInputTarget {
+public:
+  SystemUiInputTarget(PackagedSession &session, oos::ui::SystemUiState &state)
+      : session_(session), state_(state) {}
+
+  bool routeKey(const KeyEvent &event, bool &consumed) override {
+    consumed = state_.locked();
+    if (!consumed)
+      return true;
+    if (session_.dispatchKey(event, monotonicMicros()))
+      return true;
+    error_ = session_.lastError();
+    return false;
+  }
+
+  const std::string &lastError() const override { return error_; }
+
+private:
+  PackagedSession &session_;
+  oos::ui::SystemUiState &state_;
+  std::string error_;
 };
 
 volatile std::sig_atomic_t g_stop_requested = 0;
@@ -238,6 +214,7 @@ bool preparePackagedSession(oos::apps::AppRepository &repository,
   config.context.service_permission_mask =
       oos::apps::deviceServicePermissionMask(
           launch.app.manifest.requested_permissions);
+  config.permission_mask = config.context.service_permission_mask;
   config.context.enforce_service_permissions = true;
   return true;
 }
@@ -326,8 +303,7 @@ void dispatchShellKey(void *data, const KeyEvent &event) {
 
 void printUsage(const char *program) {
   std::fprintf(stderr,
-               "usage: %s [--builtin launcher|settings | --app APP_ID | "
-               "--module WASM_BASE]\n"
+               "usage: %s [--app APP_ID | --module WASM_BASE]\n"
                "       %s --install APPLICATION.zip\n"
                "       %s --list-apps\n",
                program, program, program);
@@ -382,33 +358,25 @@ int run(int argc, char **argv) {
   if (repository_result >= 0)
     return repository_result;
 
-  const char *builtin_id = argc == 1 ? kLauncherId : nullptr;
+  const char *launcher_id = environmentOr("OOS_LAUNCHER_APP_ID",
+                                          "cc.jaxy.oos.launcher");
+  const char *system_ui_id = environmentOr("OOS_SYSTEM_UI_APP_ID",
+                                           "cc.jaxy.oos.systemui");
   const char *raw_module = nullptr;
-  const char *app_id = nullptr;
+  const char *app_id = argc == 1 ? launcher_id : nullptr;
   if (argc == 2) {
     raw_module = argv[1];
   } else if (argc == 3 && std::strcmp(argv[1], "--module") == 0) {
     raw_module = argv[2];
   } else if (argc == 3 && std::strcmp(argv[1], "--app") == 0) {
     app_id = argv[2];
-  } else if (argc == 3 && std::strcmp(argv[1], "--builtin") == 0) {
-    if (std::strcmp(argv[2], "launcher") == 0)
-      builtin_id = kLauncherId;
-    else if (std::strcmp(argv[2], "settings") == 0)
-      builtin_id = kSettingsId;
-    else {
-      printUsage(argv[0]);
-      return 2;
-    }
   } else if (argc != 1) {
     printUsage(argv[0]);
     return 2;
   }
 
   PackagedSessionConfig initial_app;
-  if (builtin_id) {
-    // Built-in shell applications are separate targets managed by the host.
-  } else if (raw_module) {
+  if (raw_module) {
     initial_app.runtime = oos::apps::AppRuntimeKind::WebAssembly;
     initial_app.executable_path = raw_module;
     initial_app.context.app_id = "diagnostic";
@@ -449,68 +417,77 @@ int run(int argc, char **argv) {
 
   constexpr uint32_t kStatusHeight = 22;
   const uint32_t content_height = descriptor.primary_height - kStatusHeight;
-  auto overlay_surface = compositor.createLayer(
-      {"system-overlay", 0, static_cast<int32_t>(kStatusHeight),
-       descriptor.primary_width, content_height, 100});
-  auto status_surface = compositor.createLayer(
-      {"status-bar", 0, 0, descriptor.primary_width, kStatusHeight, 200});
-  if (!overlay_surface || !status_surface) {
-    std::fprintf(stderr, "failed to create OOS compositor layers\n");
-    platform_device->shutdown();
-    return 1;
-  }
-
   oos::ui::DeviceStatusMonitor status_monitor(*platform_device);
   status_monitor.start();
   oos::ui::SystemUiSettings shell_settings(data_root);
-  if (!shell_settings.initialize())
+  if (!shell_settings.initialize()) {
     std::fprintf(stderr, "load system UI settings failed: %s\n",
                  shell_settings.lastError().c_str());
-  oos::apps::systemui::SystemUi system_ui(*status_surface, *overlay_surface,
-                                          &status_monitor, &shell_settings);
-  if (!system_ui.initialize()) {
-    std::fprintf(stderr, "failed to start SystemUI: %s\n",
-                 system_ui.lastError().c_str());
     status_monitor.stop();
     platform_device->shutdown();
     return 1;
   }
+  oos::ui::SystemUiState system_ui_state(&status_monitor, &shell_settings);
 
   const int wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
   if (wake_fd < 0)
     std::fprintf(stderr, "create runtime wake event failed: %s\n",
                  std::strerror(errno));
 
-  ApplicationSessionManager sessions(
-      compositor, 0, static_cast<int32_t>(kStatusHeight),
-      descriptor.primary_width, content_height, system_ui,
-      {oos::sdk::ui::theme::kStatusBackground, false});
-  if (!sessions.registerFactory(
-          kLauncherId,
-          [&](GraphicsHost &graphics,
-              oos::ui::StatusBarAppearanceController &status_bar) {
-            return std::make_unique<LauncherSession>(graphics, repository,
-                                                     status_bar);
-          }) ||
-      !sessions.registerFactory(
-          kSettingsId, [&](GraphicsHost &graphics,
-                           oos::ui::StatusBarAppearanceController &status_bar) {
-            return std::make_unique<SettingsSession>(
-                graphics, repository, *platform_device, shell_settings,
-                status_bar, data_root);
-          })) {
-    std::fprintf(stderr, "register built-in applications failed: %s\n",
-                 sessions.lastError());
-    system_ui.shutdown();
+  PackagedSessionConfig system_ui_config;
+  if (!preparePackagedSession(repository, system_ui_id, data_root,
+                              system_ui_config) ||
+      !oos::apps::hasDeviceServicePermission(
+          system_ui_config.permission_mask,
+          oos::apps::DeviceServicePermission::SystemUi)) {
+    std::fprintf(stderr, "prepare SystemUI application %s failed: %s\n",
+                 system_ui_id,
+                 repository.lastError().empty()
+                     ? "manifest does not grant system-ui"
+                     : repository.lastError().c_str());
     status_monitor.stop();
     platform_device->shutdown();
+    if (wake_fd >= 0)
+      ::close(wake_fd);
     return 1;
   }
+  system_ui_config.context.wake_fd = wake_fd;
+  system_ui_config.context.system_ui_state = &system_ui_state;
+  system_ui_config.context.system_ui_settings = &shell_settings;
+  auto system_ui_surface = compositor.createLayer(
+      {system_ui_id, 0, 0, descriptor.primary_width,
+       descriptor.primary_height, 200});
+  if (!system_ui_surface) {
+    std::fprintf(stderr, "create SystemUI application layer failed\n");
+    status_monitor.stop();
+    platform_device->shutdown();
+    if (wake_fd >= 0)
+      ::close(wake_fd);
+    return 1;
+  }
+  PackagedSession system_ui(*system_ui_surface, *platform_device,
+                            system_ui_state, std::move(system_ui_config));
+  if (!system_ui.initialize()) {
+    std::fprintf(stderr, "start SystemUI application failed: %s\n",
+                 system_ui.lastError());
+    status_monitor.stop();
+    platform_device->shutdown();
+    if (wake_fd >= 0)
+      ::close(wake_fd);
+    return 1;
+  }
+
+  ApplicationSessionManager sessions(
+      compositor, 0, static_cast<int32_t>(kStatusHeight),
+      descriptor.primary_width, content_height, system_ui_state,
+      {0x101214, false});
 
   auto register_app = [&](const std::string &id,
                           const PackagedSessionConfig &config) {
     PackagedSessionConfig launch_config = config;
     launch_config.context.wake_fd = wake_fd;
+    launch_config.context.system_ui_state = &system_ui_state;
+    launch_config.context.system_ui_settings = &shell_settings;
     return sessions.registerFactory(
         id,
         [&, launch_config](GraphicsHost &graphics,
@@ -528,11 +505,9 @@ int run(int argc, char **argv) {
     return register_app(id, config);
   };
 
-  std::string runtime_id = builtin_id   ? builtin_id
-                           : raw_module ? "diagnostic"
-                                        : app_id;
-  if (!builtin_id && !register_app(runtime_id, initial_app)) {
-    std::fprintf(stderr, "register native application %s failed: %s\n",
+  std::string runtime_id = raw_module ? "diagnostic" : app_id;
+  if (!register_app(runtime_id, initial_app)) {
+    std::fprintf(stderr, "register application %s failed: %s\n",
                  runtime_id.c_str(), sessions.lastError());
     system_ui.shutdown();
     status_monitor.stop();
@@ -552,7 +527,8 @@ int run(int argc, char **argv) {
                runtime_id.c_str());
   std::fflush(stderr);
 
-  oos::window::InputRouter input_router(system_ui, sessions);
+  SystemUiInputTarget system_input(system_ui, system_ui_state);
+  oos::window::InputRouter input_router(system_input, sessions);
   ShellInputContext input_context{&input_router};
   while (!g_stop_requested && !input.stopRequested()) {
     const std::string launch_request = sessions.takeLaunchRequest();
@@ -568,25 +544,46 @@ int run(int argc, char **argv) {
       }
       runtime_id = launch_request;
     }
+    const std::string uninstall_request = sessions.takeUninstallRequest();
+    if (!uninstall_request.empty()) {
+      const bool protected_app = uninstall_request == runtime_id ||
+                                 uninstall_request == launcher_id ||
+                                 uninstall_request == system_ui_id;
+      const bool unregistered =
+          !protected_app &&
+          (!sessions.registered(uninstall_request) ||
+           sessions.unregisterFactory(uninstall_request));
+      if (protected_app || !unregistered ||
+          !repository.uninstall(uninstall_request.c_str())) {
+        const char *message =
+            protected_app
+                ? "the active shell application cannot be uninstalled"
+                : sessions.lastError()[0] ? sessions.lastError()
+                                          : repository.lastError().c_str();
+        std::fprintf(stderr, "uninstall application %s failed: %s\n",
+                     uninstall_request.c_str(), message);
+      }
+    }
     if (sessions.takeExitRequest()) {
       const std::string closing_id = runtime_id;
-      if (closing_id == kLauncherId || !sessions.activate(kLauncherId) ||
+      if (closing_id == launcher_id || !ensure_registered(launcher_id) ||
+          !sessions.activate(launcher_id) ||
           !sessions.destroy(closing_id)) {
         std::fprintf(stderr, "close application %s failed: %s\n",
                      closing_id.c_str(), sessions.lastError());
         break;
       }
-      runtime_id = kLauncherId;
+      runtime_id = launcher_id;
     }
     const int64_t frame_time = monotonicMicros();
     uint32_t system_ui_delay_ms = 1000;
     uint32_t application_delay_ms = 1000;
     if (!system_ui.frame(frame_time, system_ui_delay_ms)) {
       std::fprintf(stderr, "SystemUI frame failed: %s\n",
-                   system_ui.lastError().c_str());
+                   system_ui.lastError());
       break;
     }
-    if (!system_ui.locked()) {
+    if (!system_ui_state.locked()) {
       if (!sessions.frame(frame_time, application_delay_ms)) {
         std::fprintf(stderr, "application frame failed: %s\n",
                      sessions.lastError());

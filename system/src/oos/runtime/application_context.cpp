@@ -9,6 +9,8 @@
 #include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
+#include "oos/ui/system_ui_state.h"
+#include "oos/ui/system_ui_settings.h"
 
 #include <algorithm>
 #include <new>
@@ -172,12 +174,111 @@ ui::StatusBarAppearanceController *ApplicationContext::statusBar() const {
   return options_.status_bar;
 }
 
+ui::SystemUiState *ApplicationContext::systemUiState() const {
+  return options_.system_ui_state;
+}
+
+ui::SystemUiSettings *ApplicationContext::systemUiSettings() const {
+  return options_.system_ui_settings;
+}
+
 void ApplicationContext::setAudioFocused(bool focused) {
   audio_focused_ = focused;
   if (media_)
     media_->setFocused(focused);
   if (services_)
     services_->setAudioFocused(focused);
+}
+
+bool ApplicationContext::listApplications(
+    std::vector<ApplicationInfo> &applications) {
+  error_.clear();
+  applications.clear();
+  const uint32_t allowed =
+      apps::permissionBit(apps::DeviceServicePermission::AppsLaunch) |
+      apps::permissionBit(apps::DeviceServicePermission::AppsManagement);
+  if (!permissionGranted(allowed)) {
+    error_ = "application listing permission denied";
+    return false;
+  }
+  if (!options_.app_repository) {
+    error_ = "application repository is unavailable";
+    return false;
+  }
+  std::vector<apps::AppRecord> records;
+  if (!options_.app_repository->list(records)) {
+    error_ = options_.app_repository->lastError();
+    return false;
+  }
+  applications.reserve(records.size());
+  for (const apps::AppRecord &record : records) {
+    applications.push_back({record.manifest.id, record.manifest.name,
+                            record.manifest.version,
+                            record.manifest.entry.runtime, record.enabled});
+  }
+  return true;
+}
+
+bool ApplicationContext::requestApplicationLaunch(const std::string &app_id) {
+  error_.clear();
+  const uint32_t allowed =
+      apps::permissionBit(apps::DeviceServicePermission::AppsLaunch) |
+      apps::permissionBit(apps::DeviceServicePermission::AppsManagement);
+  if (!permissionGranted(allowed)) {
+    error_ = "application launch permission denied";
+    return false;
+  }
+  apps::AppRecord record;
+  if (app_id.empty() || !options_.app_repository ||
+      !options_.app_repository->resolve(app_id.c_str(), record)) {
+    error_ = options_.app_repository
+                 ? options_.app_repository->lastError()
+                 : "application repository is unavailable";
+    return false;
+  }
+  if (!record.enabled) {
+    error_ = "application is disabled: " + app_id;
+    return false;
+  }
+  launch_request_ = app_id;
+  return true;
+}
+
+bool ApplicationContext::requestApplicationUninstall(
+    const std::string &app_id) {
+  error_.clear();
+  const uint32_t required =
+      apps::permissionBit(apps::DeviceServicePermission::AppsManagement);
+  if (!permissionGranted(required)) {
+    error_ = "application management permission denied";
+    return false;
+  }
+  if (app_id.empty() || app_id == options_.app_id) {
+    error_ = "an application cannot uninstall itself";
+    return false;
+  }
+  apps::AppRecord record;
+  if (!options_.app_repository ||
+      !options_.app_repository->resolve(app_id.c_str(), record)) {
+    error_ = options_.app_repository
+                 ? options_.app_repository->lastError()
+                 : "application repository is unavailable";
+    return false;
+  }
+  uninstall_request_ = app_id;
+  return true;
+}
+
+std::string ApplicationContext::takeApplicationLaunchRequest() {
+  std::string request = std::move(launch_request_);
+  launch_request_.clear();
+  return request;
+}
+
+std::string ApplicationContext::takeApplicationUninstallRequest() {
+  std::string request = std::move(uninstall_request_);
+  uninstall_request_.clear();
+  return request;
 }
 
 } // namespace oos::runtime

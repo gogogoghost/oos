@@ -1,6 +1,11 @@
 #include "oos/apps/systemui/system_ui.h"
 
+#ifndef OOS_WASM_GUEST
 #include "oos/compositor/compositor.h"
+#else
+#include "oos/runtime/graphics_host.h"
+#include "oos/sdk/guest/platform.h"
+#endif
 #include "oos/sdk/ui/fonts.h"
 #include "oos/sdk/ui/icons.h"
 #include "oos/sdk/ui/lvgl_backend.h"
@@ -47,12 +52,20 @@ lv_obj_t *makeLabel(lv_obj_t *parent, const char *text, const lv_font_t *font,
 }
 
 std::string currentTime() {
+#ifdef OOS_WASM_GUEST
+  const uint32_t minutes = sdk::guest::wallClockMinute();
+  char value[6] = {};
+  std::snprintf(value, sizeof(value), "%02u:%02u", (minutes / 60) % 24,
+                minutes % 60);
+  return value;
+#else
   const std::time_t now = std::time(nullptr);
   std::tm local = {};
   localtime_r(&now, &local);
   char value[6] = {};
   std::strftime(value, sizeof(value), "%H:%M", &local);
   return value;
+#endif
 }
 
 } // namespace
@@ -61,6 +74,12 @@ class SystemUi::Impl {
 public:
   enum class OverlayMode { Hidden, Notification, Locked };
 
+#ifdef OOS_WASM_GUEST
+  Impl(runtime::GraphicsHost &surface, ui::SystemStatusSource *status_source,
+       ui::SystemUiSettings *settings)
+      : status_backend(surface, sdk_ui::LvglBackendOptions{true}),
+        surface(surface), status_source(status_source), settings(settings) {}
+#else
   Impl(compositor::LayerSurface &status_surface,
        compositor::LayerSurface &overlay_surface,
        ui::SystemStatusSource *status_source, ui::SystemUiSettings *settings)
@@ -68,13 +87,22 @@ public:
         overlay_backend(overlay_surface, sdk_ui::LvglBackendOptions{true}),
         status_surface(status_surface), overlay_surface(overlay_surface),
         status_source(status_source), settings(settings) {}
+#endif
 
   bool initialize() {
     if (initialized)
       return true;
-    if (!status_backend.initialize() || !overlay_backend.initialize()) {
+    if (!status_backend.initialize()
+#ifndef OOS_WASM_GUEST
+        || !overlay_backend.initialize()
+#endif
+    ) {
       error = !status_backend.lastError().empty() ? status_backend.lastError()
+#ifndef OOS_WASM_GUEST
                                                   : overlay_backend.lastError();
+#else
+                                                  : "SystemUI backend failed";
+#endif
       shutdown();
       return false;
     }
@@ -85,15 +113,23 @@ public:
       return false;
     }
     stripObject(root);
+#ifdef OOS_WASM_GUEST
+    lv_obj_set_style_bg_opa(root, LV_OPA_TRANSP, 0);
+    status_root = lv_obj_create(root);
+    stripObject(status_root);
+    lv_obj_set_size(status_root, LV_PCT(100), 22);
+    lv_obj_set_pos(status_root, 0, 0);
+#else
     status_root = root;
-    lv_obj_set_style_bg_color(root, color(appearance.background_rgb), 0);
-    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+#endif
+    lv_obj_set_style_bg_color(status_root, color(appearance.background_rgb), 0);
+    lv_obj_set_style_bg_opa(status_root, LV_OPA_COVER, 0);
 
-    status_time =
-        makeLabel(root, currentTime().c_str(), sdk_ui::fonts::get(12), kText);
+    status_time = makeLabel(status_root, currentTime().c_str(),
+                            sdk_ui::fonts::get(12), kText);
     lv_obj_align(status_time, LV_ALIGN_LEFT_MID, 7, 0);
 
-    indicators = lv_obj_create(root);
+    indicators = lv_obj_create(status_root);
     stripObject(indicators);
     lv_obj_set_size(indicators, 188, 22);
     lv_obj_align(indicators, LV_ALIGN_RIGHT_MID, -6, 0);
@@ -128,7 +164,14 @@ public:
     lv_obj_add_flag(wifi, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(charge, LV_OBJ_FLAG_HIDDEN);
 
+#ifdef OOS_WASM_GUEST
+    overlay_root = lv_obj_create(root);
+    stripObject(overlay_root);
+    lv_obj_set_size(overlay_root, surface.width(), surface.height() - 22);
+    lv_obj_set_pos(overlay_root, 0, 22);
+#else
     overlay_root = overlay_backend.root();
+#endif
     if (!overlay_root) {
       error = "SystemUI overlay surface has no LVGL root";
       shutdown();
@@ -148,7 +191,7 @@ public:
     lv_label_set_long_mode(overlay_message, LV_LABEL_LONG_DOT);
     lv_label_set_long_mode(overlay_hint, LV_LABEL_LONG_DOT);
 
-    overlay_surface.setVisible(false);
+    setOverlayVisible(false);
     applyAppearance();
     updatePreferences();
     updateClock();
@@ -160,9 +203,11 @@ public:
   }
 
   void shutdown() {
-    overlay_surface.setVisible(false);
-    overlay_surface.clearFrame();
+    setOverlayVisible(false);
+    clearOverlayFrame();
+#ifndef OOS_WASM_GUEST
     overlay_backend.shutdown();
+#endif
     status_backend.shutdown();
     status_root = nullptr;
     status_time = nullptr;
@@ -185,7 +230,11 @@ public:
   }
 
   void updateClock() {
+#ifdef OOS_WASM_GUEST
+    const int64_t minute = sdk::guest::wallClockMinute();
+#else
     const int64_t minute = static_cast<int64_t>(std::time(nullptr) / 60);
+#endif
     if (minute == last_minute)
       return;
     last_minute = minute;
@@ -319,23 +368,22 @@ public:
     lv_obj_add_flag(overlay_hint, LV_OBJ_FLAG_HIDDEN);
     if (mode == OverlayMode::Locked) {
       const std::string time = currentTime();
-      lv_obj_set_size(overlay_panel, overlay_surface.width(),
-                      overlay_surface.height());
+      lv_obj_set_size(overlay_panel, overlayWidth(), overlayHeight());
       lv_obj_align(overlay_panel, LV_ALIGN_CENTER, 0, 0);
       lv_obj_set_style_radius(overlay_panel, 0, 0);
       lv_obj_set_style_bg_color(overlay_panel, color(0x101214), 0);
       lv_obj_set_style_bg_opa(overlay_panel, LV_OPA_COVER, 0);
       lv_label_set_text(overlay_time, time.c_str());
-      lv_obj_set_width(overlay_time, overlay_surface.width());
+      lv_obj_set_width(overlay_time, overlayWidth());
       lv_obj_set_style_text_align(overlay_time, LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_align(overlay_time, LV_ALIGN_TOP_MID, 0, 64);
-      lv_obj_set_width(overlay_hint, overlay_surface.width() - 20);
+      lv_obj_set_width(overlay_hint, overlayWidth() - 20);
       lv_obj_set_style_text_align(overlay_hint, LV_TEXT_ALIGN_CENTER, 0);
       lv_obj_align(overlay_hint, LV_ALIGN_TOP_MID, 0, 136);
       lv_obj_remove_flag(overlay_time, LV_OBJ_FLAG_HIDDEN);
       lv_obj_remove_flag(overlay_hint, LV_OBJ_FLAG_HIDDEN);
     } else {
-      lv_obj_set_size(overlay_panel, overlay_surface.width() - 16, 42);
+      lv_obj_set_size(overlay_panel, overlayWidth() - 16, 42);
       lv_obj_align(overlay_panel, LV_ALIGN_TOP_MID, 0, 8);
       lv_obj_set_style_radius(overlay_panel, 4, 0);
       lv_obj_set_style_bg_color(overlay_panel, color(0x202326), 0);
@@ -344,15 +392,20 @@ public:
       lv_obj_set_width(overlay_title, 76);
       lv_label_set_text(overlay_message, notification.c_str());
       lv_obj_set_pos(overlay_message, 90, 12);
-      lv_obj_set_width(overlay_message, overlay_surface.width() - 116);
+      lv_obj_set_width(overlay_message, overlayWidth() - 116);
       lv_obj_remove_flag(overlay_title, LV_OBJ_FLAG_HIDDEN);
       lv_obj_remove_flag(overlay_message, LV_OBJ_FLAG_HIDDEN);
     }
+#ifndef OOS_WASM_GUEST
     overlay_backend.frame(monotonic_us);
     if (!overlay_backend.healthy() || !overlay_backend.refresh()) {
       error = overlay_backend.lastError();
       return false;
     }
+#else
+    (void)monotonic_us;
+    status_needs_refresh = true;
+#endif
     overlay_needs_refresh = false;
     return true;
   }
@@ -366,9 +419,14 @@ public:
     if (mode == OverlayMode::Notification &&
         monotonic_us >= notification_until_us) {
       mode = OverlayMode::Hidden;
-      overlay_surface.setVisible(false);
-      overlay_surface.clearFrame();
+      setOverlayVisible(false);
+      clearOverlayFrame();
     }
+#ifdef OOS_WASM_GUEST
+    if (mode != OverlayMode::Hidden && overlay_needs_refresh &&
+        !renderOverlay(monotonic_us))
+      return false;
+#endif
     status_backend.frame(monotonic_us);
     if (!status_backend.healthy()) {
       error = status_backend.lastError();
@@ -381,11 +439,18 @@ public:
       }
       status_needs_refresh = false;
     }
+#ifndef OOS_WASM_GUEST
     if (mode != OverlayMode::Hidden && overlay_needs_refresh &&
         !renderOverlay(monotonic_us))
       return false;
+#endif
 
+#ifdef OOS_WASM_GUEST
+    const uint32_t seconds =
+        static_cast<uint32_t>(sdk::guest::wallClockSeconds() % 60);
+#else
     const uint32_t seconds = static_cast<uint32_t>(std::time(nullptr) % 60);
+#endif
     next_delay_ms = std::max(1u, (60u - seconds) * 1000u);
     if (status_source)
       next_delay_ms = std::min(next_delay_ms, 1000u);
@@ -411,8 +476,8 @@ public:
     if (mode == OverlayMode::Notification &&
         event.action != input::KeyAction::Released && event.code == kKeyBack) {
       mode = OverlayMode::Hidden;
-      overlay_surface.setVisible(false);
-      overlay_surface.clearFrame();
+      setOverlayVisible(false);
+      clearOverlayFrame();
       consumed = true;
     }
     return true;
@@ -424,22 +489,78 @@ public:
     notification_until_us =
         monotonic_us + static_cast<int64_t>(duration_ms) * 1000;
     mode = OverlayMode::Notification;
-    overlay_surface.setVisible(true);
+    setOverlayVisible(true);
     overlay_needs_refresh = true;
   }
 
   void setLocked(bool locked) {
     mode = locked ? OverlayMode::Locked : OverlayMode::Hidden;
-    overlay_surface.setVisible(locked);
+    setOverlayVisible(locked);
     if (!locked)
-      overlay_surface.clearFrame();
+      clearOverlayFrame();
     overlay_needs_refresh = locked;
   }
 
+  uint32_t overlayWidth() const {
+#ifdef OOS_WASM_GUEST
+    return surface.width();
+#else
+    return overlay_surface.width();
+#endif
+  }
+
+  uint32_t overlayHeight() const {
+#ifdef OOS_WASM_GUEST
+    return surface.height() - 22;
+#else
+    return overlay_surface.height();
+#endif
+  }
+
+  void setOverlayVisible(bool visible) {
+#ifdef OOS_WASM_GUEST
+    if (!overlay_root)
+      return;
+    if (visible)
+      lv_obj_remove_flag(overlay_root, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(overlay_root, LV_OBJ_FLAG_HIDDEN);
+    status_needs_refresh = true;
+#else
+    overlay_surface.setVisible(visible);
+#endif
+  }
+
+  void clearOverlayFrame() {
+#ifndef OOS_WASM_GUEST
+    overlay_surface.clearFrame();
+#else
+    status_needs_refresh = true;
+#endif
+  }
+
+  void setStatusVisible(bool visible) {
+#ifdef OOS_WASM_GUEST
+    if (!status_root)
+      return;
+    if (visible)
+      lv_obj_remove_flag(status_root, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(status_root, LV_OBJ_FLAG_HIDDEN);
+    status_needs_refresh = true;
+#else
+    status_surface.setVisible(visible);
+#endif
+  }
+
   sdk_ui::LvglBackend status_backend;
+#ifndef OOS_WASM_GUEST
   sdk_ui::LvglBackend overlay_backend;
   compositor::LayerSurface &status_surface;
   compositor::LayerSurface &overlay_surface;
+#else
+  runtime::GraphicsHost &surface;
+#endif
   ui::SystemStatusSource *status_source = nullptr;
   ui::SystemUiSettings *settings = nullptr;
   lv_obj_t *status_root = nullptr;
@@ -472,12 +593,19 @@ public:
   bool overlay_needs_refresh = false;
 };
 
+#ifdef OOS_WASM_GUEST
+SystemUi::SystemUi(runtime::GraphicsHost &surface,
+                   ui::SystemStatusSource *status_source,
+                   ui::SystemUiSettings *settings)
+    : impl_(std::make_unique<Impl>(surface, status_source, settings)) {}
+#else
 SystemUi::SystemUi(compositor::LayerSurface &status_surface,
                    compositor::LayerSurface &overlay_surface,
                    ui::SystemStatusSource *status_source,
                    ui::SystemUiSettings *settings)
     : impl_(std::make_unique<Impl>(status_surface, overlay_surface,
                                    status_source, settings)) {}
+#endif
 
 SystemUi::~SystemUi() { shutdown(); }
 
@@ -512,7 +640,7 @@ void SystemUi::applyStatusBarAppearance(ui::StatusBarAppearance appearance) {
 }
 
 void SystemUi::setStatusBarVisible(bool visible) {
-  impl_->status_surface.setVisible(visible);
+  impl_->setStatusVisible(visible);
 }
 
 const std::string &SystemUi::lastError() const { return impl_->error; }

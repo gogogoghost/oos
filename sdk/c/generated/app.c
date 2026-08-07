@@ -292,6 +292,12 @@ extern void __wasm_import_oos_platform_vibrator_last_error(uint8_t *);
 __attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("get-status")))
 extern void __wasm_import_oos_platform_wifi_get_status(uint8_t *);
 
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("enabled")))
+extern void __wasm_import_oos_platform_wifi_enabled(uint8_t *);
+
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("set-enabled")))
+extern void __wasm_import_oos_platform_wifi_set_enabled(int32_t, uint8_t *);
+
 __attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("scan")))
 extern void __wasm_import_oos_platform_wifi_scan(int32_t, uint8_t *);
 
@@ -300,6 +306,9 @@ extern void __wasm_import_oos_platform_wifi_list_networks(uint8_t *);
 
 __attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("connect")))
 extern void __wasm_import_oos_platform_wifi_connect(uint8_t *, size_t, int32_t, uint8_t *, size_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("select")))
+extern void __wasm_import_oos_platform_wifi_select(int32_t, uint8_t *);
 
 __attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("disconnect")))
 extern void __wasm_import_oos_platform_wifi_disconnect(uint8_t *);
@@ -486,6 +495,33 @@ extern void __wasm_import_oos_platform_assets_close(int32_t, uint8_t *);
 
 __attribute__((__import_module__("oos:platform/system-services@0.3.0"), __import_name__("request")))
 extern void __wasm_import_oos_platform_system_services_request(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
+
+// Imported Functions from `oos:platform/applications@0.3.0`
+
+__attribute__((__import_module__("oos:platform/applications@0.3.0"), __import_name__("enumerate")))
+extern void __wasm_import_oos_platform_applications_enumerate(uint8_t *);
+
+__attribute__((__import_module__("oos:platform/applications@0.3.0"), __import_name__("launch")))
+extern void __wasm_import_oos_platform_applications_launch(uint8_t *, size_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/applications@0.3.0"), __import_name__("uninstall")))
+extern void __wasm_import_oos_platform_applications_uninstall(uint8_t *, size_t, uint8_t *);
+
+// Imported Functions from `oos:platform/system-ui@0.3.0`
+
+__attribute__((__import_module__("oos:platform/system-ui@0.3.0"), __import_name__("snapshot")))
+extern void __wasm_import_oos_platform_system_ui_snapshot(uint8_t *);
+
+__attribute__((__import_module__("oos:platform/system-ui@0.3.0"), __import_name__("set-locked")))
+extern void __wasm_import_oos_platform_system_ui_set_locked(int32_t, uint8_t *);
+
+// Imported Functions from `oos:platform/system-settings@0.3.0`
+
+__attribute__((__import_module__("oos:platform/system-settings@0.3.0"), __import_name__("get-status-bar")))
+extern void __wasm_import_oos_platform_system_settings_get_status_bar(uint8_t *);
+
+__attribute__((__import_module__("oos:platform/system-settings@0.3.0"), __import_name__("set-status-bar")))
+extern void __wasm_import_oos_platform_system_settings_set_status_bar(int32_t, int32_t, int32_t, uint8_t *);
 
 // Imported Functions from `oos:platform/modules@0.3.0`
 
@@ -839,6 +875,18 @@ void oos_platform_wifi_result_status_error_code_free(oos_platform_wifi_result_st
   }
 }
 
+void oos_platform_wifi_result_bool_error_code_free(oos_platform_wifi_result_bool_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_wifi_result_void_error_code_free(oos_platform_wifi_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
 void oos_platform_wifi_list_access_point_free(oos_platform_wifi_list_access_point_t *ptr) {
   size_t list_len = ptr->len;
   if (list_len > 0) {
@@ -876,12 +924,6 @@ void oos_platform_wifi_result_list_network_error_code_free(oos_platform_wifi_res
 }
 
 void oos_platform_wifi_result_s32_error_code_free(oos_platform_wifi_result_s32_error_code_t *ptr) {
-  if (!ptr->is_err) {
-  } else {
-  }
-}
-
-void oos_platform_wifi_result_void_error_code_free(oos_platform_wifi_result_void_error_code_t *ptr) {
   if (!ptr->is_err) {
   } else {
   }
@@ -1139,6 +1181,65 @@ void oos_platform_assets_result_void_error_code_free(oos_platform_assets_result_
 void oos_platform_system_services_result_string_error_code_free(oos_platform_system_services_result_string_error_code_t *ptr) {
   if (!ptr->is_err) {
     app_string_free(&ptr->val.ok);
+  } else {
+  }
+}
+
+void oos_platform_applications_application_info_free(oos_platform_applications_application_info_t *ptr) {
+  app_string_free(&ptr->id);
+  app_string_free(&ptr->name);
+  app_string_free(&ptr->version);
+}
+
+void oos_platform_applications_list_application_info_free(oos_platform_applications_list_application_info_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    oos_platform_applications_application_info_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+      oos_platform_applications_application_info_free(&list_ptr[i]);
+    }
+    free(list_ptr);
+  }
+}
+
+void oos_platform_applications_result_list_application_info_error_code_free(oos_platform_applications_result_list_application_info_error_code_t *ptr) {
+  if (!ptr->is_err) {
+    oos_platform_applications_list_application_info_free(&ptr->val.ok);
+  } else {
+  }
+}
+
+void oos_platform_applications_result_void_error_code_free(oos_platform_applications_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_system_ui_status_snapshot_free(oos_platform_system_ui_status_snapshot_t *ptr) {
+  app_string_free(&ptr->radio_technology);
+}
+
+void oos_platform_system_ui_result_status_snapshot_error_code_free(oos_platform_system_ui_result_status_snapshot_error_code_t *ptr) {
+  if (!ptr->is_err) {
+    oos_platform_system_ui_status_snapshot_free(&ptr->val.ok);
+  } else {
+  }
+}
+
+void oos_platform_system_ui_result_void_error_code_free(oos_platform_system_ui_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_system_settings_result_status_bar_preferences_error_code_free(oos_platform_system_settings_result_status_bar_preferences_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_system_settings_result_void_error_code_free(oos_platform_system_settings_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
   } else {
   }
 }
@@ -3092,6 +3193,58 @@ bool oos_platform_wifi_get_status(oos_platform_wifi_status_t *ret, oos_platform_
   }
 }
 
+bool oos_platform_wifi_enabled(bool *ret, oos_platform_wifi_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_wifi_enabled(ptr);
+  oos_platform_wifi_result_bool_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_wifi_set_enabled(bool enabled, oos_platform_wifi_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_wifi_set_enabled(enabled, ptr);
+  oos_platform_wifi_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
 bool oos_platform_wifi_scan(uint32_t wait_ms, oos_platform_wifi_list_access_point_t *ret, oos_platform_wifi_error_code_t *err) {
   __attribute__((__aligned__(sizeof(void*))))
   uint8_t ret_area[(3*sizeof(void*))];
@@ -3166,6 +3319,31 @@ bool oos_platform_wifi_connect(app_string_t *ssid, oos_platform_wifi_security_t 
   }
   if (!result.is_err) {
     *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_wifi_select(int32_t network_id, oos_platform_wifi_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_wifi_select(network_id, ptr);
+  oos_platform_wifi_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
     return 1;
   } else {
     *err = result.val.err;
@@ -4625,6 +4803,211 @@ bool oos_platform_system_services_request(app_string_t *service, app_string_t *o
   }
   if (!result.is_err) {
     *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_applications_enumerate(oos_platform_applications_list_application_info_t *ret, oos_platform_applications_error_code_t *err) {
+  __attribute__((__aligned__(sizeof(void*))))
+  uint8_t ret_area[(3*sizeof(void*))];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_applications_enumerate(ptr);
+  oos_platform_applications_result_list_application_info_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (oos_platform_applications_list_application_info_t) { (oos_platform_applications_application_info_t*)(*((uint8_t **) (ptr + sizeof(void*)))), (*((size_t*) (ptr + (2*sizeof(void*))))) };
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + sizeof(void*)));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_applications_launch(app_string_t *app_id, oos_platform_applications_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_applications_launch((uint8_t *) (*app_id).ptr, (*app_id).len, ptr);
+  oos_platform_applications_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_applications_uninstall(app_string_t *app_id, oos_platform_applications_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_applications_uninstall((uint8_t *) (*app_id).ptr, (*app_id).len, ptr);
+  oos_platform_applications_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_system_ui_snapshot(oos_platform_system_ui_status_snapshot_t *ret, oos_platform_system_ui_error_code_t *err) {
+  __attribute__((__aligned__(8)))
+  uint8_t ret_area[(48+2*sizeof(void*))];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_system_ui_snapshot(ptr);
+  oos_platform_system_ui_result_status_snapshot_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (oos_platform_system_ui_status_snapshot_t) {
+        (uint64_t) (uint64_t) (*((int64_t*) (ptr + 8))),
+        (bool) (int32_t) *((uint8_t*) (ptr + 16)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 17)),
+        (uint32_t) (uint32_t) (*((int32_t*) (ptr + 20))),
+        (bool) (int32_t) *((uint8_t*) (ptr + 24)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 25)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 26)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 27)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 28)),
+        (int32_t) *((int32_t*) (ptr + 32)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 36)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 37)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 38)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 39)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 40)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 41)),
+        (int32_t) *((int32_t*) (ptr + 44)),
+        (app_string_t) (app_string_t) { (uint8_t*)(*((uint8_t **) (ptr + 48))), (*((size_t*) (ptr + (48+1*sizeof(void*))))) },
+      };
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 8));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_system_ui_set_locked(bool locked, oos_platform_system_ui_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_system_ui_set_locked(locked, ptr);
+  oos_platform_system_ui_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_system_settings_get_status_bar(oos_platform_system_settings_status_bar_preferences_t *ret, oos_platform_system_settings_error_code_t *err) {
+  __attribute__((__aligned__(8)))
+  uint8_t ret_area[24];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_system_settings_get_status_bar(ptr);
+  oos_platform_system_settings_result_status_bar_preferences_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (oos_platform_system_settings_status_bar_preferences_t) {
+        (bool) (int32_t) *((uint8_t*) (ptr + 8)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 9)),
+        (bool) (int32_t) *((uint8_t*) (ptr + 10)),
+        (uint64_t) (uint64_t) (*((int64_t*) (ptr + 16))),
+      };
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 8));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_system_settings_set_status_bar(bool show_clock, bool show_network, bool show_battery_percentage, oos_platform_system_settings_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_system_settings_set_status_bar(show_clock, show_network, show_battery_percentage, ptr);
+  oos_platform_system_settings_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
     return 1;
   } else {
     *err = result.val.err;

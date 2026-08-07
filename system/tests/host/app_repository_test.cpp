@@ -272,6 +272,26 @@ int main(int argc, char **argv) {
           R"({"schema":1,"id":"cc.jaxy.oos.suffix","name":"bad","version":"1.0.0","entry":{"runtime":"wasm","path":"app/main.wasm"}})",
           invalid, error),
       "Wasm manifest paths with file suffixes must be rejected");
+  oos::apps::AppManifest hyphenated_id;
+  success &= check(
+      oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"com.example.hyphenated-app","name":"Hyphenated","version":"1.0.0","entry":{"runtime":"js","path":"app/main.mjs"}})",
+          hyphenated_id, error),
+      "package id segments may contain internal hyphens");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"com.example.trailing-","name":"Invalid","version":"1.0.0","entry":{"runtime":"js","path":"app/main.mjs"}})",
+          invalid, error) &&
+          !oos::apps::parseAppManifest(
+              R"({"schema":1,"id":"com.example.-leading","name":"Invalid","version":"1.0.0","entry":{"runtime":"js","path":"app/main.mjs"}})",
+              invalid, error),
+      "package id segments must not start or end with a hyphen");
+  oos::apps::AppManifest launcher_manifest;
+  success &= check(
+      oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.launcher","name":"Launcher","version":"1.0.0","entry":{"runtime":"js","path":"app/main.mjs"},"permissions":{"apps-launch":{}}})",
+          launcher_manifest, error),
+      "system application ids use the same manifest rules as every app");
 
   success &= check(seedLegacyWebRecord(root, error), error.c_str());
   oos::apps::AppRepository repository(root);

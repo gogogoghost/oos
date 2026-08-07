@@ -12,6 +12,10 @@ namespace oos::compositor {
 class LayerSurface;
 }
 
+namespace oos::runtime {
+class GraphicsHost;
+}
+
 namespace oos::ui {
 class SystemStatusSource;
 class SystemUiSettings;
@@ -19,16 +23,21 @@ class SystemUiSettings;
 
 namespace oos::apps::systemui {
 
-// Trusted, process-local system shell. It owns two compositor layers: a
-// non-focusable status bar and a modal/transient overlay. Launcher content is
-// intentionally owned by a separate application.
+// LVGL system shell. Native builds use two compositor layers; the packaged
+// guest maps the same status and overlay trees onto one transparent surface.
 class SystemUi : public window::SystemInputTarget,
                  public ui::StatusBarAppearanceHost {
 public:
+#ifdef OOS_WASM_GUEST
+  SystemUi(runtime::GraphicsHost &surface,
+           ui::SystemStatusSource *status_source = nullptr,
+           ui::SystemUiSettings *settings = nullptr);
+#else
   SystemUi(compositor::LayerSurface &status_surface,
            compositor::LayerSurface &overlay_surface,
            ui::SystemStatusSource *status_source = nullptr,
            ui::SystemUiSettings *settings = nullptr);
+#endif
   ~SystemUi();
 
   SystemUi(const SystemUi &) = delete;

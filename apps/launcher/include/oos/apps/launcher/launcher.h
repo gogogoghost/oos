@@ -20,8 +20,8 @@ class StatusBarAppearanceController;
 
 namespace oos::apps::launcher {
 
-// Built-in LVGL home application. It owns desktop content and softkeys only;
-// status and global overlays belong to the independent SystemUI application.
+// LVGL home application. It owns desktop content and softkeys only; status and
+// global overlays belong to the independent SystemUI application package.
 class Launcher final : public window::ApplicationInputTarget {
 public:
   Launcher(runtime::GraphicsHost &graphics, AppRepository &repository,

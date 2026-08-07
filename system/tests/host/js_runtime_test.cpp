@@ -1,15 +1,17 @@
 #include "oos/apps/app_manifest.h"
+#include "oos/device/device.h"
 #include "oos/input/key_input.h"
 #include "oos/runtime/application_scene.h"
 #include "oos/runtime/canvas_2d.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/runtime/js_app.h"
 #include "oos/runtime/native_ui.h"
+#include "oos/ui/system_ui_settings.h"
 
 #include <cassert>
 #include <chrono>
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -78,9 +80,8 @@ public:
                   size_t) override {
     return true;
   }
-  bool submitGlesToTexture(uint32_t, uint32_t, uint32_t,
-                           const OosGlesCommand *, size_t,
-                           const uint32_t *, size_t) override {
+  bool submitGlesToTexture(uint32_t, uint32_t, uint32_t, const OosGlesCommand *,
+                           size_t, const uint32_t *, size_t) override {
     ++gles_submissions;
     return true;
   }
@@ -101,7 +102,8 @@ struct TestPackage {
   std::filesystem::path removable;
 
   TestPackage() {
-    const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto seed =
+        std::chrono::steady_clock::now().time_since_epoch().count();
     root = std::filesystem::temp_directory_path() /
            ("oos-js-runtime-" + std::to_string(seed));
     app = root / "app";
@@ -146,32 +148,35 @@ oos::runtime::JsAppOptions optionsFor(const TestPackage &package) {
           oos::apps::DeviceServicePermission::DeviceStorageCreate);
   options.enforce_service_permissions = true;
   options.execution_time_limit_ms = 20;
-  options.modules.push_back({"shared", oos::apps::AppRuntimeKind::JavaScript,
-                             "modules/shared.mjs"});
+  options.modules.push_back(
+      {"shared", oos::apps::AppRuntimeKind::JavaScript, "modules/shared.mjs"});
   return options;
 }
 
 void testLifecycleAndImports() {
   TestPackage package;
   package.write(package.app / "helper.mjs", "export const local = 5;\n");
-  package.write(package.modules / "shared.mjs",
-                "import { abiVersion } from 'oos:runtime';\n"
-                "import { kvSet } from 'oos:storage';\n"
-                "export const shared = 7;\n"
-                "export function invoke(operation, request) {\n"
-                "  if (operation !== 'increment') throw new Error('bad operation');\n"
-                "  if (abiVersion() !== 8) throw new Error('bad ABI');\n"
-                "  const response = new Uint8Array([request[0] + 1]);\n"
-                "  kvSet('module-result', response);\n"
-                "  return response;\n"
-                "}\n");
+  package.write(
+      package.modules / "shared.mjs",
+      "import { abiVersion } from 'oos:runtime';\n"
+      "import { kvSet } from 'oos:storage';\n"
+      "export const shared = 7;\n"
+      "export function invoke(operation, request) {\n"
+      "  if (operation !== 'increment') throw new Error('bad operation');\n"
+      "  if (abiVersion() !== 8) throw new Error('bad ABI');\n"
+      "  const response = new Uint8Array([request[0] + 1]);\n"
+      "  kvSet('module-result', response);\n"
+      "  return response;\n"
+      "}\n");
   package.write(package.assets / "fixture.bin", "asset-data");
   package.write(
       package.app / "main.mjs",
-      "import { abiVersion, wallClockMinutes, requestExit } from 'oos:runtime';\n"
+      "import { abiVersion, wallClockMinutes, requestExit } from "
+      "'oos:runtime';\n"
       "import { getDescriptor } from 'oos:device';\n"
       "import { kvSet, kvGet, databaseExecute } from 'oos:storage';\n"
-      "import { open as openAsset, read as readAsset, close as closeAsset } from 'oos:assets';\n"
+      "import { open as openAsset, read as readAsset, close as closeAsset } "
+      "from 'oos:assets';\n"
       "import { writeFile, readFile, deleteFile } from 'oos:device-storage';\n"
       "import { load as loadFont } from 'oos:font-assets';\n"
       "import { request as systemRequest } from 'oos:system-services';\n"
@@ -184,10 +189,13 @@ void testLifecycleAndImports() {
       "import { lastError as bluetoothError } from 'oos:bluetooth';\n"
       "import { lastError as modemError } from 'oos:modem';\n"
       "import { lastError as codecError } from 'oos:codec';\n"
-      "import { create, submit2d, textureSet, submitMesh, destroy } from 'oos:canvas';\n"
-      "import { surfaceSize, graphicsLimits, textureSet as rootTextureSet, submit as rootSubmit } from 'oos:graphics';\n"
+      "import { create, submit2d, textureSet, submitMesh, destroy } from "
+      "'oos:canvas';\n"
+      "import { surfaceSize, graphicsLimits, textureSet as rootTextureSet, "
+      "submit as rootSubmit } from 'oos:graphics';\n"
       "import { capabilities, submit as submitGles } from 'oos:gles';\n"
-      "import { submit as submitUi, clear as clearUi } from 'oos:solid-internal';\n"
+      "import { submit as submitUi, clear as clearUi } from "
+      "'oos:solid-internal';\n"
       "import { enumerate, invoke } from 'oos:modules';\n"
       "import { local } from './helper.mjs';\n"
       "import { shared } from 'shared';\n"
@@ -200,39 +208,62 @@ void testLifecycleAndImports() {
       "  const moduleResult = kvGet('module-result');\n"
       "  kvSet('answer', new Uint8Array([4, 2]));\n"
       "  const stored = kvGet('answer');\n"
-      "  const changes = databaseExecute('main', 'CREATE TABLE IF NOT EXISTS smoke(value INTEGER)');\n"
+      "  const changes = databaseExecute('main', 'CREATE TABLE IF NOT EXISTS "
+      "smoke(value INTEGER)');\n"
       "  const asset = openAsset('fixture.bin');\n"
       "  const assetBytes = readAsset(asset.handle, 0n, 64);\n"
       "  closeAsset(asset.handle);\n"
       "  writeFile(0, 'quickjs.bin', 0, new Uint8Array([6, 7, 8]));\n"
       "  const mediaBytes = readFile(0, 'quickjs.bin');\n"
       "  const removed = deleteFile(0, 'quickjs.bin');\n"
-      "  const serviceErrors = [audioError(), cameraError(), powerError(), vibratorError(), wifiError(), ipError(), bluetoothError(), modemError(), codecError()];\n"
+      "  const serviceErrors = [audioError(), cameraError(), powerError(), "
+      "vibratorError(), wifiError(), ipError(), bluetoothError(), "
+      "modemError(), codecError()];\n"
       "  ready = abiVersion() === 8 && wallClockMinutes() < 1440 &&\n"
       "    surfaceSize().width === 240 && surfaceSize().height === 298 &&\n"
       "    graphicsLimits().maxVertices === 65535 &&\n"
-      "    getDescriptor().id === '' && stored?.[0] === 4 && stored?.[1] === 2 &&\n"
-      "    changes === 0 && assetBytes.length === 10 && assetBytes[0] === 97 && assetBytes[9] === 97 &&\n"
+      "    getDescriptor().id === '' && stored?.[0] === 4 && stored?.[1] === 2 "
+      "&&\n"
+      "    changes === 0 && assetBytes.length === 10 && assetBytes[0] === 97 "
+      "&& assetBytes[9] === 97 &&\n"
       "    mediaBytes[2] === 8 && removed && supportedFormats().length > 0 &&\n"
       "    serviceErrors.every(value => typeof value === 'string') &&\n"
-      "    typeof loadFont === 'function' && typeof systemRequest === 'function' &&\n"
-      "    local + shared === 12 && reply[0] === 9 && moduleResult?.[0] === 9 &&\n"
-      "    enumerate().some(module => module.name === 'shared' && module.runtime === 'js') &&\n"
+      "    typeof loadFont === 'function' && typeof systemRequest === "
+      "'function' &&\n"
+      "    local + shared === 12 && reply[0] === 9 && moduleResult?.[0] === 9 "
+      "&&\n"
+      "    enumerate().some(module => module.name === 'shared' && "
+      "module.runtime === 'js') &&\n"
       "    WebAssembly.validate('shared') === false &&\n"
       "    typeof document === 'undefined' && typeof window === 'undefined';\n"
-      "  rootTextureSet(9, { format: 3, x: 0, y: 0, width: 1, height: 1, rowStride: 4, flags: 4 }, new Uint8Array([255, 255, 255, 255]));\n"
-      "  rootSubmit([{ x: 0, y: 0, u: 0, v: 0 }, { x: 1, y: 0, u: 1, v: 0 }, { x: 0, y: 1, u: 0, v: 1 }], new Uint16Array([0, 1, 2]), [{ firstIndex: 0, indexCount: 3, texture: 9, clipMinX: 0, clipMinY: 0, clipMaxX: 1, clipMaxY: 1 }], 0xff000000);\n"
-      "  canvas = create({ context: '2d', x: 0, y: 0, width: 40, height: 40, z: 1 });\n"
-      "  submit2d(canvas, [{ op: 'clear', x: 0, y: 0, width: 40, height: 40, rgba: 0xff202020 }]);\n"
-      "  mesh = create({ context: 'mesh2d', x: 40, y: 0, width: 20, height: 20, z: 2 });\n"
-      "  textureSet(mesh, 1, { format: 3, x: 0, y: 0, width: 1, height: 1, rowStride: 4, flags: 4 }, new Uint8Array([255, 255, 255, 255]));\n"
-      "  submitMesh(mesh, [{ x: 0, y: 0, u: 0, v: 0 }, { x: 20, y: 0, u: 1, v: 0 }, { x: 0, y: 20, u: 0, v: 1 }], new Uint16Array([0, 1, 2]), [{ firstIndex: 0, indexCount: 3, texture: 1, clipMinX: 0, clipMinY: 0, clipMaxX: 20, clipMaxY: 20 }], 0);\n"
-      "  webgl = create({ context: 'webgl', x: 60, y: 0, width: 20, height: 20, z: 3 });\n"
+      "  rootTextureSet(9, { format: 3, x: 0, y: 0, width: 1, height: 1, "
+      "rowStride: 4, flags: 4 }, new Uint8Array([255, 255, 255, 255]));\n"
+      "  rootSubmit([{ x: 0, y: 0, u: 0, v: 0 }, { x: 1, y: 0, u: 1, v: 0 }, { "
+      "x: 0, y: 1, u: 0, v: 1 }], new Uint16Array([0, 1, 2]), [{ firstIndex: "
+      "0, indexCount: 3, texture: 9, clipMinX: 0, clipMinY: 0, clipMaxX: 1, "
+      "clipMaxY: 1 }], 0xff000000);\n"
+      "  canvas = create({ context: '2d', x: 0, y: 0, width: 40, height: 40, "
+      "z: 1 });\n"
+      "  submit2d(canvas, [{ op: 'clear', x: 0, y: 0, width: 40, height: 40, "
+      "rgba: 0xff202020 }]);\n"
+      "  mesh = create({ context: 'mesh2d', x: 40, y: 0, width: 20, height: "
+      "20, z: 2 });\n"
+      "  textureSet(mesh, 1, { format: 3, x: 0, y: 0, width: 1, height: 1, "
+      "rowStride: 4, flags: 4 }, new Uint8Array([255, 255, 255, 255]));\n"
+      "  submitMesh(mesh, [{ x: 0, y: 0, u: 0, v: 0 }, { x: 20, y: 0, u: 1, v: "
+      "0 }, { x: 0, y: 20, u: 0, v: 1 }], new Uint16Array([0, 1, 2]), [{ "
+      "firstIndex: 0, indexCount: 3, texture: 1, clipMinX: 0, clipMinY: 0, "
+      "clipMaxX: 20, clipMaxY: 20 }], 0);\n"
+      "  webgl = create({ context: 'webgl', x: 60, y: 0, width: 20, height: "
+      "20, z: 3 });\n"
       "  ready = ready && capabilities(webgl).maxCommands >= 2;\n"
-      "  submitGles(webgl, [{ op: 0, a0: 1, a1: 0xff000000, a2: 1065353216 }, { op: 19 }], new Uint32Array());\n"
+      "  submitGles(webgl, [{ op: 0, a0: 1, a1: 0xff000000, a2: 1065353216 }, "
+      "{ op: 19 }], new Uint32Array());\n"
       "  submitUi([\n"
-      "    { id: 1, kind: 'container', class: 'flex flex-col w-full h-full p-2' },\n"
-      "    { id: 2, parent: 1, kind: 'text', class: 'text-sm text-white', text: 'Ready' },\n"
+      "    { id: 1, kind: 'container', class: 'flex flex-col w-full h-full "
+      "p-2' },\n"
+      "    { id: 2, parent: 1, kind: 'text', class: 'text-sm text-white', "
+      "text: 'Ready' },\n"
       "    { id: 3, parent: 1, kind: 'canvas', class: 'grow w-full', canvas }\n"
       "  ]);\n"
       "  return ready;\n"
@@ -245,7 +276,8 @@ void testLifecycleAndImports() {
       "  if (ready && typeof now === 'bigint') requestExit();\n"
       "  return 17;\n"
       "}\n"
-      "export function shutdown() { clearUi(); destroy(webgl); destroy(mesh); destroy(canvas); }\n");
+      "export function shutdown() { clearUi(); destroy(webgl); destroy(mesh); "
+      "destroy(canvas); }\n");
 
   FakeGraphics graphics;
   oos::runtime::ApplicationScene scene(graphics);
@@ -284,6 +316,51 @@ void testImportConfinement() {
          std::string::npos);
 }
 
+void testSystemSettingsAndWifiModules() {
+  TestPackage package;
+  std::filesystem::create_directories(package.root / "system");
+  package.write(
+      package.app / "main.mjs",
+      "import { enabled, setEnabled, select } from 'oos:wifi';\n"
+      "import { getStatusBar, setStatusBar } from 'oos:system-settings';\n"
+      "export function initialize() {\n"
+      "  if (!enabled()) throw new Error('wifi should start enabled');\n"
+      "  setEnabled(false);\n"
+      "  if (enabled()) throw new Error('wifi disable failed');\n"
+      "  setEnabled(true);\n"
+      "  select(1);\n"
+      "  setStatusBar(false, true, false);\n"
+      "  const value = getStatusBar();\n"
+      "  return !value.showClock && value.showNetwork &&\n"
+      "    !value.showBatteryPercentage && typeof value.revision === "
+      "'bigint';\n"
+      "}\n"
+      "export function frame() { return 1000; }\n");
+
+  oos::ui::SystemUiSettings settings(package.root.string());
+  assert(settings.initialize());
+  std::unique_ptr<oos::device::Device> device = oos::device::createDevice();
+  assert(device);
+  auto options = optionsFor(package);
+  options.system_ui_settings = &settings;
+  options.service_permission_mask =
+      oos::apps::permissionBit(oos::apps::DeviceServicePermission::Wifi) |
+      oos::apps::permissionBit(
+          oos::apps::DeviceServicePermission::SystemSettings);
+  FakeGraphics graphics;
+  oos::runtime::JsApp app(graphics, *device, std::move(options));
+  assert(app.load((package.app / "main.mjs").c_str()));
+  const bool initialized = app.initialize();
+  if (!initialized)
+    std::fprintf(stderr, "JavaScript service initialize failed: %s\n",
+                 app.lastError());
+  assert(initialized);
+  assert(!settings.statusBar().show_clock);
+  assert(settings.statusBar().show_network);
+  assert(!settings.statusBar().show_battery_percentage);
+  app.shutdown();
+}
+
 void testExecutionDeadline() {
   TestPackage package;
   package.write(package.app / "main.mjs",
@@ -304,8 +381,7 @@ void testCanvasSceneComposition() {
   FakeGraphics graphics;
   oos::runtime::ApplicationScene scene(graphics);
   const uint32_t canvas = scene.createCanvas(
-      {10, 20, 80, 60, 4, true},
-      oos::runtime::CanvasContextKind::Canvas2d);
+      {10, 20, 80, 60, 4, true}, oos::runtime::CanvasContextKind::Canvas2d);
   assert(canvas != 0);
   oos::runtime::Canvas2dCommand clear;
   clear.opcode = static_cast<uint8_t>(oos::runtime::Canvas2dOpcode::Clear);
@@ -328,9 +404,8 @@ void testCanvasSceneComposition() {
   assert(scene.present());
   assert(graphics.texture_updates == 2);
   assert(graphics.submissions == 1);
-  assert(!scene.setCanvasTexture(canvas, 2, OOS_TEXTURE_RGBA8888, 0, 0,
-                                 1, 1, 4, OOS_TEXTURE_REPLACE, white,
-                                 sizeof(white)));
+  assert(!scene.setCanvasTexture(canvas, 2, OOS_TEXTURE_RGBA8888, 0, 0, 1, 1, 4,
+                                 OOS_TEXTURE_REPLACE, white, sizeof(white)));
   assert(scene.destroyCanvas(canvas));
 }
 
@@ -385,9 +460,8 @@ void testNativeUiLayoutAndTailwind() {
       {0, 0, 10, 10, 1, true}, oos::runtime::CanvasContextKind::Mesh2d);
   assert(raw_canvas != 0);
   const uint8_t white[] = {255, 255, 255, 255};
-  assert(scene.setCanvasTexture(raw_canvas, 1, OOS_TEXTURE_RGBA8888, 0, 0,
-                                1, 1, 4, OOS_TEXTURE_REPLACE, white,
-                                sizeof(white)));
+  assert(scene.setCanvasTexture(raw_canvas, 1, OOS_TEXTURE_RGBA8888, 0, 0, 1, 1,
+                                4, OOS_TEXTURE_REPLACE, white, sizeof(white)));
   const OosGfxVertex vertices[] = {
       {{0, 0}, {0, 0}, {255, 255, 255, 255}},
       {{10, 0}, {1, 0}, {255, 255, 255, 255}},
@@ -395,8 +469,8 @@ void testNativeUiLayoutAndTailwind() {
   };
   const uint16_t indices[] = {0, 1, 2};
   const OosGfxDrawCommand draw = {0, 3, 1, {0, 0}, {10, 10}};
-  assert(scene.submitCanvasMesh(raw_canvas, vertices, 3, indices, 3, &draw,
-                                1, 0));
+  assert(
+      scene.submitCanvasMesh(raw_canvas, vertices, 3, indices, 3, &draw, 1, 0));
 
   std::string strings;
   const auto append = [&](const char *value) {
@@ -429,8 +503,7 @@ void testNativeUiLayoutAndTailwind() {
   nodes[2].canvas = raw_canvas;
 
   oos::runtime::NativeUiEngine ui(scene);
-  assert(ui.submit(nodes, 3,
-                   reinterpret_cast<const uint8_t *>(strings.data()),
+  assert(ui.submit(nodes, 3, reinterpret_cast<const uint8_t *>(strings.data()),
                    strings.size()));
   assert(ui.layout().size() == 3);
   assert(ui.layout()[0].width == 240);
@@ -441,16 +514,15 @@ void testNativeUiLayoutAndTailwind() {
   assert(scene.present());
   assert(graphics.last_command_count == 2);
 
-  assert(ui.submit(nodes, 2,
-                   reinterpret_cast<const uint8_t *>(strings.data()),
+  assert(ui.submit(nodes, 2, reinterpret_cast<const uint8_t *>(strings.data()),
                    strings.size()));
   assert(scene.present());
   assert(graphics.last_command_count == 1);
 
   oos::runtime::UiStyle style;
   std::string error;
-  assert(!oos::runtime::parseTailwindClasses("position:fixed", 14, style,
-                                              error));
+  assert(
+      !oos::runtime::parseTailwindClasses("position:fixed", 14, style, error));
   assert(error.find("unsupported Tailwind utility") != std::string::npos);
 
   oos::runtime::UiNodeRecord shrinking[3];
@@ -480,6 +552,7 @@ void testNativeUiLayoutAndTailwind() {
 int main() {
   testLifecycleAndImports();
   testImportConfinement();
+  testSystemSettingsAndWifiModules();
   testExecutionDeadline();
   testCanvasSceneComposition();
   testCanvas2dPixels();

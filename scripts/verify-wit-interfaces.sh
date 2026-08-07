@@ -3,9 +3,9 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-DEMO_CORE=${1:-"$ROOT_DIR/build/native-apps/egui-demo.wasm"}
-DEMO_COMPONENT=${2:-"$ROOT_DIR/build/native-apps/egui-demo.component.wasm"}
-SMOKE_CORE=${3:-"$ROOT_DIR/build/native-apps/wit-smoke.wasm"}
+DEMO_CORE=${1:-"$ROOT_DIR/apps/tests/egui-demo/build/main.wasm"}
+DEMO_COMPONENT=${2:-"$ROOT_DIR/apps/tests/egui-demo/build/main.component.wasm"}
+SMOKE_CORE=${3:-"$ROOT_DIR/apps/tests/wit-smoke/build/main.wasm"}
 MODULE_CORE=${4:-"$ROOT_DIR/build/native-apps/c-module-parent.wasm"}
 PACKAGE_MODULE=${5:-"$ROOT_DIR/build/native-apps/package-modules/echo.wasm"}
 

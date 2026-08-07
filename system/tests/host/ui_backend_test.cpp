@@ -13,6 +13,7 @@
 #include "oos/sdk/ui/theme.h"
 #include "oos/ui/system_status.h"
 #include "oos/ui/system_ui_settings.h"
+#include "oos/ui/system_ui_state.h"
 
 #include <cassert>
 #include <cstddef>
@@ -164,6 +165,7 @@ public:
     return initialized;
   }
   std::string takeLaunchRequest() override { return {}; }
+  std::string takeUninstallRequest() override { return {}; }
   bool takeExitRequest() override { return false; }
   bool dispatchKey(const oos::input::KeyEvent &, int64_t) override {
     ++key_count;
@@ -386,6 +388,24 @@ void testSystemUi() {
   assert(graphics.textures.empty());
 }
 
+void testSystemUiState() {
+  FakeStatusSource statuses;
+  statuses.value.revision = 3;
+  statuses.value.battery_available = true;
+  statuses.value.battery_percent = 82;
+  statuses.value.wifi_connected = true;
+  oos::ui::SystemUiState state(&statuses);
+  state.applyStatusBarAppearance({0xf2f2f2, true});
+  state.setStatusBarVisible(false);
+  state.setLocked(true);
+  std::string snapshot;
+  assert(state.snapshotJson(snapshot));
+  assert(snapshot.find("\"batteryPercent\":82") != std::string::npos);
+  assert(snapshot.find("\"backgroundRgb\":15921906") != std::string::npos);
+  assert(snapshot.find("\"statusBarVisible\":false") != std::string::npos);
+  assert(state.locked());
+}
+
 void testLauncher() {
   FakeGraphicsHost graphics;
   oos::compositor::Compositor compositor(graphics);
@@ -593,6 +613,7 @@ int main() {
   testApplicationSessions();
   testTransparentLvglBackend();
   testSystemUi();
+  testSystemUiState();
   testLauncher();
   testSettings();
   return 0;

@@ -14,4 +14,7 @@ export * as storage from "oos:storage";
 export * as deviceStorage from "oos:device-storage";
 export * as fontAssets from "oos:font-assets";
 export * as assets from "oos:assets";
+export * as applications from "oos:applications";
 export * as systemServices from "oos:system-services";
+export * as systemUi from "oos:system-ui";
+export * as systemSettings from "oos:system-settings";

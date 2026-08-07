@@ -1,6 +1,6 @@
 # Settings Application
 
-`apps/settings` is the built-in LVGL Settings application. It uses the same
+`apps/settings` is the packaged LVGL Settings application. It uses the same
 palette, typography, flat rows, reserved selection border, and softkey layout
 as Launcher. The host owns its lifecycle and switches between Launcher and
 Settings without coupling either application to the other's implementation.
@@ -9,11 +9,11 @@ The root list is divided into Network, Apps, and Device sections:
 
 - Wi-Fi provides radio on/off, access-point scanning, Open and WPA-PSK
   connection, reconnecting saved networks, disconnect, and confirmed forget.
-  Association and DHCP run off the UI thread so navigation and animation stay
-  responsive. Bluetooth and SIM manager remain explicit placeholder pages.
-- Manage apps lists built-in and installed applications. Package applications
-  expose metadata and a confirmed uninstall action; built-in applications are
-  read-only.
+  responsive in native tests. The Wasm guest performs bounded service calls on
+  its lifecycle thread because privileged WIT imports are main-thread-only.
+  Bluetooth and SIM manager remain explicit placeholder pages.
+- Manage apps lists every installed package through the application WIT API
+  and exposes metadata plus a confirmed uninstall action.
 - Storage reads total, used, and available bytes from the persistent data
   volume. Device information reports the active platform descriptor.
 - Status bar toggles the clock, network indicators, and numeric battery level.
@@ -40,5 +40,5 @@ Preview Settings directly on the local device with:
 
 ```sh
 make local-rootfs
-./scripts/run-local-rootfs.sh --builtin settings
+./scripts/run-local-rootfs.sh --app cc.jaxy.oos.settings
 ```

@@ -20,6 +20,9 @@ public:
   const StatusBarPreferences &statusBar() const;
   bool setStatusBar(bool show_clock, bool show_network,
                     bool show_battery_percentage);
+#ifdef OOS_WASM_GUEST
+  void updateFromHost(StatusBarPreferences status_bar);
+#endif
   const std::string &lastError() const;
 
 private:

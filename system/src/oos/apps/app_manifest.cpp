@@ -61,25 +61,33 @@ bool validIdentifier(const std::string &value) {
 
   size_t separators = 0;
   bool segment_start = true;
+  bool hyphen = false;
   for (const unsigned char character : value) {
     if (character == '.') {
-      if (segment_start)
+      if (segment_start || hyphen)
         return false;
       ++separators;
       segment_start = true;
+      hyphen = false;
       continue;
     }
     if (segment_start) {
       if (character < 'a' || character > 'z')
         return false;
       segment_start = false;
+      hyphen = false;
+      continue;
+    }
+    if (character == '-') {
+      hyphen = true;
       continue;
     }
     if ((character < 'a' || character > 'z') &&
         (character < '0' || character > '9'))
       return false;
+    hyphen = false;
   }
-  return !segment_start && separators >= 2;
+  return !segment_start && !hyphen && separators >= 2;
 }
 
 bool validVersion(const std::string &value) {

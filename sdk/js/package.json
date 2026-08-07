@@ -24,6 +24,9 @@
   },
   "exports": {
     "./runtime": "./src/runtime.ts",
+    "./applications": "./src/applications.ts",
+    "./system-ui": "./src/system-ui.ts",
+    "./system-settings": "./src/system-settings.ts",
     "./services": "./src/services.ts",
     "./modules": "./src/modules.ts",
     "./canvas": "./src/canvas.ts",
