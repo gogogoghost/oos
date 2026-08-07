@@ -69,6 +69,10 @@ public:
                               size_t name_size) override;
   bool submitGles(const OosGlesCommand *commands, size_t command_count,
                   const uint32_t *data, size_t data_words) override;
+  bool submitGlesToTexture(uint32_t texture, uint32_t width, uint32_t height,
+                           const OosGlesCommand *commands,
+                           size_t command_count, const uint32_t *data,
+                           size_t data_words) override;
 
 private:
   friend class LayerSurface;
@@ -121,6 +125,10 @@ public:
   int32_t glesUniformLocation(uint32_t, const char *, size_t) override;
   bool submitGles(const OosGlesCommand *, size_t, const uint32_t *,
                   size_t) override;
+  bool submitGlesToTexture(uint32_t texture, uint32_t width, uint32_t height,
+                           const OosGlesCommand *commands,
+                           size_t command_count, const uint32_t *data,
+                           size_t data_words) override;
 
 private:
   friend class Compositor;

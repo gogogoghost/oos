@@ -1,24 +1,26 @@
-# WAMR Native-App Runtime
+# QuickJS And WAMR Application Runtimes
 
 ## First-Version Scope
 
-OOS keeps native applications resident in one process through WAMR 2.4.4.
+OOS keeps application sessions resident in one process. ES modules execute in
+the pinned QuickJS runtime and core Wasm/AOT modules execute in WAMR 2.4.4.
 Exactly one application session is active and receives input and frame
-callbacks; background instances retain their isolated WASM/UI state and
+callbacks; background instances retain their isolated runtime and UI state and
 dedicated compositor layer without rendering.
 The host owns display lifecycle, EGL/GLES, HWC, key devices, clocks, and phone
 services. A guest can only reach interfaces in the versioned
-`oos:platform@0.2.0` WIT package.
+`oos:platform@0.3.0` WIT package.
 
-The production SystemUI is a trusted, process-local LVGL component and does
-not allocate a WAMR instance. The egui 0.35 Launcher remains the first SDK
-integration app: it uses the reusable `oos-egui` adapter and compiles to
-`wasm32-unknown-unknown` without JavaScript, a DOM, WebView, or WASI.
+The production SystemUI is a trusted, process-local LVGL component. QuickJS is
+built into OOS from `third_party/quickjs` without `quickjs-libc`; applications
+receive restricted platform modules and no DOM, filesystem, shell, or browser
+globals. Solid renders through the host tree transport, while Clay compiles
+into Wasm and targets the same Canvas2D backend.
 
 ```text
 evdev -> OOS key normalization -> oos:platform/lifecycle#event
                                   |
-                              Wasm application
+                         JS or Wasm application
                                   |
         textures + indexed meshes or GLES2 command batch
                                   |
@@ -35,13 +37,13 @@ Every app implements the WIT `lifecycle` interface:
 - `shutdown()`
 
 The generated core-Wasm export names are versioned, for example
-`oos:platform/lifecycle@0.2.0#frame`. Applications use generated bindings and
+`oos:platform/lifecycle@0.3.0#frame`. Applications use generated bindings and
 must not depend on those lowered names directly.
 
-`ApplicationSessionManager` applies the same lifecycle to built-in and WAMR
-applications. Every resident module owns a `WasmApp` and an independent
-compositor `GraphicsHost`, so linear memory, UI state, retained draw state, and
-texture namespaces survive foreground switches without colliding. The manager
+`ApplicationSessionManager` applies the same lifecycle to built-in, QuickJS,
+and WAMR applications. Every resident session owns its runtime instance and an
+independent compositor `GraphicsHost`, so VM memory, UI state, retained draw
+state, and texture namespaces survive foreground switches without colliding. The manager
 and every WIT import run on the OOS event-loop thread. A non-zero
 return, trap, missing export, invalid pointer, invalid draw range, or resource
 limit violation fails that app call instead of passing untrusted data to GLES.
@@ -96,8 +98,8 @@ activation and cannot leak from a hidden application.
 between status-safe geometry and the complete physical display. The status bar
 is hidden in immersive mode, `graphics.surface-size` changes synchronously, and
 the mode is restored with the resident session. Lifecycle frame delays,
-worker-safe clocks, dynamic media sources, child runtimes, explicit access
-discovery, and least-privilege device-storage grants use ABI 7.
+worker-safe clocks, dynamic media sources, package modules, canvases, explicit
+access discovery, and least-privilege device-storage grants use ABI 8.
 
 The lifecycle result is the next requested frame delay in milliseconds. OOS
 schedules the earliest application/SystemUI deadline, clamps idle waits to one
@@ -126,11 +128,8 @@ The `storage` interface provides persistent byte-valued KV plus bounded
 prepared SQLite statements. Database handles and statement cursors stay in
 the native host; guests bind/read null, integer, float, text, and blob values
 through validated WIT buffers. Each application receives only its configured
-`/data/users/0/wasm/<app-id>` storage root. The app identity and launch-time
+`/data/users/0/apps/<app-id>` storage root. The app identity and launch-time
 permission mask are carried into every runtime instance.
-The KaiOS 2.5 application-owned DataStore adapter uses this same host storage
-implementation for Web applications; it is an API-shape adapter, not a second
-database service.
 
 The `audio` interface reports the running build's real decoder set by canonical
 MIME type. It provides immutable session-owned byte sources, asynchronous
@@ -158,22 +157,20 @@ It is registered only for applications granted `system`; ordinary WAMR apps do
 not instantiate its SQLite service. It manages software state and events, not
 device drivers.
 
-## Ephemeral Child Modules
+## Package Modules
 
-An application package may contain named `modules/<name>.wasm` and
-`modules/<name>.aot` files. The `subruntime` interface permits one child at a
-time and prefers AOT. A child inherits the parent's storage and device
-capabilities but owns an independent WAMR instance, worker cluster, stacks, and
-linear memory. Creation and activation are deferred until the parent import has
-returned. OOS then suspends the parent and routes lifecycle, input, graphics,
-and device calls to the child on the normal event-loop thread. Child completion,
-exit, failure, and cancellation are explicit states; resuming the parent never
-re-enters it from a native callback. Destroy joins a live worker, tears down host
-resources, and releases the entire child linear memory.
+The manifest may declare named JS, core-Wasm, and AOT modules under `modules/`.
+Calls use one bounded operation string and one byte request/response, so a call
+crosses each runtime boundary only twice regardless of payload size. JS imports
+declared JS modules through standard ESM syntax and reaches Wasm through the
+restricted `WebAssembly.Module`/`Instance` facade. Wasm uses the `modules` WIT
+interface for Wasm-to-Wasm and Wasm-to-JS calls.
 
-This is the recoverable-memory model for compiler/game workloads. Host stress
-coverage checks deferred activation, event-loop thread affinity, completion,
-stale handles, worker WIT traps, and `smaps_rollup` PSS recovery.
+Each Wasm package module owns an isolated instance, memory, and persistent host
+worker. The worker avoids WAMR TLS re-entry while the caller is inside a native
+import. Canonical arguments use the module's exported `cabi_realloc`, never
+WAMR's separate application heap. Payloads are capped at 1 MiB, recursion depth
+is capped at eight, and recursive invocation of the same Wasm module is rejected.
 
 ## WAMR And Components
 
@@ -191,16 +188,21 @@ interface model.
 
 ## Execution And Isolation
 
-Each native application ZIP contains `entry.wasm`, `entry.aot`, or both. AOT is
-preferred when present, and AOT-only production packages avoid carrying a
-redundant core Wasm module.
+Each Wasm application and package module declares one package-relative,
+suffixless base such as `app/main` or `modules/compiler` in `manifest.json`.
+At load time OOS tries `<base>.<cpu-core>.aot`, then
+`<base>.<cpu-arch>.aot`, then `<base>.wasm`. The CPU profile comes from the
+selected device descriptor; raw diagnostics fall back to the build target.
+AOT-only production packages are supported when a matching artifact exists.
+JavaScript applications declare the actual package-relative `.js` or `.mjs`
+file instead.
 
 The optional `egui-demo.component.wasm` remains a build/tooling artifact until
 the runtime has a Component Model loader; it is not required in the device
 package.
 
 AOT retains WebAssembly bounds checks and WAMR validation. WAMR's interpreter
-remains available for portable `entry.wasm` packages; JIT is not part of the
+remains available for portable core-Wasm packages; JIT is not part of the
 native-app runtime. AOT is deterministic, needs no writable-executable memory
 on the phone, and is available for this ARMv7 target. This decision is
 independent from any browser engine or JavaScript runtime.
@@ -209,8 +211,8 @@ Module files are loaded with writable private `mmap` rather than copied into
 anonymous malloc memory. Unmodified AOT pages stay file-backed and reclaimable;
 multiple instances of the same module also share those physical pages.
 
-WASI, SIMD, cross-module imports/dependency linking, and direct dynamic library
-access are disabled. The only libc-shaped imports are WAMR's pthread contract;
+WASI, SIMD, native Wasm linker imports, and direct dynamic library access are
+disabled. The only libc-shaped imports are WAMR's pthread contract;
 the C SDK supplies its allocator inside the guest. Independent app instances do
 not import from each other. Service providers must be narrow OOS capabilities
 associated with an application manifest. WAMR memory safety does not replace
@@ -218,8 +220,16 @@ that permission layer.
 
 ## Framework Compatibility
 
-egui is the first guest framework and validates the complete route from framework UI
-to phone GPU. `oos-egui::Renderer` retains its frame buffers and handles
+Solid is the primary JavaScript UI framework. Its custom renderer emits one
+retained node-tree batch without creating a DOM; the native layout engine
+accepts the documented Tailwind subset and renders through Canvas2D. Clay uses
+the same drawing backend from C/Wasm and also submits complete batches.
+`@oos/vite-plugin` configures Solid's universal compiler, rejects DOM/CSS
+imports and code splitting, preserves native `oos:*` imports, and emits one
+QuickJS ESM entry. `@oos/platform` supplies the typed runtime and renderer APIs;
+both packages are independently publishable from `sdk/`.
+
+egui remains a small Wasm mesh example. `oos-egui::Renderer` retains its frame buffers and handles
 texture deltas, tessellation, index rebasing, clip rectangles, and WIT
 submissions, leaving Launcher with application UI logic only. Its
 `CanvasTexture` accepts direct RGB565 and other supported formats for emulator
@@ -228,17 +238,11 @@ press, repeat, and release state and builds correctly scaled `RawInput` values.
 The renderer returns non-painting egui output for the application/SystemUI
 integration to handle explicitly.
 
-iced is next: its custom renderer/backend can target the same WIT texture and
-mesh interface. The adapter must live in the SDK and avoid depending on wgpu
-because the device graphics stack is GLES-oriented.
-
 The built-in LVGL display and keypad ports target `GraphicsHost` without
 exposing Linux devices. LVGL renders into two 32-row RGB565 buffers, uploads
 only invalidated rectangles, and presents one GPU-composited quad. The
-process-local Dear ImGui backend translates textures, vertices, `u16` indices,
-texture IDs, and clip rectangles directly into the same host records. Both
-backends are device-independent and therefore run unchanged on the 2780,
-8110, and local target. The C guest LVGL adapter lowers partial RGB565 updates
+backend is device-independent and therefore runs unchanged on the 2780, 8110,
+and local target. The C guest LVGL adapter lowers partial RGB565 updates
 through WIT and exposes its quad rather than forcing a second submit. Its
 overlay mode renders ARGB8888, converts dirty rows to premultiplied RGBA8888,
 and keeps the root transparent above a retained game texture. Resize replaces
@@ -266,7 +270,7 @@ smoke guest that imports every device-service interface and validates
 Canonical ABI error lifting. It also executes a C shared-memory pthread guest,
 checks repeated worker join, clocks and wakeups, rejects an unbounded-memory
 module, and compiles that same guest to ARMv7 AOT. It also covers dynamic MIDI
-bytes, child failure recovery, live-worker teardown, and PSS recovery. The
+bytes and all four JS/Wasm package-module call directions. The
 interface verifier rejects legacy `oos_*`
 imports and checks both core-Wasm and component lifecycle exports. The Android
 build also emits `oos_test_nokia_2780_wasm_multi_app`; it cycles three

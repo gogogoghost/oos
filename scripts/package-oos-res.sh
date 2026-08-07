@@ -66,9 +66,11 @@ if [[ "$DEVICE" == nokia-8110-4g ]]; then
   DEVICE_RUNTIME_LIBRARY="$ROOT_DIR/build/android-$DEVICE/devices/$DEVICE/liboos-android23-buffer.so"
 fi
 WAMR_LICENSE="$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
+QUICKJS_LICENSE="$ROOT_DIR/third_party/quickjs/LICENSE"
+STB_LICENSE="$ROOT_DIR/third_party/stb/LICENSE"
+CLAY_LICENSE="$ROOT_DIR/third_party/clay/LICENSE.md"
 LVGL_LICENSE="$ROOT_DIR/third_party/lvgl/LICENCE.txt"
 FONT_AWESOME_LICENSE="$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt"
-IMGUI_LICENSE="$ROOT_DIR/third_party/imgui/LICENSE.txt"
 MINIAUDIO_LICENSE="$ROOT_DIR/third_party/miniaudio/LICENSE"
 FFMPEG_LICENSE="$ROOT_DIR/third_party/ffmpeg/COPYING.LGPLv2.1"
 SONIVOX_NOTICE="$ROOT_DIR/third_party/sonivox/NOTICE"
@@ -83,9 +85,11 @@ if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
   package_require_file "$DEVICE_RUNTIME_LIBRARY"
 fi
 package_require_file "$WAMR_LICENSE"
+package_require_file "$QUICKJS_LICENSE"
+package_require_file "$STB_LICENSE"
+package_require_file "$CLAY_LICENSE"
 package_require_file "$LVGL_LICENSE"
 package_require_file "$FONT_AWESOME_LICENSE"
-package_require_file "$IMGUI_LICENSE"
 package_require_file "$MINIAUDIO_LICENSE"
 package_require_file "$FFMPEG_LICENSE"
 package_require_file "$SONIVOX_NOTICE"
@@ -113,12 +117,16 @@ if [[ -n "$DEVICE_RUNTIME_LIBRARY" ]]; then
 fi
 install -m 0644 "$WAMR_LICENSE" \
   "$STAGING/share/licenses/oos/WAMR.txt"
+install -m 0644 "$QUICKJS_LICENSE" \
+  "$STAGING/share/licenses/oos/QuickJS.txt"
+install -m 0644 "$STB_LICENSE" \
+  "$STAGING/share/licenses/oos/stb.txt"
+install -m 0644 "$CLAY_LICENSE" \
+  "$STAGING/share/licenses/oos/clay.txt"
 install -m 0644 "$LVGL_LICENSE" \
   "$STAGING/share/licenses/oos/LVGL.txt"
 install -m 0644 "$FONT_AWESOME_LICENSE" \
   "$STAGING/share/licenses/oos/FontAwesome5.txt"
-install -m 0644 "$IMGUI_LICENSE" \
-  "$STAGING/share/licenses/oos/DearImGui.txt"
 install -m 0644 "$MINIAUDIO_LICENSE" \
   "$STAGING/share/licenses/oos/miniaudio.txt"
 install -m 0644 "$FFMPEG_LICENSE" \
@@ -165,9 +173,9 @@ printf '%s\n' \
   "device=$DEVICE" \
   "abi=armeabi-v7a" \
   "android_api=$ANDROID_API" \
-  "native_app_runtime=${WAMR_VERSION}" \
-  "native_app_execution=interpreter,aot" \
-  "native_app_interface=oos-wit-0.2.0-core" \
+  "app_runtimes=quickjs-${QUICKJS_VERSION},wamr-${WAMR_VERSION}" \
+  "wasm_execution=interpreter,aot" \
+  "native_app_interface=oos-wit-0.3.0-core" \
   "media_miniaudio=${MINIAUDIO_VERSION}" \
   "media_ffmpeg=${FFMPEG_VERSION}" \
   "media_sonivox=${SONIVOX_VERSION}" \
@@ -177,7 +185,6 @@ printf '%s\n' \
   "system_font_fallback=/system/fonts/DroidSansFallback.ttf" \
   "system_icons=font-awesome-5-free" \
   "system_ui=lvgl-${LVGL_VERSION#v}" \
-  "debug_ui_backend=dear-imgui-${IMGUI_VERSION#v}" \
   "runtime_prefix=/opt/oos" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   >"$STAGING/manifest.env"

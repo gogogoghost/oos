@@ -97,14 +97,14 @@ target_link_libraries(oos_nokia_8110_device PUBLIC
   oos_input
   oos_nokia_8110_gles_display)
 add_library(oos::platform ALIAS oos_nokia_8110_device)
-target_link_libraries(oos_wasm_runtime PUBLIC oos::platform)
+target_link_libraries(oos_app_runtime PUBLIC oos::platform)
 
 oos_nokia_8110_android_target(oos)
 target_include_directories(oos PRIVATE
   "${NOKIA_8110_LIBPNG_DIR}")
 target_link_libraries(oos PRIVATE
   oos::platform
-  oos_wasm_runtime
+  oos_app_runtime
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libpng.so"
   "${NOKIA_8110_SYSTEM_LIB_DIR}/libc++.so")
 

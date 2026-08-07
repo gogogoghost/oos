@@ -68,6 +68,7 @@ std::string regularPath() {
   return firstReadable(
       "OOS_UI_FONT_REGULAR",
       {"/system/fonts/Roboto-Regular.ttf",
+       "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"});
 }
@@ -80,6 +81,10 @@ bool initialize() {
   const std::string fallback =
       firstReadable("OOS_UI_FONT_FALLBACK",
                     {"/system/fonts/DroidSansFallback.ttf",
+                     "/usr/share/fonts/google-droid-sans-fonts/"
+                     "DroidSansFallbackFull.ttf",
+                     "/usr/share/fonts/google-noto-sans-cjk-vf-fonts/"
+                     "NotoSansCJK-VF.ttc",
                      "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
                      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"});
   if (primary.empty()) {

@@ -48,8 +48,21 @@ build() {
     -DNDEBUG -Dprintf=oos_tlsf_diagnostic \
     -c "$ROOT_DIR/third_party/tlsf/tlsf.c" \
     -o "$tlsf_object"
+  local optional_flags=()
+  if [[ -n ${OOS_LV_CONF_DIR:-} ]]; then
+    [[ -f "$OOS_LV_CONF_DIR/lv_conf.h" ]] || {
+      echo "LVGL configuration is unavailable: $OOS_LV_CONF_DIR/lv_conf.h" >&2
+      exit 1
+    }
+    optional_flags+=(
+      -DLV_CONF_INCLUDE_SIMPLE
+      -I"$OOS_LV_CONF_DIR"
+      -I"$ROOT_DIR/sdk/c/lvgl"
+      -I"$ROOT_DIR/third_party/lvgl")
+  fi
   local sources=("$ROOT_DIR/sdk/c/generated/app.c"
-                 "$ROOT_DIR/sdk/c/runtime/oos_allocator.c" "$@")
+                 "$ROOT_DIR/sdk/c/runtime/oos_allocator.c"
+                 "$ROOT_DIR/sdk/c/clay/oos_clay_backend.c" "$@")
   local objects=("$ROOT_DIR/sdk/c/generated/app_component_type.o"
                  "$tlsf_object")
   local index=0
@@ -59,7 +72,9 @@ build() {
       -matomics -mbulk-memory -ffunction-sections -fdata-sections \
       -D__IEEE_LITTLE_ENDIAN \
       -I"$ROOT_DIR/sdk/c/include" -I"$ROOT_DIR/sdk/c/generated" \
+      -I"$ROOT_DIR/sdk/c/clay" -I"$ROOT_DIR/third_party/clay" \
       -I"$ROOT_DIR/third_party/tlsf" -isystem "$PICOLIBC_DIR/include" \
+      "${optional_flags[@]}" \
       -c "$source" -o "$object"
     objects+=("$object")
     index=$((index + 1))
@@ -86,6 +101,7 @@ if [[ -n "$BUILD_CONTAINER" && "${OOS_IN_DISTROBOX:-0}" != 1 ]]; then
   exec distrobox enter "$BUILD_CONTAINER" -- env OOS_IN_DISTROBOX=1 \
     OOS_WASM_MEMORY_BYTES="$MEMORY_BYTES" \
     OOS_WASM_INITIAL_MEMORY_BYTES="$INITIAL_MEMORY_BYTES" \
+    OOS_LV_CONF_DIR="${OOS_LV_CONF_DIR:-}" \
     "$0" "$OUTPUT" "$@"
 fi
 build "$@"

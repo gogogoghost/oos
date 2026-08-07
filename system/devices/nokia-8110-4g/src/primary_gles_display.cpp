@@ -1109,5 +1109,12 @@ bool PrimaryGlesDisplay::submitGles(const OosGlesCommand *commands,
                                     size_t data_words) {
   return impl_->gles_.submit(commands, command_count, data, data_words);
 }
+bool PrimaryGlesDisplay::submitGlesToTexture(
+    uint32_t texture, uint32_t width, uint32_t height,
+    const OosGlesCommand *commands, size_t command_count, const uint32_t *data,
+    size_t data_words) {
+  return impl_->gles_.submitToTexture(texture, width, height, commands,
+                                      command_count, data, data_words);
+}
 
 } // namespace oos::nokia8110

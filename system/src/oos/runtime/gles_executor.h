@@ -59,6 +59,9 @@ public:
 
   bool submit(const OosGlesCommand *commands, size_t command_count,
               const uint32_t *data, size_t data_words);
+  bool submitToTexture(uint32_t texture, uint32_t width, uint32_t height,
+                       const OosGlesCommand *commands, size_t command_count,
+                       const uint32_t *data, size_t data_words);
   void reset();
 
 private:

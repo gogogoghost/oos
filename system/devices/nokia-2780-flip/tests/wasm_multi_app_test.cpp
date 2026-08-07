@@ -12,7 +12,8 @@
 
 int main(int argc, char **argv) {
   if (argc < 2 || argc > 4) {
-    std::fprintf(stderr, "usage: %s APP.aot [INSTANCE_COUNT=3] [SECONDS=20]\n",
+    std::fprintf(stderr,
+                 "usage: %s WASM_BASE [INSTANCE_COUNT=3] [SECONDS=20]\n",
                  argv[0]);
     return 2;
   }

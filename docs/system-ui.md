@@ -5,7 +5,7 @@ trees:
 
 ```text
 system/  hardware contracts, runtime, compositor, input routing, storage
-sdk/     public WIT/Rust SDK plus reusable egui, LVGL, and ImGui backends
+sdk/     public WIT/Rust/JS SDK plus Solid, Clay, egui, and LVGL backends
 apps/    one directory per application
 ```
 
@@ -16,7 +16,7 @@ only the foreground surface visible. `apps/systemui` owns only global UI: the
 22-pixel status bar and the full content-area overlay used by notifications and
 the lock screen. None of these applications is implemented inside `system/`.
 
-System-owned LVGL and ImGui surfaces use the platform system font. On Android,
+System-owned LVGL surfaces use the platform system font. On Android,
 Roboto is the primary face and DroidSansFallback supplies missing CJK glyphs
 on demand. FontAwesome is embedded only as a small subset containing OOS icon
 codepoints; framework text fonts are not embedded in the runtime.

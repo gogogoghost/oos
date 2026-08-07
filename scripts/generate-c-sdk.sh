@@ -13,6 +13,8 @@ command -v wit-bindgen >/dev/null 2>&1 || {
   exit 1
 }
 mkdir -p "$ROOT_DIR/sdk/c/generated"
-ARGS=(c --world app --out-dir "$ROOT_DIR/sdk/c/generated")
-[[ ${1:-} == --check ]] && ARGS+=(--check)
-wit-bindgen "${ARGS[@]}" "$ROOT_DIR/sdk/wit"
+for world in app module; do
+  ARGS=(c --world "$world" --out-dir "$ROOT_DIR/sdk/c/generated")
+  [[ ${1:-} == --check ]] && ARGS+=(--check)
+  wit-bindgen "${ARGS[@]}" "$ROOT_DIR/sdk/wit"
+done

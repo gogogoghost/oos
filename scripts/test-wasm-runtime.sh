@@ -12,9 +12,11 @@ BUILD_DIR="$ROOT_DIR/build/host-wamr-runtime"
 "$ROOT_DIR/scripts/build-c-thread-smoke.sh"
 "$ROOT_DIR/scripts/build-c-worker-wit-trap.sh"
 "$ROOT_DIR/scripts/build-c-exit-smoke.sh"
-"$ROOT_DIR/scripts/build-c-subruntime-smoke.sh"
+"$ROOT_DIR/scripts/build-c-module-smoke.sh"
 "$ROOT_DIR/scripts/build-c-thread-smoke-aot.sh"
-"$ROOT_DIR/scripts/build-c-subruntime-smoke-aot.sh"
+"$ROOT_DIR/scripts/compile-native-app-aot.sh" \
+  "$ROOT_DIR/build/native-apps/c-production-libc-smoke.wasm" \
+  "$ROOT_DIR/build/native-apps/c-production-libc-smoke.x86_64.aot"
 if command -v wasm-tools >/dev/null 2>&1 &&
     [[ -f "$ROOT_DIR/build/native-apps/egui-demo.component.wasm" ]]; then
   "$ROOT_DIR/scripts/verify-wit-interfaces.sh"
@@ -25,24 +27,27 @@ cmake -S "$ROOT_DIR/system/tests/host" -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$BUILD_DIR"
 "$BUILD_DIR/oos_wasm_runtime_test" \
-  "$ROOT_DIR/build/native-apps/egui-demo.wasm" \
-  "$ROOT_DIR/build/native-apps/wit-smoke.wasm" \
-  "$ROOT_DIR/build/native-apps/c-thread-smoke.wasm" \
-  "$ROOT_DIR/build/native-apps/c-worker-wit-trap.wasm" \
-  "$ROOT_DIR/build/native-apps/c-exit-smoke.wasm" \
+  "$ROOT_DIR/build/native-apps/egui-demo" \
+  "$ROOT_DIR/build/native-apps/wit-smoke" \
+  "$ROOT_DIR/build/native-apps/c-thread-smoke" \
+  "$ROOT_DIR/build/native-apps/c-worker-wit-trap" \
+  "$ROOT_DIR/build/native-apps/c-exit-smoke" \
   "$ROOT_DIR/system/assets/fonts" \
-  "$ROOT_DIR/build/native-apps/c-subruntime-parent.wasm" \
-  "$ROOT_DIR/build/native-apps/subruntime-host-modules" \
-  "$ROOT_DIR/build/native-apps/c-production-libc-smoke.wasm"
+  "$ROOT_DIR/build/native-apps/c-module-parent" \
+  "$ROOT_DIR/build/native-apps/package-modules" \
+  "$ROOT_DIR/build/native-apps/c-production-libc-smoke" \
+  "$ROOT_DIR/build/native-apps/lvgl-demo" \
+  "$ROOT_DIR/build/native-apps/clay-demo" \
+  "$ROOT_DIR/build/native-apps/solid-demo/main.mjs"
 
 TEST_DIRECTORY=$(mktemp -d "${TMPDIR:-/tmp}/oos-test-application.XXXXXX")
 TEST_AOT_PACKAGE="$TEST_DIRECTORY/aot-only.zip"
 TEST_WASM_PACKAGE="$TEST_DIRECTORY/wasm-only.zip"
 trap 'rm -rf "$TEST_DIRECTORY"' EXIT
 "$ROOT_DIR/system/tests/host/create-app-package.sh" "$TEST_AOT_PACKAGE" aot
-"$BUILD_DIR/oos_app_repository_test" "$TEST_AOT_PACKAGE" entry.aot
+"$BUILD_DIR/oos_app_repository_test" "$TEST_AOT_PACKAGE" app/main.cortex-a53.aot
 "$ROOT_DIR/system/tests/host/create-app-package.sh" "$TEST_WASM_PACKAGE" wasm
-"$BUILD_DIR/oos_app_repository_test" "$TEST_WASM_PACKAGE" entry.wasm
+"$BUILD_DIR/oos_app_repository_test" "$TEST_WASM_PACKAGE" app/main.wasm
 "$BUILD_DIR/oos_device_storage_test"
 "$BUILD_DIR/oos_font_assets_test"
 "$BUILD_DIR/oos_system_service_test"

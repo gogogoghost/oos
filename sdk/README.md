@@ -4,7 +4,7 @@ OOS application interfaces are defined in `sdk/wit/oos.wit`. That versioned WIT
 package is the public contract; applications must not declare WAMR imports or
 export lifecycle symbols by hand.
 
-- `rust/oos-app` runs `wit-bindgen` for the `oos:platform/app@0.2.0` world and
+- `rust/oos-app` runs `wit-bindgen` for the `oos:platform/app@0.3.0` world and
   provides small Rust convenience wrappers.
 - `rust/oos-egui` converts egui textures and meshes into the generated WIT
   graphics records, provides keypad input/system-font integration, and exposes
@@ -59,7 +59,7 @@ OOS WIT plus the explicit WAMR pthread/semaphore imports. Set
 64 MiB OOS ceiling. The host supplies the 512 KiB WAMR lifecycle execution
 stack. The SDK fixes the one supported guest auxiliary stack at 2 MiB because
 WAMR partitions the linked region at module build time; it cannot be changed
-when a child is instantiated.
+when an application instance is created.
 C applications implement the four generated lifecycle exports.
 `c/lvgl/oos_lvgl_backend` uploads either RGB565 dirty rectangles or a
 premultiplied RGBA8888 transparent overlay and returns draw records so an app
@@ -80,13 +80,15 @@ Component Model artifact for runtimes that support components. WAMR 2.4.4 does
 not itself load component binaries.
 
 Framework adapters belong under `sdk/`, not in an individual application.
-The Rust egui adapter lives in `rust/oos-egui`; the guest LVGL C adapter lives
-in `c/lvgl`; process-local LVGL and Dear ImGui backends live in `cpp`.
+The publishable Solid platform renderer lives in `js`, its publishable Vite
+integration lives in `js-vite-plugin`, the Clay adapter lives in `c/clay`,
+the Rust egui example lives in `rust/oos-egui`, and the LVGL adapters live in
+`c/lvgl` and `cpp`.
 Applications under `apps/` link only the adapter
 they use. Future iced and GPU-backed LVGL adapters can emit the same
 texture/mesh records. Software LVGL/J2ME ports can upload strided RGB565 dirty
 rectangles.
 2D/3D engine backends can translate a render queue into one validated GLES2
 command batch per frame rather than introducing another device ABI. See
-[graphics documentation](../../docs/graphics.md) for the format and
+[graphics documentation](../docs/graphics.md) for the format and
 host-composition contract.

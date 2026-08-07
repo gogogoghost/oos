@@ -14,9 +14,14 @@ class GraphicsHost;
 
 namespace oos::sdk::ui {
 
+struct LvglBackendOptions {
+  bool transparent = false;
+};
+
 class LvglBackend {
 public:
-  explicit LvglBackend(runtime::GraphicsHost &graphics);
+  explicit LvglBackend(runtime::GraphicsHost &graphics,
+                       LvglBackendOptions options = {});
   ~LvglBackend();
 
   LvglBackend(const LvglBackend &) = delete;

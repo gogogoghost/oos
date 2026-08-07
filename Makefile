@@ -13,7 +13,7 @@ export CCACHE_DIR
 help:
 	@printf '%s\n' \
 		'make native-apps       Build WIT core Wasm and Component artifacts' \
-		'make native-app-aot    Build the ARMv7 WAMR AOT egui demo' \
+		'make native-app-aot    Build architecture/core WAMR AOT egui demos' \
 		'make verify-wit        Validate generated WIT artifacts' \
 		'make test-wasm         Run the WAMR host integration suite' \
 		'make local             Build OOS for the local device' \

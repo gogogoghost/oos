@@ -1,0 +1,22 @@
+{
+  "name": "oos-solid-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@oos/platform": "file:../../../sdk/js",
+    "solid-js": "1.9.14"
+  },
+  "devDependencies": {
+    "@oos/vite-plugin": "file:../../../sdk/js-vite-plugin",
+    "typescript": "7.0.2",
+    "vite": "8.2.1"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

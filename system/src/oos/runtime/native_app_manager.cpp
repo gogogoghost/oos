@@ -49,18 +49,18 @@ NativeAppManager::NativeAppManager(GraphicsHost &graphics,
 
 NativeAppManager::~NativeAppManager() = default;
 
-bool NativeAppManager::load(const char *id, const char *module_path) {
+bool NativeAppManager::load(const char *id, const char *module_base_path) {
   NativeAppLaunchOptions options;
-  options.module_path = module_path;
+  options.module_base_path = module_base_path;
   return load(id, options);
 }
 
 bool NativeAppManager::load(const char *id,
                             const NativeAppLaunchOptions &options) {
   impl_->error.clear();
-  if (!id || id[0] == '\0' || !options.module_path ||
-      options.module_path[0] == '\0') {
-    impl_->error = "native app id or module path is empty";
+  if (!id || id[0] == '\0' || !options.module_base_path ||
+      options.module_base_path[0] == '\0') {
+    impl_->error = "native app id or Wasm module base path is empty";
     return false;
   }
   if (impl_->resident_limit == 0 ||
@@ -95,14 +95,16 @@ bool NativeAppManager::load(const char *id,
       options.asset_directory ? options.asset_directory : "";
   wasm_options.module_directory =
       options.module_directory ? options.module_directory : "";
+  wasm_options.modules = options.modules;
   wasm_options.service_permission_mask = options.service_permission_mask;
   wasm_options.enforce_service_permissions =
       options.enforce_service_permissions;
+  wasm_options.wasm_target = options.wasm_target;
   auto app = impl_->device
                  ? std::make_unique<WasmApp>(impl_->graphics, *impl_->device,
                                              wasm_options)
                  : std::make_unique<WasmApp>(impl_->graphics, wasm_options);
-  if (!app->load(options.module_path) || !app->initialize()) {
+  if (!app->load(options.module_base_path) || !app->initialize()) {
     impl_->error =
         std::string("load native app ") + id + ": " + app->lastError();
     return false;

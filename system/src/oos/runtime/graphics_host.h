@@ -45,6 +45,20 @@ public:
                                       size_t name_size) = 0;
   virtual bool submitGles(const OosGlesCommand *commands, size_t command_count,
                           const uint32_t *data, size_t data_words) = 0;
+  virtual bool submitGlesToTexture(uint32_t texture, uint32_t width,
+                                   uint32_t height,
+                                   const OosGlesCommand *commands,
+                                   size_t command_count, const uint32_t *data,
+                                   size_t data_words) {
+    (void)texture;
+    (void)width;
+    (void)height;
+    (void)commands;
+    (void)command_count;
+    (void)data;
+    (void)data_words;
+    return false;
+  }
 };
 
 } // namespace oos::runtime

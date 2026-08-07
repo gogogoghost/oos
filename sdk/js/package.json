@@ -1,0 +1,49 @@
+{
+  "name": "@oos/platform",
+  "version": "0.3.0",
+  "description": "QuickJS platform SDK and Solid universal renderer for Orange OS applications",
+  "keywords": [
+    "oos",
+    "quickjs",
+    "solid-js",
+    "canvas"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gogogoghost/oos.git",
+    "directory": "sdk/js"
+  },
+  "homepage": "https://github.com/gogogoghost/oos/tree/main/sdk/js",
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    "./runtime": "./src/runtime.ts",
+    "./services": "./src/services.ts",
+    "./modules": "./src/modules.ts",
+    "./canvas": "./src/canvas.ts",
+    "./graphics": "./src/graphics.ts",
+    "./mesh": "./src/mesh.ts",
+    "./solid": "./src/solid.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./webgl": "./src/webgl.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "pack:check": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "solid-js": "1.9.14"
+  },
+  "devDependencies": {
+    "solid-js": "1.9.14",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

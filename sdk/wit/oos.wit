@@ -1,4 +1,4 @@
-package oos:platform@0.2.0;
+package oos:platform@0.3.0;
 
 interface types {
   enum error-code {
@@ -153,12 +153,119 @@ interface graphics {
   ) -> result<_, error-code>;
 }
 
+/// Host-owned canvases are ordinary nodes in the application scene. A canvas
+/// chooses its rendering context when it is created; using Solid or Clay does
+/// not change which contexts the same application may create.
+interface canvas {
+  use types.{error-code, point, size};
+  use graphics.{draw-command, texture-flags, texture-format, vertex};
+
+  enum context-kind {
+    canvas2d,
+    mesh2d,
+    gles2,
+  }
+
+  record geometry {
+    x: s32,
+    y: s32,
+    width: u32,
+    height: u32,
+    z-order: s32,
+    visible: bool,
+  }
+
+  enum canvas2d-opcode {
+    clear,
+    fill-rect,
+    stroke-rect,
+    fill-text,
+    push-clip,
+    pop-clip,
+  }
+
+  /// Fixed 44-byte Canvas2D command. All commands for a canvas frame cross the
+  /// runtime boundary in one list. Text commands address the shared UTF-8 byte
+  /// list by offset and length.
+  record canvas2d-command {
+    opcode: canvas2d-opcode,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    radius: f32,
+    line-width: f32,
+    font-size: f32,
+    rgba: u32,
+    text-offset: u32,
+    text-length: u32,
+  }
+
+  create: func(context: context-kind, geometry: geometry) -> result<u32, error-code>;
+  configure: func(canvas: u32, geometry: geometry) -> result<_, error-code>;
+  destroy: func(canvas: u32) -> result<_, error-code>;
+  submit-2d: func(
+    canvas: u32,
+    commands: list<canvas2d-command>,
+    text: list<u8>,
+  ) -> result<_, error-code>;
+  texture-set: func(
+    canvas: u32,
+    texture: u32,
+    format: texture-format,
+    position: point,
+    dimensions: size,
+    row-stride: u32,
+    options: texture-flags,
+    pixels: list<u8>,
+  ) -> result<_, error-code>;
+  texture-free: func(canvas: u32, texture: u32) -> result<_, error-code>;
+  submit-mesh: func(
+    canvas: u32,
+    vertices: list<vertex>,
+    indices: list<u16>,
+    commands: list<draw-command>,
+    clear-rgba: u32,
+  ) -> result<_, error-code>;
+}
+
+/// Retained-tree transport used by the Solid platform backend. It is not a DOM
+/// or a general application UI mode; Clay emits Canvas2D batches instead.
+interface ui {
+  use types.{error-code};
+
+  enum node-kind {
+    container,
+    text,
+    canvas,
+  }
+
+  /// Fixed 32-byte node. Parents precede children; roots use `u32::MAX` as the
+  /// parent. Class and text fields
+  /// address one shared UTF-8 byte list, keeping a complete tree update to one
+  /// FFI call.
+  record node {
+    id: u32,
+    parent: u32,
+    kind: node-kind,
+    class-offset: u32,
+    class-length: u32,
+    text-offset: u32,
+    text-length: u32,
+    canvas: u32,
+  }
+
+  submit: func(nodes: list<node>, strings: list<u8>) -> result<_, error-code>;
+  clear: func();
+}
+
 /// A validated, batched OpenGL ES 2.0 programmable pipeline. Resources and
 /// commands are scoped to one application. The host owns the EGL context,
 /// render target, composition, and presentation; applications never receive
 /// native GL, framebuffer, or display handles.
 interface gles {
-  use types.{error-code};
+  use types.{error-code, point, size};
+  use graphics.{texture-flags, texture-format};
 
   enum buffer-usage {
     static-draw,
@@ -311,34 +418,50 @@ interface gles {
     a7: u32,
   }
 
-  get-capabilities: func() -> capabilities;
+  get-capabilities: func(canvas: u32) -> capabilities;
+  texture-set: func(
+    canvas: u32,
+    texture: u32,
+    format: texture-format,
+    position: point,
+    dimensions: size,
+    row-stride: u32,
+    options: texture-flags,
+    pixels: list<u8>,
+  ) -> result<_, error-code>;
+  texture-free: func(canvas: u32, texture: u32) -> result<_, error-code>;
   buffer-set: func(
+    canvas: u32,
     buffer: u32,
     size: u32,
     usage: buffer-usage,
     initial-data: list<u8>,
   ) -> result<_, error-code>;
   buffer-write: func(
+    canvas: u32,
     buffer: u32,
     offset: u32,
     data: list<u8>,
   ) -> result<_, error-code>;
-  buffer-free: func(buffer: u32) -> result<_, error-code>;
+  buffer-free: func(canvas: u32, buffer: u32) -> result<_, error-code>;
   shader-set: func(
+    canvas: u32,
     shader: u32,
     stage: shader-stage,
     source: string,
   ) -> result<_, error-code>;
-  shader-free: func(shader: u32) -> result<_, error-code>;
+  shader-free: func(canvas: u32, shader: u32) -> result<_, error-code>;
   program-set: func(
+    canvas: u32,
     program: u32,
     vertex-shader: u32,
     fragment-shader: u32,
   ) -> result<_, error-code>;
-  program-free: func(program: u32) -> result<_, error-code>;
-  attribute-location: func(program: u32, name: string) -> s32;
-  uniform-location: func(program: u32, name: string) -> s32;
+  program-free: func(canvas: u32, program: u32) -> result<_, error-code>;
+  attribute-location: func(canvas: u32, program: u32, name: string) -> s32;
+  uniform-location: func(canvas: u32, program: u32, name: string) -> s32;
   submit: func(
+    canvas: u32,
     commands: list<command>,
     data: list<u32>,
   ) -> result<_, error-code>;
@@ -546,49 +669,41 @@ interface audio {
   last-error: func() -> string;
 }
 
-/// One ephemeral child module owned by the calling application session.
-/// Compiler and game-runtime modules use independent linear memories so
-/// destruction deterministically returns their committed pages to OOS.
-interface subruntime {
+/// Synchronous, message-oriented calls between manifest-declared modules.
+/// Each call crosses the runtime boundary twice regardless of payload size.
+/// Implementations cap payloads and recursive calls to keep module graphs
+/// deterministic and prevent unbounded guest re-entry.
+interface modules {
   use types.{error-code};
 
-  enum child-state {
-    loading,
-    running,
-    completed,
-    exit-requested,
-    failed,
-    cancelled,
+  enum module-kind {
+    js,
+    wasm,
   }
 
-  record child-status {
-    state: child-state,
-    next-frame-delay-ms: u32,
-    result-code: u32,
+  record module-info {
+    name: string,
+    kind: module-kind,
   }
 
-  record limits {
-    maximum-instances: u32,
-    minimum-stack-bytes: u32,
-    maximum-stack-bytes: u32,
-    effective-worker-stack-bytes: u32,
-    maximum-memory-bytes: u64,
-  }
-
-  get-limits: func() -> limits;
-  /// `module` is a simple name resolved as modules/<name>.aot, then .wasm.
-  create: func(
+  enumerate: func() -> list<module-info>;
+  invoke: func(
     module: string,
-    main-stack-bytes: u32,
-  ) -> result<u32, error-code>;
-  initialize: func(handle: u32) -> result<_, error-code>;
-  event: func(handle: u32, code: u32, action: u32, monotonic-time-us: u64) -> result<_, error-code>;
-  frame: func(handle: u32, monotonic-time-us: u64) -> result<u32, error-code>;
-  status: func(handle: u32) -> result<child-status, error-code>;
-  /// Called by a packaged child after it has durably committed its result.
-  complete: func(result-code: u32) -> result<_, error-code>;
-  destroy: func(handle: u32) -> result<_, error-code>;
-  last-error: func() -> string;
+    operation: string,
+    request: list<u8>,
+  ) -> result<list<u8>, error-code>;
+}
+
+/// Exported by a Wasm package module. JavaScript modules export an `invoke`
+/// function with the equivalent `(operation, Uint8Array) -> Uint8Array`
+/// contract.
+interface module-api {
+  use types.{error-code};
+
+  invoke: func(
+    operation: string,
+    request: list<u8>,
+  ) -> result<list<u8>, error-code>;
 }
 
 interface camera {
@@ -1043,6 +1158,8 @@ world app {
   import runtime;
   import graphics;
   import gles;
+  import canvas;
+  import ui;
   import device;
   import audio;
   import camera;
@@ -1058,7 +1175,16 @@ world app {
   import font-assets;
   import assets;
   import system-services;
-  import subruntime;
+  import modules;
 
   export lifecycle;
+}
+
+world module {
+  import runtime;
+  import storage;
+  import assets;
+  import modules;
+
+  export module-api;
 }

@@ -1,5 +1,6 @@
 #include "oos/apps/app_repository.h"
 
+#include "oos/apps/wasm_artifact.h"
 #include "oos/apps/zip_archive.h"
 #include "oos/storage/filesystem.h"
 #include "oos/storage/sqlite.h"
@@ -19,7 +20,6 @@ constexpr size_t kMaximumManifestBytes = 256 * 1024;
 constexpr size_t kMaximumAssetBytes = 64 * 1024 * 1024;
 constexpr size_t kMaximumModuleBytes = 32 * 1024 * 1024;
 constexpr const char kAssetPrefix[] = "assets/";
-constexpr const char kModulePrefix[] = "modules/";
 
 std::string join(const std::string &left, const std::string &right) {
   return left + (left.empty() || left.back() == '/' ? "" : "/") + right;
@@ -75,6 +75,30 @@ bool parseRecord(storage::SqliteStatement &statement, AppRecord &record) {
   parsed.package_digest = digest;
   parsed.enabled = statement.columnInt64(6) != 0;
   record = std::move(parsed);
+  return true;
+}
+
+bool loadPackageManifest(AppRecord &record, std::string &error) {
+  ZipArchive archive;
+  if (!archive.open(record.package_path.c_str())) {
+    error = archive.lastError();
+    return false;
+  }
+  std::vector<uint8_t> bytes;
+  if (!archive.read(kAppManifestPath, bytes, kMaximumManifestBytes)) {
+    error = archive.lastError();
+    return false;
+  }
+  AppManifest manifest;
+  if (!parseAppManifest(std::string(bytes.begin(), bytes.end()), manifest,
+                        error))
+    return false;
+  if (manifest.id != record.manifest.id ||
+      manifest.version != record.manifest.version) {
+    error = "installed package manifest identity does not match the registry";
+    return false;
+  }
+  record.manifest = std::move(manifest);
   return true;
 }
 
@@ -149,60 +173,128 @@ bool createRegistrySchema(storage::SqliteDatabase &database) {
       "PRAGMA user_version=3;");
 }
 
-bool validChildModulePath(const std::string &path) {
-  if (path.rfind(kModulePrefix, 0) != 0 || path.back() == '/' ||
-      path.find('/', sizeof(kModulePrefix) - 1) != std::string::npos)
+bool supportedRuntimeFile(const std::string &path) {
+  constexpr const char *extensions[] = {".js", ".mjs", ".wasm", ".aot"};
+  for (const char *extension : extensions) {
+    const size_t length = std::strlen(extension);
+    if (path.size() > length &&
+        path.compare(path.size() - length, length, extension) == 0)
+      return true;
+  }
+  return false;
+}
+
+const ZipEntry *findWasmArtifact(const ZipArchive &archive,
+                                 const std::string &base_path) {
+  for (const ZipEntry &entry : archive.entries()) {
+    if (isWasmArtifactForBase(entry.name, base_path))
+      return &entry;
+  }
+  return nullptr;
+}
+
+bool declaredWasmArtifact(const AppManifest &manifest,
+                          const std::string &path) {
+  if (manifest.entry.runtime == AppRuntimeKind::WebAssembly &&
+      isWasmArtifactForBase(path, manifest.entry.path))
+    return true;
+  for (const AppModule &module : manifest.modules) {
+    if (module.runtime == AppRuntimeKind::WebAssembly &&
+        isWasmArtifactForBase(path, module.path))
+      return true;
+  }
+  return false;
+}
+
+bool validatePackageContents(const ZipArchive &archive,
+                             const AppManifest &manifest, std::string &error) {
+  const auto executablePresent = [&](AppRuntimeKind runtime,
+                                     const std::string &path) {
+    return runtime == AppRuntimeKind::JavaScript
+               ? archive.find(path.c_str()) != nullptr
+               : findWasmArtifact(archive, path) != nullptr;
+  };
+  if (!executablePresent(manifest.entry.runtime, manifest.entry.path)) {
+    error = "manifest executable is missing from the package: " +
+            manifest.entry.path;
     return false;
-  const std::string name = path.substr(sizeof(kModulePrefix) - 1);
-  const bool executable =
-      (name.size() > 4 && name.substr(name.size() - 4) == ".aot") ||
-      (name.size() > 5 && name.substr(name.size() - 5) == ".wasm");
-  if (!executable)
-    return false;
-  for (unsigned char character : name) {
-    if (!(std::isalnum(character) || character == '-' || character == '_' ||
-          character == '.'))
+  }
+  for (const AppModule &module : manifest.modules) {
+    if (!executablePresent(module.runtime, module.path)) {
+      error = "manifest module is missing from the package: " + module.path;
       return false;
+    }
+  }
+
+  for (const ZipEntry &entry : archive.entries()) {
+    if (entry.name == kAppManifestPath || entry.name.back() == '/')
+      continue;
+    if (entry.name.rfind(kAssetPrefix, 0) == 0) {
+      std::vector<uint8_t> verified;
+      if (!archive.readEntry(entry, verified, kMaximumAssetBytes)) {
+        error = "validate packaged asset: " + archive.lastError();
+        return false;
+      }
+      continue;
+    }
+    const bool runtime_file = entry.name.rfind(kAppSourcePrefix, 0) == 0 ||
+                              entry.name.rfind(kModulePrefix, 0) == 0;
+    if (!runtime_file || !supportedRuntimeFile(entry.name)) {
+      error = "unsupported application package entry: " + entry.name;
+      return false;
+    }
+    const bool wasm_artifact =
+        entry.name.size() >= 5 &&
+        (entry.name.compare(entry.name.size() - 5, 5, ".wasm") == 0 ||
+         entry.name.compare(entry.name.size() - 4, 4, ".aot") == 0);
+    if (wasm_artifact && !declaredWasmArtifact(manifest, entry.name)) {
+      error = "undeclared or invalid Wasm artifact: " + entry.name;
+      return false;
+    }
+    std::vector<uint8_t> verified;
+    if (!archive.readEntry(entry, verified, kMaximumModuleBytes)) {
+      error = "validate packaged runtime module: " + archive.lastError();
+      return false;
+    }
   }
   return true;
 }
 
-bool migrateLegacyRegistry(storage::SqliteDatabase &database) {
-  if (database.exec(
-          "BEGIN IMMEDIATE;"
-          "ALTER TABLE applications RENAME TO applications_legacy;"
-          "ALTER TABLE app_versions RENAME TO app_versions_legacy;"
-          "CREATE TABLE applications("
-          " app_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,"
-          " active_version TEXT NOT NULL, role TEXT NOT NULL DEFAULT '',"
-          " enabled INTEGER NOT NULL DEFAULT 1,"
-          " trust_level TEXT NOT NULL DEFAULT 'unverified',"
-          " installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
-          "CREATE TABLE app_versions("
-          " app_id TEXT NOT NULL, version TEXT NOT NULL,"
-          " package_path TEXT NOT NULL, package_digest TEXT NOT NULL,"
-          " installed_at INTEGER NOT NULL, PRIMARY KEY(app_id, version));"
-          "INSERT INTO applications(app_id,display_name,active_version,role,"
-          "enabled,trust_level,installed_at,updated_at)"
-          " SELECT app_id,display_name,active_version,role,enabled,trust_level,"
-          "installed_at,updated_at FROM applications_legacy"
-          " WHERE package_kind='oos-wasm-v1' AND runtime_kind='wamr';"
-          "INSERT INTO app_versions(app_id,version,package_path,package_digest,"
-          "installed_at) SELECT app_id,version,package_path,package_digest,"
-          "installed_at FROM app_versions_legacy WHERE app_id IN"
-          " (SELECT app_id FROM applications);"
-          "DELETE FROM app_permissions WHERE app_id NOT IN"
-          " (SELECT app_id FROM applications);"
-          "DELETE FROM app_roles WHERE app_id NOT IN"
-          " (SELECT app_id FROM applications);"
-          "DELETE FROM app_handlers WHERE app_id NOT IN"
-          " (SELECT app_id FROM applications);"
-          "DELETE FROM app_state WHERE app_id NOT IN"
-          " (SELECT app_id FROM applications);"
-          "DROP TABLE applications_legacy;"
-          "DROP TABLE app_versions_legacy;"
-          "PRAGMA user_version=3;"
-          "COMMIT;"))
+bool extractTree(const ZipArchive &archive, const char *prefix,
+                 const std::string &cache_directory, size_t maximum_bytes,
+                 uint32_t mode, std::string &error) {
+  for (const ZipEntry &entry : archive.entries()) {
+    if (entry.name.rfind(prefix, 0) != 0 || entry.name.back() == '/')
+      continue;
+    const std::string destination = join(cache_directory, entry.name);
+    struct stat status = {};
+    if (stat(destination.c_str(), &status) == 0 && S_ISREG(status.st_mode) &&
+        static_cast<uint64_t>(status.st_size) == entry.uncompressed_size)
+      continue;
+    if (!storage::ensureDirectory(storage::parentPath(destination), 0700,
+                                  error))
+      return false;
+    std::vector<uint8_t> bytes;
+    if (!archive.readEntry(entry, bytes, maximum_bytes) ||
+        !storage::writeFileAtomic(destination, bytes.data(), bytes.size(), mode,
+                                  error)) {
+      if (error.empty())
+        error = archive.lastError();
+      return false;
+    }
+  }
+  return true;
+}
+
+bool resetLegacyRegistry(storage::SqliteDatabase &database) {
+  if (database.exec("BEGIN IMMEDIATE;"
+                    "DROP TABLE IF EXISTS app_state;"
+                    "DROP TABLE IF EXISTS app_handlers;"
+                    "DROP TABLE IF EXISTS app_roles;"
+                    "DROP TABLE IF EXISTS app_permissions;"
+                    "DROP TABLE IF EXISTS app_versions;"
+                    "DROP TABLE IF EXISTS applications;") &&
+      createRegistrySchema(database) && database.exec("COMMIT;"))
     return true;
   database.exec("ROLLBACK;");
   return false;
@@ -223,7 +315,7 @@ AppRepository::~AppRepository() = default;
 bool AppRepository::initialize() {
   error_.clear();
   const char *directories[] = {
-      "system",  "runtime", "packages",       "users/0/wasm",    "cache/aot",
+      "system",  "runtime", "packages",       "users/0/apps",    "cache/apps",
       "staging", "tmp",     "media/internal", "media/removable",
   };
   for (const char *directory : directories) {
@@ -252,7 +344,7 @@ bool AppRepository::initialize() {
   }
   const bool schema_ready = version == 0 ? createRegistrySchema(impl_->database)
                             : version < 3
-                                ? migrateLegacyRegistry(impl_->database)
+                                ? resetLegacyRegistry(impl_->database)
                                 : createRegistrySchema(impl_->database);
   if (!schema_ready) {
     error_ = impl_->database.lastError();
@@ -295,33 +387,8 @@ bool AppRepository::install(const char *package_path,
     error_ = "explicit application id does not match manifest.json";
     return false;
   }
-  if (!archive.find(kAotModulePath) && !archive.find(kWasmModulePath)) {
-    error_ = "application package has no entry.aot or entry.wasm";
+  if (!validatePackageContents(archive, manifest, error_))
     return false;
-  }
-  for (const ZipEntry &entry : archive.entries()) {
-    if (entry.name.rfind(kAssetPrefix, 0) != 0 ||
-        entry.name.size() == sizeof(kAssetPrefix) - 1)
-      continue;
-    std::vector<uint8_t> verified;
-    if (!archive.readEntry(entry, verified, kMaximumAssetBytes)) {
-      error_ = "validate packaged asset: " + archive.lastError();
-      return false;
-    }
-  }
-  for (const ZipEntry &entry : archive.entries()) {
-    if (entry.name.rfind(kModulePrefix, 0) != 0)
-      continue;
-    if (!validChildModulePath(entry.name)) {
-      error_ = "invalid child module path: " + entry.name;
-      return false;
-    }
-    std::vector<uint8_t> verified;
-    if (!archive.readEntry(entry, verified, kMaximumModuleBytes)) {
-      error_ = "validate child module: " + archive.lastError();
-      return false;
-    }
-  }
   const std::string digest = contentDigest(package_path, error_);
   if (digest.empty())
     return false;
@@ -471,6 +538,8 @@ bool AppRepository::resolve(const char *app_id, AppRecord &record) {
              std::string(app_id ? app_id : "(null)");
     return false;
   }
+  if (!loadPackageManifest(record, error_))
+    return false;
   if (!loadGrantedPermissions(impl_->database, record) ||
       !loadHandlers(impl_->database, record)) {
     error_ = impl_->database.lastError();
@@ -499,9 +568,11 @@ bool AppRepository::list(std::vector<AppRecord> &records) {
     AppRecord record;
     if (result != storage::SqliteStatement::Step::Row ||
         !parseRecord(statement, record) ||
+        !loadPackageManifest(record, error_) ||
         !loadGrantedPermissions(impl_->database, record) ||
         !loadHandlers(impl_->database, record)) {
-      error_ = impl_->database.lastError();
+      if (error_.empty())
+        error_ = impl_->database.lastError();
       return false;
     }
     records.push_back(std::move(record));
@@ -548,9 +619,9 @@ bool AppRepository::uninstall(const char *app_id) {
   const std::string package_root =
       join(join(data_root_, "packages"), record.manifest.id);
   const std::string cache_root =
-      join(join(data_root_, "cache/aot"), record.package_digest);
+      join(join(data_root_, "cache/apps"), record.package_digest);
   const std::string user_data = join(
-      join(join(join(data_root_, "users"), "0"), "wasm"), record.manifest.id);
+      join(join(join(data_root_, "users"), "0"), "apps"), record.manifest.id);
   if (!storage::removeTree(package_root, error_) ||
       !storage::removeTree(cache_root, error_) ||
       !storage::removeTree(user_data, error_)) {
@@ -573,90 +644,49 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
     error_ = archive.lastError();
     return false;
   }
-  std::string entrypoint;
-  if (archive.find(kAotModulePath))
-    entrypoint = kAotModulePath;
-  else if (archive.find(kWasmModulePath))
-    entrypoint = kWasmModulePath;
-  else {
-    error_ = "active package has no executable entry";
+  const AppEntrypoint &entry = record.manifest.entry;
+  const std::string entrypoint = entry.path;
+  const ZipEntry *packaged_artifact =
+      entry.runtime == AppRuntimeKind::JavaScript
+          ? archive.find(entrypoint.c_str())
+          : findWasmArtifact(archive, entrypoint);
+  if (entrypoint.empty() || !packaged_artifact) {
+    error_ = "active package has no declared executable entry";
     return false;
   }
   const std::string cache_directory =
-      join(join(data_root_, "cache/aot"), record.package_digest);
+      join(join(data_root_, "cache/apps"), record.package_digest);
   if (!storage::ensureDirectory(cache_directory, 0700, error_))
     return false;
-  const std::string extension =
-      entrypoint.size() >= 4 &&
-              entrypoint.substr(entrypoint.size() - 4) == ".aot"
-          ? ".aot"
-      : entrypoint.size() >= 5 &&
-              entrypoint.substr(entrypoint.size() - 5) == ".wasm"
-          ? ".wasm"
-          : ".entry";
-  const std::string executable = join(cache_directory, "app" + extension);
-  struct stat status = {};
-  if (stat(executable.c_str(), &status) != 0 || !S_ISREG(status.st_mode)) {
-    std::vector<uint8_t> bytes;
-    if (!archive.read(entrypoint.c_str(), bytes)) {
-      error_ = archive.lastError();
-      return false;
-    }
-    if (!storage::writeFileAtomic(executable, bytes.data(), bytes.size(), 0500,
-                                  error_))
-      return false;
+  if (!extractTree(archive, kAppSourcePrefix, cache_directory,
+                   kMaximumModuleBytes, 0400, error_) ||
+      !extractTree(archive, kModulePrefix, cache_directory, kMaximumModuleBytes,
+                   0400, error_) ||
+      !extractTree(archive, kAssetPrefix, cache_directory, kMaximumAssetBytes,
+                   0400, error_))
+    return false;
+
+  const std::string executable = join(cache_directory, entrypoint);
+  const std::string extracted_artifact =
+      join(cache_directory, packaged_artifact->name);
+  struct stat executable_status = {};
+  if (stat(extracted_artifact.c_str(), &executable_status) != 0 ||
+      !S_ISREG(executable_status.st_mode)) {
+    error_ = "extracted application entry is unavailable";
+    return false;
   }
 
-  const std::string asset_directory = join(cache_directory, "assets");
-  if (!storage::ensureDirectory(asset_directory, 0700, error_))
+  const std::string application_directory =
+      join(cache_directory, kAppSourcePrefix);
+  const std::string asset_directory = join(cache_directory, kAssetPrefix);
+  const std::string module_directory = join(cache_directory, kModulePrefix);
+  if (!storage::ensureDirectory(application_directory, 0700, error_) ||
+      !storage::ensureDirectory(asset_directory, 0700, error_) ||
+      !storage::ensureDirectory(module_directory, 0700, error_))
     return false;
-  for (const ZipEntry &entry : archive.entries()) {
-    if (entry.name.rfind(kAssetPrefix, 0) != 0 ||
-        entry.name.size() == sizeof(kAssetPrefix) - 1 ||
-        entry.name.back() == '/')
-      continue;
-    const std::string relative = entry.name.substr(sizeof(kAssetPrefix) - 1);
-    const std::string destination = join(asset_directory, relative);
-    struct stat asset_status = {};
-    if (stat(destination.c_str(), &asset_status) == 0 &&
-        S_ISREG(asset_status.st_mode) &&
-        static_cast<uint64_t>(asset_status.st_size) == entry.uncompressed_size)
-      continue;
-    std::vector<uint8_t> bytes;
-    if (!archive.readEntry(entry, bytes, kMaximumAssetBytes) ||
-        !storage::writeFileAtomic(destination, bytes.data(), bytes.size(), 0400,
-                                  error_)) {
-      if (error_.empty())
-        error_ = archive.lastError();
-      return false;
-    }
-  }
-
-  const std::string module_directory = join(cache_directory, "modules");
-  if (!storage::ensureDirectory(module_directory, 0700, error_))
-    return false;
-  for (const ZipEntry &entry : archive.entries()) {
-    if (!validChildModulePath(entry.name))
-      continue;
-    const std::string name = entry.name.substr(sizeof(kModulePrefix) - 1);
-    const std::string destination = join(module_directory, name);
-    struct stat module_status = {};
-    if (stat(destination.c_str(), &module_status) == 0 &&
-        S_ISREG(module_status.st_mode) &&
-        static_cast<uint64_t>(module_status.st_size) == entry.uncompressed_size)
-      continue;
-    std::vector<uint8_t> bytes;
-    if (!archive.readEntry(entry, bytes, kMaximumModuleBytes) ||
-        !storage::writeFileAtomic(destination, bytes.data(), bytes.size(), 0500,
-                                  error_)) {
-      if (error_.empty())
-        error_ = archive.lastError();
-      return false;
-    }
-  }
 
   const std::string data_directory = join(
-      join(join(join(data_root_, "users"), "0"), "wasm"), record.manifest.id);
+      join(join(join(data_root_, "users"), "0"), "apps"), record.manifest.id);
   if (!storage::ensureDirectory(data_directory, 0700, error_))
     return false;
   launch.app = std::move(record);
@@ -664,6 +694,7 @@ bool AppRepository::prepareLaunch(const char *app_id, AppLaunch &launch) {
   launch.entrypoint = entrypoint;
   launch.data_directory = data_directory;
   launch.cache_directory = cache_directory;
+  launch.application_directory = application_directory;
   launch.asset_directory = asset_directory;
   launch.module_directory = module_directory;
   return true;

@@ -41,3 +41,5 @@ else
   echo "Built $DESTINATION and $SMOKE_DESTINATION"
   echo "wasm-tools is unavailable; skipped the optional Component Model artifact" >&2
 fi
+
+"$ROOT_DIR/scripts/build-framework-demos.sh"

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "cc.jaxy.oos.solid-demo",
+  "name": "OOS Solid Demo",
+  "version": "0.1.0",
+  "entry": {
+    "runtime": "js",
+    "path": "app/main.mjs"
+  }
+}

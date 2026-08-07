@@ -55,6 +55,10 @@ public:
                               size_t name_size) override;
   bool submitGles(const OosGlesCommand *commands, size_t command_count,
                   const uint32_t *data, size_t data_words) override;
+  bool submitGlesToTexture(uint32_t texture, uint32_t width, uint32_t height,
+                           const OosGlesCommand *commands,
+                           size_t command_count, const uint32_t *data,
+                           size_t data_words) override;
 
 private:
   class Impl;

@@ -103,14 +103,14 @@ target_link_libraries(oos_nokia_2780_device PUBLIC
   oos_input
   oos_nokia_2780_gles_display)
 add_library(oos::platform ALIAS oos_nokia_2780_device)
-target_link_libraries(oos_wasm_runtime PUBLIC oos::platform)
+target_link_libraries(oos_app_runtime PUBLIC oos::platform)
 
 oos_nokia_2780_android_target(oos)
 target_include_directories(oos PRIVATE
   "${THIRD_PARTY_DIR}/aosp-libpng-android6")
 target_link_libraries(oos PRIVATE
   oos::platform
-  oos_wasm_runtime
+  oos_app_runtime
   "${NOKIA_2780_SYSTEM_LIB_DIR}/libpng.so")
 
 add_library(oos_nokia_2780_network STATIC
@@ -253,7 +253,7 @@ if(OOS_BUILD_DEVICE_TESTS)
   target_include_directories(oos_test_nokia_2780_wasm_multi_app PRIVATE
     "${CMAKE_SOURCE_DIR}/src")
   target_link_libraries(oos_test_nokia_2780_wasm_multi_app PRIVATE
-    oos_wasm_runtime
+    oos_app_runtime
     oos_nokia_2780_gles_display)
 
   set_target_properties(

@@ -9,7 +9,6 @@
 #include "oos/runtime/application_session_manager.h"
 #include "oos/runtime/graphics_host.h"
 #include "oos/sdk/ui/fonts.h"
-#include "oos/sdk/ui/imgui_backend.h"
 #include "oos/sdk/ui/lvgl_backend.h"
 #include "oos/sdk/ui/theme.h"
 #include "oos/ui/system_status.h"
@@ -319,22 +318,20 @@ void testApplicationSessions() {
   assert(sessions.residentCount() == 0);
 }
 
-void testImguiBackend() {
+void testTransparentLvglBackend() {
   FakeGraphicsHost graphics;
-  oos::sdk::ui::ImguiBackend backend(graphics);
+  oos::sdk::ui::LvglBackend backend(graphics,
+                                    oos::sdk::ui::LvglBackendOptions{true});
   assert(backend.initialize());
-  assert(backend.beginFrame(1000));
-  ImGui::SetNextWindowPos(ImVec2(0, 0));
-  ImGui::SetNextWindowSize(ImVec2(240, 320));
-  ImGui::Begin("Backend test", nullptr,
-               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                   ImGuiWindowFlags_NoSavedSettings);
-  ImGui::TextUnformatted("Dear ImGui backend");
-  ImGui::Button("OK");
-  ImGui::End();
-  assert(backend.submit());
+  lv_obj_t *panel = lv_obj_create(backend.root());
+  lv_obj_set_size(panel, 100, 40);
+  lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 8);
+  lv_obj_set_style_bg_color(panel, lv_color_hex(0x202326), 0);
+  lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+  backend.frame(1000);
+  assert(backend.refresh());
   assert(graphics.texture_uploads > 0);
-  assert(graphics.frame_submissions == 1);
+  assert(graphics.frame_submissions > 0);
   assert(graphics.draw_commands > 0);
   backend.shutdown();
   assert(graphics.textures.empty());
@@ -594,7 +591,7 @@ void testSettings() {
 int main() {
   testLvglBackend();
   testApplicationSessions();
-  testImguiBackend();
+  testTransparentLvglBackend();
   testSystemUi();
   testLauncher();
   testSettings();

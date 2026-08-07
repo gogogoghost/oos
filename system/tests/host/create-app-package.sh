@@ -13,26 +13,34 @@ trap 'rm -rf "$staging"' EXIT
 entries=(manifest.json)
 mkdir -p "$staging/assets/audio"
 mkdir -p "$staging/modules"
+mkdir -p "$staging/app"
 printf 'OOS packaged asset\n' > "$staging/assets/audio/test.dat"
 printf '\0child-wasm-test-module\n' > "$staging/modules/compiler.wasm"
-printf '\0child-aot-test-module\n' > "$staging/modules/runtime.aot"
+printf '\0child-aot-test-module\n' > "$staging/modules/runtime.cortex-a53.aot"
 entries+=(assets/audio/test.dat)
-entries+=(modules/compiler.wasm modules/runtime.aot)
+entries+=(modules/compiler.wasm modules/runtime.cortex-a53.aot)
 if [[ $mode == aot || $mode == both ]]; then
-  printf '\0aot-test-module\n' > "$staging/entry.aot"
-  entries+=(entry.aot)
+  printf '\0aot-test-module\n' > "$staging/app/main.cortex-a53.aot"
+  entries+=(app/main.cortex-a53.aot)
 fi
 if [[ $mode == wasm || $mode == both ]]; then
-  printf '\0wasm-test-module\n' > "$staging/entry.wasm"
-  entries+=(entry.wasm)
+  printf '\0wasm-test-module\n' > "$staging/app/main.wasm"
+  entries+=(app/main.wasm)
 fi
-cat > "$staging/manifest.json" <<'EOF'
+cat > "$staging/manifest.json" <<EOF
 {
+  "schema": 1,
   "id": "cc.jaxy.oos.test",
   "name": "OOS Test",
   "version": "1.0.0",
   "role": "test",
-  "permissions": {"camera": {}, "wifi-manage": {}}
+  "entry": {"runtime": "wasm", "path": "app/main"},
+  "modules": [
+    {"name": "compiler", "runtime": "wasm", "path": "modules/compiler"},
+    {"name": "runtime", "runtime": "wasm", "path": "modules/runtime"}
+  ],
+  "permissions": {"camera": {}, "wifi-manage": {}},
+  "handlers": [{"kind": "activity", "value": "test"}]
 }
 EOF
 mkdir -p "$(dirname "$output")"

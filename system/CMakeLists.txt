@@ -42,6 +42,14 @@ if(NOT BUILD_LOCAL)
   add_compile_definitions(_LIBCPP_ABI_NAMESPACE=__1)
 endif()
 
+if(BUILD_NOKIA_2780_FLIP)
+  add_compile_definitions(OOS_WASM_CPU_CORE="cortex-a53"
+                          OOS_WASM_CPU_ARCH="armv7a")
+elseif(BUILD_NOKIA_8110_4G)
+  add_compile_definitions(OOS_WASM_CPU_CORE="cortex-a7"
+                          OOS_WASM_CPU_ARCH="armv7a")
+endif()
+
 if(NOT BUILD_LOCAL AND (NOT SYSTEM_DIR OR NOT EXISTS "${SYSTEM_DIR}/lib/libc++.so"))
   message(FATAL_ERROR
     "SYSTEM_DIR must point to an extracted Android /system directory containing lib/libc++.so. "
@@ -58,7 +66,8 @@ if(BUILD_NOKIA_2780_FLIP)
 endif()
 
 set(OOS_LVGL_DIR "${THIRD_PARTY_DIR}/lvgl")
-set(OOS_IMGUI_DIR "${THIRD_PARTY_DIR}/imgui")
+set(OOS_QUICKJS_DIR "${THIRD_PARTY_DIR}/quickjs")
+set(OOS_STB_DIR "${THIRD_PARTY_DIR}/stb")
 set(OOS_MINIAUDIO_DIR "${THIRD_PARTY_DIR}/miniaudio")
 set(OOS_SONIVOX_DIR "${THIRD_PARTY_DIR}/sonivox/arm-wt-22k")
 set(OOS_FLUIDLITE_DIR "${THIRD_PARTY_DIR}/fluidlite")
@@ -66,16 +75,20 @@ set(OOS_TINYSOUNDFONT_DIR "${THIRD_PARTY_DIR}/tinysoundfont")
 set(OOS_GM_SOUNDFONT_FILE
     "${THIRD_PARTY_DIR}/generaluser-gs/GeneralUser-GS.sf2")
 if(NOT EXISTS "${OOS_LVGL_DIR}/src/lv_init.c" OR
-   NOT EXISTS "${OOS_IMGUI_DIR}/imgui.cpp" OR
+   NOT EXISTS "${OOS_QUICKJS_DIR}/quickjs.h" OR
+   NOT EXISTS "${OOS_STB_DIR}/stb_truetype.h" OR
    NOT EXISTS "${OOS_MINIAUDIO_DIR}/miniaudio.h" OR
    NOT EXISTS "${OOS_SONIVOX_DIR}/lib_src/wt_22khz.c" OR
    NOT EXISTS "${OOS_FLUIDLITE_DIR}/src/fluid_synth.c" OR
    NOT EXISTS "${OOS_TINYSOUNDFONT_DIR}/tml.h" OR
    NOT EXISTS "${OOS_GM_SOUNDFONT_FILE}")
   message(FATAL_ERROR
-    "A UI or media dependency is missing. Run scripts/fetch-ui-frameworks.sh "
-    "and scripts/fetch-media-dependencies.sh first.")
+    "A runtime, UI, or media dependency is missing. Run scripts/fetch-quickjs.sh, "
+    "scripts/fetch-ui-frameworks.sh, and scripts/fetch-media-dependencies.sh first.")
 endif()
+
+include(cmake/QuickJS.cmake)
+oos_add_quickjs(oos_quickjs "${OOS_QUICKJS_DIR}")
 
 include(cmake/Sonivox.cmake)
 oos_add_sonivox(oos_sonivox "${OOS_SONIVOX_DIR}")
@@ -105,22 +118,6 @@ set(LV_BUILD_LVGL_H_SIMPLE_INCLUDE ON CACHE BOOL "" FORCE)
 add_subdirectory("${OOS_LVGL_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/third_party/lvgl"
                  EXCLUDE_FROM_ALL)
 target_compile_options(lvgl PRIVATE -Wno-unused-function -Wno-unused-variable)
-
-add_library(oos_imgui_core STATIC
-  "${OOS_IMGUI_DIR}/imgui.cpp"
-  "${OOS_IMGUI_DIR}/imgui_draw.cpp"
-  "${OOS_IMGUI_DIR}/imgui_tables.cpp"
-  "${OOS_IMGUI_DIR}/imgui_widgets.cpp")
-target_include_directories(oos_imgui_core SYSTEM PUBLIC "${OOS_IMGUI_DIR}")
-target_compile_definitions(oos_imgui_core PUBLIC
-  IMGUI_DISABLE_DEFAULT_FONT
-  IMGUI_DISABLE_DEBUG_TOOLS
-  IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
-  IMGUI_DISABLE_OBSOLETE_FUNCTIONS
-  IMGUI_DISABLE_TIME_FUNCTIONS
-  IMGUI_DISABLE_TTY_FUNCTIONS)
-target_compile_options(oos_imgui_core PRIVATE
-  -fno-exceptions -fno-rtti -Wno-unused-function)
 
 add_subdirectory(runtime/wamr)
 
@@ -184,6 +181,7 @@ add_subdirectory("${OOS_REPO_ROOT}/sdk"
 add_library(oos_app_model STATIC
   src/oos/apps/app_manifest.cpp
   src/oos/apps/app_repository.cpp
+  src/oos/apps/wasm_artifact.cpp
   src/oos/apps/json.cpp
   src/oos/apps/zip_archive.cpp
   src/oos/storage/app_storage.cpp
@@ -218,14 +216,22 @@ target_include_directories(oos_system_settings PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(oos_system_settings PUBLIC oos_app_model)
 
-add_library(oos_wasm_runtime STATIC
+add_library(oos_app_runtime STATIC
   src/oos/media/media_service.cpp
+  src/oos/runtime/application_context.cpp
+  src/oos/runtime/application_scene.cpp
+  src/oos/runtime/canvas_2d.cpp
+  src/oos/runtime/js_app.cpp
+  src/oos/runtime/js_platform_services.cpp
+  src/oos/runtime/module_host.cpp
+  src/oos/runtime/native_ui.cpp
   src/oos/runtime/native_app_manager.cpp
   src/oos/runtime/wasm_app.cpp)
-target_include_directories(oos_wasm_runtime PUBLIC
+target_include_directories(oos_app_runtime PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(oos_wasm_runtime PUBLIC
-  oos_wamr oos_input oos_app_model oos_device_storage oos_font_assets
+target_include_directories(oos_app_runtime SYSTEM PRIVATE "${OOS_STB_DIR}")
+target_link_libraries(oos_app_runtime PUBLIC
+  oos_quickjs oos_wamr oos_input oos_app_model oos_device_storage oos_font_assets
   oos_system_services oos_media)
 target_link_libraries(oos_window PUBLIC
   oos_input)
@@ -263,7 +269,7 @@ if(NOT BUILD_LOCAL)
 endif()
 target_link_libraries(oos PRIVATE
   oos_device_api oos_compositor oos_app_model oos_device_storage oos_sdk_ui
-  oos_window oos_app_sessions oos_wasm_runtime oos_system_settings oos_launcher_app
+  oos_window oos_app_sessions oos_app_runtime oos_system_settings oos_launcher_app
   oos_settings_app oos_systemui_app)
 set_target_properties(oos PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

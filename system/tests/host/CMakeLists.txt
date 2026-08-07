@@ -34,6 +34,9 @@ target_include_directories(oos_wamr_host PUBLIC
   "${WAMR_ROOT_DIR}/core/iwasm/include")
 target_link_libraries(oos_wamr_host PUBLIC dl m pthread)
 
+include("${OOS_SYSTEM_ROOT}/cmake/QuickJS.cmake")
+oos_add_quickjs(oos_quickjs_host "${OOS_REPO_ROOT}/third_party/quickjs")
+
 include("${OOS_SYSTEM_ROOT}/cmake/Sonivox.cmake")
 oos_add_sonivox(oos_sonivox_host
   "${OOS_REPO_ROOT}/third_party/sonivox/arm-wt-22k")
@@ -47,7 +50,10 @@ add_executable(oos_wasm_runtime_test
   wasm_runtime_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/wasm_artifact.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/input/key_debouncer.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/input/key_input.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/audio_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/audio_format.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/ffmpeg_decoder.cpp"
@@ -56,6 +62,13 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/src/oos/media/midi_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/soundfont_midi_decoder.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/application_context.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/application_scene.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/canvas_2d.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/js_app.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/js_platform_services.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/module_host.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/runtime/native_ui.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/native_app_manager.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/runtime/wasm_app.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/resources/font_assets.cpp"
@@ -69,6 +82,7 @@ add_executable(oos_wasm_runtime_test
   "${OOS_SYSTEM_ROOT}/devices/local/src/service_provider.cpp")
 target_include_directories(oos_wasm_runtime_test PRIVATE
   "${OOS_SYSTEM_ROOT}/src"
+  "${OOS_REPO_ROOT}/third_party/stb"
   "${OOS_REPO_ROOT}/third_party/miniaudio"
   "${OOS_REPO_ROOT}/third_party/tinysoundfont")
 include("${OOS_SYSTEM_ROOT}/cmake/EmbeddedSoundFont.cmake")
@@ -78,7 +92,8 @@ set_source_files_properties(
   "${OOS_SYSTEM_ROOT}/src/oos/media/miniaudio_decoder.c"
   PROPERTIES COMPILE_OPTIONS "-Wno-unused-function;-Wno-unused-variable")
 target_link_libraries(oos_wasm_runtime_test PRIVATE
-  oos_wamr_host oos_sonivox_host oos_ffmpeg_host fluidlite ${CMAKE_DL_LIBS} z)
+  oos_quickjs_host oos_wamr_host oos_sonivox_host oos_ffmpeg_host fluidlite
+  ${CMAKE_DL_LIBS} z)
 
 add_executable(oos_media_core_test
   media_core_test.cpp
@@ -105,6 +120,7 @@ add_executable(oos_app_repository_test
   app_repository_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/wasm_artifact.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/resources/package_assets.cpp"
@@ -135,6 +151,7 @@ add_executable(oos_system_service_test
   system_service_test.cpp
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_manifest.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/app_repository.cpp"
+  "${OOS_SYSTEM_ROOT}/src/oos/apps/wasm_artifact.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/json.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/apps/zip_archive.cpp"
   "${OOS_SYSTEM_ROOT}/src/oos/services/system_service.cpp"

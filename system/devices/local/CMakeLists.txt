@@ -24,11 +24,11 @@ target_link_libraries(oos_local_platform PUBLIC
   SDL3::SDL3
   OpenGL::GLES2)
 add_library(oos::platform ALIAS oos_local_platform)
-target_link_libraries(oos_wasm_runtime PUBLIC oos::platform)
+target_link_libraries(oos_app_runtime PUBLIC oos::platform)
 
 target_link_libraries(oos PRIVATE
   oos::platform
-  oos_wasm_runtime
+  oos_app_runtime
   PNG::PNG)
 
 if(OOS_BUILD_DEVICE_TESTS)
@@ -63,4 +63,10 @@ if(OOS_BUILD_DEVICE_TESTS)
     oos_sdk_ui oos_launcher_app oos_settings_app oos_systemui_app
     oos_system_settings oos_app_sessions oos::platform)
   add_test(NAME ui-backends COMMAND oos_test_ui_backends)
+
+  add_executable(oos_test_js_runtime
+    "${CMAKE_SOURCE_DIR}/tests/host/js_runtime_test.cpp")
+  target_compile_options(oos_test_js_runtime PRIVATE -UNDEBUG)
+  target_link_libraries(oos_test_js_runtime PRIVATE oos_app_runtime)
+  add_test(NAME js-runtime COMMAND oos_test_js_runtime)
 endif()

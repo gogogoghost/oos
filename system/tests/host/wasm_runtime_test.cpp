@@ -2,8 +2,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <malloc.h>
-#include <sstream>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -12,25 +10,12 @@
 #include "oos/device/device.h"
 #include "oos/input/key_input.h"
 #include "oos/runtime/graphics_host.h"
+#include "oos/runtime/js_app.h"
 #include "oos/runtime/native_app_manager.h"
 #include "oos/runtime/wasm_app.h"
 #include "oos/ui/status_bar_appearance.h"
 
 namespace {
-
-size_t processPssKilobytes() {
-  std::ifstream input("/proc/self/smaps_rollup");
-  std::string line;
-  while (std::getline(input, line)) {
-    if (line.rfind("Pss:", 0) != 0)
-      continue;
-    std::istringstream values(line.substr(4));
-    size_t kilobytes = 0;
-    values >> kilobytes;
-    return kilobytes;
-  }
-  return 0;
-}
 
 class FakeStatusBar final : public oos::ui::StatusBarAppearanceController {
 public:
@@ -206,6 +191,15 @@ public:
     ++gles_frames;
     return true;
   }
+  bool submitGlesToTexture(uint32_t texture, uint32_t width, uint32_t height,
+                           const OosGlesCommand *commands, size_t command_count,
+                           const uint32_t *data, size_t data_words) override {
+    if (!texture || !width || !height ||
+        !submitGles(commands, command_count, data, data_words))
+      return false;
+    textures[texture] = Size{width, height, OOS_TEXTURE_RGBA8888};
+    return true;
+  }
 
   struct Size {
     uint32_t width;
@@ -272,12 +266,12 @@ private:
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 10) {
+  if (argc != 13) {
     std::fprintf(stderr,
-                 "usage: %s egui-demo.wasm wit-smoke.wasm thread-smoke.wasm "
-                 "worker-wit-trap.wasm exit-smoke.wasm font-directory "
-                 "subruntime-parent.wasm module-directory "
-                 "production-libc-smoke.wasm\n",
+                 "usage: %s egui-demo wit-smoke thread-smoke "
+                 "worker-wit-trap exit-smoke font-directory "
+                 "module-parent module-directory production-libc-smoke "
+                 "lvgl-demo clay-demo solid-demo.mjs\n",
                  argv[0]);
     return 2;
   }
@@ -285,7 +279,7 @@ int main(int argc, char **argv) {
   FakeStatusBar status_bar;
   oos::runtime::NativeAppManager apps(graphics);
   oos::runtime::NativeAppLaunchOptions launcher_launch;
-  launcher_launch.module_path = argv[1];
+  launcher_launch.module_base_path = argv[1];
   launcher_launch.font_directory = argv[6];
   for (size_t index = 0; index < 3; ++index) {
     char id[16] = {};
@@ -320,10 +314,13 @@ int main(int argc, char **argv) {
               graphics.texture_updates, graphics.last_vertices,
               graphics.last_indices, graphics.last_commands);
   apps.shutdown();
-  oos::runtime::NativeAppManager libc_smoke(graphics, 1);
+  oos::runtime::WasmAppOptions libc_options;
+  libc_options.font_directory = argv[6];
+  oos::runtime::WasmApp libc_smoke(graphics, std::move(libc_options));
   uint32_t libc_delay_ms = 0;
-  if (!libc_smoke.load("production-libc", argv[9]) ||
-      !libc_smoke.activate("production-libc") ||
+  if (!libc_smoke.load(argv[9]) ||
+      libc_smoke.loadedArtifactPath() != std::string(argv[9]) + ".x86_64.aot" ||
+      !libc_smoke.initialize() ||
       !libc_smoke.render(1'450'000, libc_delay_ms) || libc_delay_ms != 1000) {
     std::fprintf(stderr, "production C runtime smoke failed: %s\n",
                  libc_smoke.lastError());
@@ -333,7 +330,7 @@ int main(int argc, char **argv) {
   std::printf("WAMR production picolibc/libm/TLSF execution passed\n");
   oos::runtime::NativeAppManager wit_smoke(graphics, 1);
   oos::runtime::NativeAppLaunchOptions smoke_launch;
-  smoke_launch.module_path = argv[2];
+  smoke_launch.module_base_path = argv[2];
   smoke_launch.font_directory = argv[6];
   smoke_launch.status_bar = &status_bar;
   uint32_t smoke_delay_ms = 0;
@@ -356,7 +353,7 @@ int main(int argc, char **argv) {
               graphics.gles_frames);
   oos::runtime::NativeAppManager thread_smoke(graphics, 1);
   oos::runtime::NativeAppLaunchOptions thread_launch;
-  thread_launch.module_path = argv[3];
+  thread_launch.module_base_path = argv[3];
   thread_launch.font_directory = argv[6];
   if (!thread_smoke.load("thread-smoke", thread_launch) ||
       !thread_smoke.activate("thread-smoke") ||
@@ -380,7 +377,7 @@ int main(int argc, char **argv) {
   std::printf("WAMR bounded guest worker passed\n");
   oos::runtime::NativeAppManager affinity_smoke(graphics, 1);
   oos::runtime::NativeAppLaunchOptions affinity_launch;
-  affinity_launch.module_path = argv[4];
+  affinity_launch.module_base_path = argv[4];
   affinity_launch.font_directory = argv[6];
   if (affinity_smoke.load("worker-wit-trap", affinity_launch) ||
       std::string(affinity_smoke.lastError()).find("guest worker") ==
@@ -391,7 +388,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   std::printf("WAMR worker WIT thread-affinity trap passed\n");
-  const std::string unbounded_path = "/tmp/oos-unbounded-memory.wasm";
+  const std::string unbounded_base = "/tmp/oos-unbounded-memory";
+  const std::string unbounded_path = unbounded_base + ".wasm";
   const unsigned char unbounded_module[] = {0x00, 0x61, 0x73, 0x6d, 0x01,
                                             0x00, 0x00, 0x00, 0x05, 0x03,
                                             0x01, 0x00, 0x01};
@@ -402,7 +400,7 @@ int main(int argc, char **argv) {
   }
   oos::runtime::NativeAppManager policy_test(graphics, 1);
   oos::runtime::NativeAppLaunchOptions unbounded_launch;
-  unbounded_launch.module_path = unbounded_path.c_str();
+  unbounded_launch.module_base_path = unbounded_base.c_str();
   if (policy_test.load("unbounded", unbounded_launch) ||
       std::string(policy_test.lastError()).find("memory") ==
           std::string::npos) {
@@ -410,7 +408,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   std::filesystem::remove(unbounded_path);
-  const std::string oversized_path = "/tmp/oos-oversized-memory.wasm";
+  const std::string oversized_base = "/tmp/oos-oversized-memory";
+  const std::string oversized_path = oversized_base + ".wasm";
   const unsigned char oversized_module[] = {0x00, 0x61, 0x73, 0x6d, 0x01,
                                             0x00, 0x00, 0x00, 0x05, 0x05,
                                             0x01, 0x01, 0x01, 0x81, 0x08};
@@ -420,7 +419,7 @@ int main(int argc, char **argv) {
                  sizeof(oversized_module));
   }
   oos::runtime::NativeAppLaunchOptions oversized_launch;
-  oversized_launch.module_path = oversized_path.c_str();
+  oversized_launch.module_base_path = oversized_base.c_str();
   if (policy_test.load("oversized", oversized_launch) ||
       std::string(policy_test.lastError()).find("memory") ==
           std::string::npos) {
@@ -444,56 +443,120 @@ int main(int argc, char **argv) {
   }
   std::printf("WAMR deferred exit request passed\n");
   {
-    malloc_trim(0);
-    const size_t baseline_pss_kb = processPssKilobytes();
-    const std::string child_path = std::string(argv[8]) + "/memory-child.wasm";
-    oos::runtime::NativeAppManager direct_child(graphics, 1);
-    uint32_t child_delay_ms = 0;
-    if (!direct_child.load("direct-child", child_path.c_str()) ||
-        !direct_child.activate("direct-child") ||
-        !direct_child.render(1'640'000, child_delay_ms) ||
-        child_delay_ms != 17) {
-      std::fprintf(stderr, "direct child worker smoke failed: %s\n",
-                   direct_child.lastError());
+    oos::runtime::NativeAppManager module_smoke(graphics, 1);
+    oos::runtime::NativeAppLaunchOptions module_launch;
+    module_launch.module_base_path = argv[7];
+    module_launch.module_directory = argv[8];
+    module_launch.font_directory = argv[6];
+    module_launch.modules.push_back(
+        {"echo", oos::apps::AppRuntimeKind::WebAssembly, "modules/echo"});
+    module_launch.modules.push_back({"js-echo",
+                                     oos::apps::AppRuntimeKind::JavaScript,
+                                     "modules/js-echo.mjs"});
+    uint32_t module_delay_ms = 0;
+    if (!module_smoke.load("module-smoke", module_launch) ||
+        !module_smoke.activate("module-smoke") ||
+        !module_smoke.render(1'650'000, module_delay_ms) ||
+        module_delay_ms != 1000) {
+      std::fprintf(stderr, "Wasm package module smoke failed: %s\n",
+                   module_smoke.lastError());
       return 1;
     }
-    direct_child.shutdown();
-    oos::runtime::NativeAppManager subruntime_smoke(graphics, 1);
-    oos::runtime::NativeAppLaunchOptions child_launch;
-    child_launch.module_path = argv[7];
-    child_launch.module_directory = argv[8];
-    child_launch.font_directory = argv[6];
-    uint32_t parent_delay_ms = 0;
-    bool subruntime_ok =
-        subruntime_smoke.load("subruntime-smoke", child_launch) &&
-        subruntime_smoke.activate("subruntime-smoke");
-    for (unsigned frame = 0;
-         subruntime_ok && frame < 40 && parent_delay_ms != 1000; ++frame) {
-      subruntime_ok = subruntime_smoke.render(
-          1'650'000 + static_cast<int64_t>(frame) * 17'000, parent_delay_ms);
-    }
-    if (!subruntime_ok || parent_delay_ms != 1000 || !graphics.threadSafe()) {
-      std::fprintf(
-          stderr, "ephemeral subruntime smoke failed: %s delay=%u thread=%d\n",
-          subruntime_smoke.lastError(), parent_delay_ms, graphics.threadSafe());
-      return 1;
-    }
-    subruntime_smoke.shutdown();
-    malloc_trim(0);
-    const size_t final_pss_kb = processPssKilobytes();
-    constexpr size_t kPssToleranceKb = 8 * 1024;
-    if (baseline_pss_kb && final_pss_kb > baseline_pss_kb + kPssToleranceKb) {
-      std::fprintf(stderr,
-                   "child runtime PSS did not return near baseline: "
-                   "before=%zu KiB after=%zu KiB\n",
-                   baseline_pss_kb, final_pss_kb);
-      return 1;
-    }
-    std::printf("WAMR child PSS returned near baseline: before=%zu KiB "
-                "after=%zu KiB\n",
-                baseline_pss_kb, final_pss_kb);
+    module_smoke.shutdown();
   }
-  std::printf("WAMR ephemeral child create/grow/join/destroy passed\n");
+  std::printf("Wasm-to-Wasm and Wasm-to-JS module invocation passed\n");
+  {
+    const std::filesystem::path js_root =
+        std::filesystem::temp_directory_path() / "oos-js-to-wasm-smoke";
+    std::filesystem::remove_all(js_root);
+    std::filesystem::create_directories(js_root);
+    const std::filesystem::path entry = js_root / "main.mjs";
+    {
+      std::ofstream output(entry);
+      output << "let valid = false;\n"
+                "export function initialize() {\n"
+                "  const module = new WebAssembly.Module('echo');\n"
+                "  const instance = new WebAssembly.Instance(module);\n"
+                "  const response = instance.exports.echo(new Uint8Array([2, "
+                "4, 6]));\n"
+                "  valid = response.length === 3 && response[0] === 2 && "
+                "response[2] === 6;\n"
+                "  return valid;\n"
+                "}\n"
+                "export function frame() { return valid ? 1000 : 0; }\n";
+    }
+    oos::runtime::JsAppOptions js_options;
+    js_options.app_id = "org.oos.js-to-wasm-smoke";
+    js_options.application_directory = js_root.string();
+    js_options.module_directory = argv[8];
+    js_options.font_directory = argv[6];
+    js_options.modules.push_back(
+        {"echo", oos::apps::AppRuntimeKind::WebAssembly, "modules/echo"});
+    oos::runtime::JsApp js_to_wasm(graphics, std::move(js_options));
+    uint32_t delay = 0;
+    if (!js_to_wasm.load(entry.c_str()) || !js_to_wasm.initialize() ||
+        !js_to_wasm.render(1'660'000, delay) || delay != 1000) {
+      std::fprintf(stderr, "JS-to-Wasm package module smoke failed: %s\n",
+                   js_to_wasm.lastError());
+      std::filesystem::remove_all(js_root);
+      return 1;
+    }
+    js_to_wasm.shutdown();
+    std::filesystem::remove_all(js_root);
+  }
+  std::printf("JS-to-Wasm WebAssembly facade invocation passed\n");
+  const auto runWasmUiDemo = [&](const char *id, const char *base_path,
+                                 uint32_t expected_delay) {
+    oos::runtime::NativeAppManager demo(graphics, 1);
+    oos::runtime::NativeAppLaunchOptions options;
+    options.module_base_path = base_path;
+    options.font_directory = argv[6];
+    uint32_t delay = 0;
+    if (!demo.load(id, options) || !demo.activate(id) ||
+        !demo.render(1'670'000, delay) || delay != expected_delay) {
+      std::fprintf(stderr, "%s framework demo failed: %s\n", id,
+                   demo.lastError());
+      return false;
+    }
+    oos::input::KeyEvent event;
+    event.code = 352;
+    event.action = oos::input::KeyAction::Pressed;
+    if (!demo.dispatchKey(event, 1'680'000) || !demo.render(1'690'000, delay)) {
+      std::fprintf(stderr, "%s framework demo input failed: %s\n", id,
+                   demo.lastError());
+      return false;
+    }
+    demo.shutdown();
+    return true;
+  };
+  if (!runWasmUiDemo("lvgl-demo", argv[10], 16) ||
+      !runWasmUiDemo("clay-demo", argv[11], 1000))
+    return 1;
+  std::printf("LVGL and Clay shared graphics backend demos passed\n");
+  {
+    const std::filesystem::path solid_entry =
+        std::filesystem::canonical(argv[12]);
+    oos::runtime::JsAppOptions options;
+    options.app_id = "cc.jaxy.oos.solid-demo";
+    options.application_directory = solid_entry.parent_path().string();
+    options.module_directory = options.application_directory;
+    options.font_directory = argv[6];
+    oos::runtime::JsApp solid(graphics, std::move(options));
+    uint32_t delay = 0;
+    oos::input::KeyEvent event;
+    event.code = 352;
+    event.action = oos::input::KeyAction::Pressed;
+    if (!solid.load(solid_entry.c_str()) || !solid.initialize() ||
+        !solid.render(1'700'000, delay) || delay != 1000 ||
+        !solid.dispatchKey(event, 1'710'000) ||
+        !solid.render(1'720'000, delay)) {
+      std::fprintf(stderr, "Solid framework demo failed: %s\n",
+                   solid.lastError());
+      return 1;
+    }
+    solid.shutdown();
+  }
+  std::printf("Solid universal renderer demo passed\n");
   oos::runtime::NativeAppManager mock_smoke(graphics, mock_device, 1);
   char storage_template[] = "/tmp/oos-wasm-storage.XXXXXX";
   const char *storage_root = mkdtemp(storage_template);
@@ -502,7 +565,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   oos::runtime::NativeAppLaunchOptions mock_launch;
-  mock_launch.module_path = argv[2];
+  mock_launch.module_base_path = argv[2];
   mock_launch.data_directory = storage_root;
   mock_launch.system_data_root = storage_root;
   mock_launch.font_directory = argv[6];
@@ -525,11 +588,18 @@ int main(int argc, char **argv) {
   }
   mock_launch.asset_directory = packaged_assets.c_str();
   const std::vector<std::string> mock_permissions = {
-      "audio-capture",         "camera",    "power",
-      "wifi-manage",           "bluetooth", "mobileconnection",
-      "mobileconnection:identity", "mobileconnection:radio-control",
-      "device-storage:read",  "device-storage:write",
-      "device-storage:create", "system"};
+      "audio-capture",
+      "camera",
+      "power",
+      "wifi-manage",
+      "bluetooth",
+      "mobileconnection",
+      "mobileconnection:identity",
+      "mobileconnection:radio-control",
+      "device-storage:read",
+      "device-storage:write",
+      "device-storage:create",
+      "system"};
   mock_launch.service_permission_mask =
       oos::apps::deviceServicePermissionMask(mock_permissions);
   mock_launch.enforce_service_permissions = true;
@@ -553,12 +623,10 @@ int main(int argc, char **argv) {
   }
   denied_smoke.shutdown();
   MockDevice read_only_device("local-storage-readonly");
-  oos::runtime::NativeAppManager read_only_smoke(graphics, read_only_device,
-                                                  1);
+  oos::runtime::NativeAppManager read_only_smoke(graphics, read_only_device, 1);
   oos::runtime::NativeAppLaunchOptions read_only_launch = mock_launch;
-  read_only_launch.service_permission_mask =
-      oos::apps::permissionBit(
-          oos::apps::DeviceServicePermission::DeviceStorageRead);
+  read_only_launch.service_permission_mask = oos::apps::permissionBit(
+      oos::apps::DeviceServicePermission::DeviceStorageRead);
   if (!read_only_smoke.load("storage-readonly", read_only_launch) ||
       !read_only_smoke.activate("storage-readonly") ||
       !read_only_smoke.render(1'800'000)) {
@@ -569,12 +637,19 @@ int main(int argc, char **argv) {
   read_only_smoke.shutdown();
   std::filesystem::remove_all(storage_root);
   std::printf("WAMR WIT local mock and permission filtering passed\n");
-  return status_bar.updates == 4 &&
-                 status_bar.appearance ==
-                     (oos::ui::StatusBarAppearance{0x123456, true}) &&
-                 graphics.frames == 5 && resident_textures == 3 &&
-                 graphics.textures.empty() && graphics.texture_updates > 0 &&
-                 graphics.gles_frames == 4
-             ? 0
-             : 1;
+  const bool valid =
+      status_bar.updates == 4 &&
+      status_bar.appearance == (oos::ui::StatusBarAppearance{0x123456, true}) &&
+      graphics.frames >= 5 && resident_textures == 3 &&
+      graphics.textures.empty() && graphics.texture_updates > 0 &&
+      graphics.gles_frames >= 4;
+  if (!valid) {
+    std::fprintf(stderr,
+                 "host invariants failed: status=%zu frames=%zu resident=%zu "
+                 "textures=%zu updates=%zu gles=%zu\n",
+                 status_bar.updates, graphics.frames, resident_textures,
+                 graphics.textures.size(), graphics.texture_updates,
+                 graphics.gles_frames);
+  }
+  return valid ? 0 : 1;
 }

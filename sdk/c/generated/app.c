@@ -3,483 +3,499 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Imported Functions from `oos:platform/runtime@0.2.0`
+// Imported Functions from `oos:platform/runtime@0.3.0`
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("abi-version")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("abi-version")))
 extern int32_t __wasm_import_oos_platform_runtime_abi_version(void);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("wall-clock-minutes")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("wall-clock-minutes")))
 extern int32_t __wasm_import_oos_platform_runtime_wall_clock_minutes(void);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("monotonic-time-us")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("monotonic-time-us")))
 extern int64_t __wasm_import_oos_platform_runtime_monotonic_time_us(void);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("wall-clock-time-ms")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("wall-clock-time-ms")))
 extern int64_t __wasm_import_oos_platform_runtime_wall_clock_time_ms(void);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("wake-main-thread")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("wake-main-thread")))
 extern void __wasm_import_oos_platform_runtime_wake_main_thread(void);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("log")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("log")))
 extern void __wasm_import_oos_platform_runtime_log(int32_t, uint8_t *, size_t);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("set-status-bar-style")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("set-status-bar-style")))
 extern void __wasm_import_oos_platform_runtime_set_status_bar_style(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("set-surface-mode")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("set-surface-mode")))
 extern void __wasm_import_oos_platform_runtime_set_surface_mode(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/runtime@0.2.0"), __import_name__("request-exit")))
+__attribute__((__import_module__("oos:platform/runtime@0.3.0"), __import_name__("request-exit")))
 extern void __wasm_import_oos_platform_runtime_request_exit(uint8_t *);
 
-// Imported Functions from `oos:platform/graphics@0.2.0`
+// Imported Functions from `oos:platform/graphics@0.3.0`
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("surface-size")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("surface-size")))
 extern void __wasm_import_oos_platform_graphics_surface_size(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("pixels-per-point")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("pixels-per-point")))
 extern float __wasm_import_oos_platform_graphics_pixels_per_point(void);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("surface-format")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("surface-format")))
 extern int32_t __wasm_import_oos_platform_graphics_surface_format(void);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("supported-texture-formats")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("supported-texture-formats")))
 extern int32_t __wasm_import_oos_platform_graphics_supported_texture_formats(void);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("graphics-limits")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("graphics-limits")))
 extern void __wasm_import_oos_platform_graphics_graphics_limits(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("texture-set")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("texture-set")))
 extern void __wasm_import_oos_platform_graphics_texture_set(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("texture-free")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("texture-free")))
 extern void __wasm_import_oos_platform_graphics_texture_free(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/graphics@0.2.0"), __import_name__("submit")))
+__attribute__((__import_module__("oos:platform/graphics@0.3.0"), __import_name__("submit")))
 extern void __wasm_import_oos_platform_graphics_submit(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, int32_t, uint8_t *);
 
-// Imported Functions from `oos:platform/gles@0.2.0`
+// Imported Functions from `oos:platform/gles@0.3.0`
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("get-capabilities")))
-extern void __wasm_import_oos_platform_gles_get_capabilities(uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("get-capabilities")))
+extern void __wasm_import_oos_platform_gles_get_capabilities(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("buffer-set")))
-extern void __wasm_import_oos_platform_gles_buffer_set(int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("texture-set")))
+extern void __wasm_import_oos_platform_gles_texture_set(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("buffer-write")))
-extern void __wasm_import_oos_platform_gles_buffer_write(int32_t, int32_t, uint8_t *, size_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("texture-free")))
+extern void __wasm_import_oos_platform_gles_texture_free(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("buffer-free")))
-extern void __wasm_import_oos_platform_gles_buffer_free(int32_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("buffer-set")))
+extern void __wasm_import_oos_platform_gles_buffer_set(int32_t, int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("shader-set")))
-extern void __wasm_import_oos_platform_gles_shader_set(int32_t, int32_t, uint8_t *, size_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("buffer-write")))
+extern void __wasm_import_oos_platform_gles_buffer_write(int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("shader-free")))
-extern void __wasm_import_oos_platform_gles_shader_free(int32_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("buffer-free")))
+extern void __wasm_import_oos_platform_gles_buffer_free(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("program-set")))
-extern void __wasm_import_oos_platform_gles_program_set(int32_t, int32_t, int32_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("shader-set")))
+extern void __wasm_import_oos_platform_gles_shader_set(int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("program-free")))
-extern void __wasm_import_oos_platform_gles_program_free(int32_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("shader-free")))
+extern void __wasm_import_oos_platform_gles_shader_free(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("attribute-location")))
-extern int32_t __wasm_import_oos_platform_gles_attribute_location(int32_t, uint8_t *, size_t);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("program-set")))
+extern void __wasm_import_oos_platform_gles_program_set(int32_t, int32_t, int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("uniform-location")))
-extern int32_t __wasm_import_oos_platform_gles_uniform_location(int32_t, uint8_t *, size_t);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("program-free")))
+extern void __wasm_import_oos_platform_gles_program_free(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/gles@0.2.0"), __import_name__("submit")))
-extern void __wasm_import_oos_platform_gles_submit(uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("attribute-location")))
+extern int32_t __wasm_import_oos_platform_gles_attribute_location(int32_t, int32_t, uint8_t *, size_t);
 
-// Imported Functions from `oos:platform/device@0.2.0`
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("uniform-location")))
+extern int32_t __wasm_import_oos_platform_gles_uniform_location(int32_t, int32_t, uint8_t *, size_t);
 
-__attribute__((__import_module__("oos:platform/device@0.2.0"), __import_name__("get-descriptor")))
+__attribute__((__import_module__("oos:platform/gles@0.3.0"), __import_name__("submit")))
+extern void __wasm_import_oos_platform_gles_submit(int32_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
+
+// Imported Functions from `oos:platform/canvas@0.3.0`
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("create")))
+extern void __wasm_import_oos_platform_canvas_create(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("configure")))
+extern void __wasm_import_oos_platform_canvas_configure(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("destroy")))
+extern void __wasm_import_oos_platform_canvas_destroy(int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("submit-2d")))
+extern void __wasm_import_oos_platform_canvas_submit_2d(int32_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("texture-set")))
+extern void __wasm_import_oos_platform_canvas_texture_set(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, uint8_t *, size_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("texture-free")))
+extern void __wasm_import_oos_platform_canvas_texture_free(int32_t, int32_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/canvas@0.3.0"), __import_name__("submit-mesh")))
+extern void __wasm_import_oos_platform_canvas_submit_mesh(int32_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, int32_t, uint8_t *);
+
+// Imported Functions from `oos:platform/ui@0.3.0`
+
+__attribute__((__import_module__("oos:platform/ui@0.3.0"), __import_name__("submit")))
+extern void __wasm_import_oos_platform_ui_submit(uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
+
+__attribute__((__import_module__("oos:platform/ui@0.3.0"), __import_name__("clear")))
+extern void __wasm_import_oos_platform_ui_clear(void);
+
+// Imported Functions from `oos:platform/device@0.3.0`
+
+__attribute__((__import_module__("oos:platform/device@0.3.0"), __import_name__("get-descriptor")))
 extern void __wasm_import_oos_platform_device_get_descriptor(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/device@0.2.0"), __import_name__("get-capability")))
+__attribute__((__import_module__("oos:platform/device@0.3.0"), __import_name__("get-capability")))
 extern int32_t __wasm_import_oos_platform_device_get_capability(int32_t);
 
-__attribute__((__import_module__("oos:platform/device@0.2.0"), __import_name__("get-access")))
+__attribute__((__import_module__("oos:platform/device@0.3.0"), __import_name__("get-access")))
 extern int32_t __wasm_import_oos_platform_device_get_access(int32_t);
 
-// Imported Functions from `oos:platform/audio@0.2.0`
+// Imported Functions from `oos:platform/audio@0.3.0`
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("supported-formats")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("supported-formats")))
 extern void __wasm_import_oos_platform_audio_supported_formats(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("get-pcm-capabilities")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("get-pcm-capabilities")))
 extern void __wasm_import_oos_platform_audio_get_pcm_capabilities(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("get-source-limits")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("get-source-limits")))
 extern void __wasm_import_oos_platform_audio_get_source_limits(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-open")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-open")))
 extern void __wasm_import_oos_platform_audio_pcm_open(int32_t, int32_t, int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-write")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-write")))
 extern void __wasm_import_oos_platform_audio_pcm_write(int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-set-volume")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-set-volume")))
 extern void __wasm_import_oos_platform_audio_pcm_set_volume(int32_t, float, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-pause")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-pause")))
 extern void __wasm_import_oos_platform_audio_pcm_pause(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-resume")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-resume")))
 extern void __wasm_import_oos_platform_audio_pcm_resume(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-flush")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-flush")))
 extern void __wasm_import_oos_platform_audio_pcm_flush(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-status")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-status")))
 extern void __wasm_import_oos_platform_audio_pcm_status(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("pcm-close")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("pcm-close")))
 extern void __wasm_import_oos_platform_audio_pcm_close(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-open-asset")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-open-asset")))
 extern void __wasm_import_oos_platform_audio_player_open_asset(uint8_t *, size_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("source-create")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("source-create")))
 extern void __wasm_import_oos_platform_audio_source_create(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("source-close")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("source-close")))
 extern void __wasm_import_oos_platform_audio_source_close(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-open-source")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-open-source")))
 extern void __wasm_import_oos_platform_audio_player_open_source(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-play")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-play")))
 extern void __wasm_import_oos_platform_audio_player_play(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-pause")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-pause")))
 extern void __wasm_import_oos_platform_audio_player_pause(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-seek")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-seek")))
 extern void __wasm_import_oos_platform_audio_player_seek(int32_t, int64_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-set-volume")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-set-volume")))
 extern void __wasm_import_oos_platform_audio_player_set_volume(int32_t, float, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-set-looping")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-set-looping")))
 extern void __wasm_import_oos_platform_audio_player_set_looping(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-status")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-status")))
 extern void __wasm_import_oos_platform_audio_player_status(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("player-close")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("player-close")))
 extern void __wasm_import_oos_platform_audio_player_close(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("play-tone")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("play-tone")))
 extern void __wasm_import_oos_platform_audio_play_tone(double, int32_t, float, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("record-wav")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("record-wav")))
 extern void __wasm_import_oos_platform_audio_record_wav(uint8_t *, size_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/audio@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/audio@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_audio_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/camera@0.2.0`
+// Imported Functions from `oos:platform/camera@0.3.0`
 
-__attribute__((__import_module__("oos:platform/camera@0.2.0"), __import_name__("enumerate")))
+__attribute__((__import_module__("oos:platform/camera@0.3.0"), __import_name__("enumerate")))
 extern void __wasm_import_oos_platform_camera_enumerate(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/camera@0.2.0"), __import_name__("set-torch")))
+__attribute__((__import_module__("oos:platform/camera@0.3.0"), __import_name__("set-torch")))
 extern void __wasm_import_oos_platform_camera_set_torch(uint8_t *, size_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/camera@0.2.0"), __import_name__("capture-jpeg")))
+__attribute__((__import_module__("oos:platform/camera@0.3.0"), __import_name__("capture-jpeg")))
 extern void __wasm_import_oos_platform_camera_capture_jpeg(uint8_t *, size_t, uint8_t *, size_t, int32_t, int32_t, int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/camera@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/camera@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_camera_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/power@0.2.0`
+// Imported Functions from `oos:platform/power@0.3.0`
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("query-battery")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("query-battery")))
 extern void __wasm_import_oos_platform_power_query_battery(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("wait-for-battery-event")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("wait-for-battery-event")))
 extern void __wasm_import_oos_platform_power_wait_for_battery_event(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("set-interactive")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("set-interactive")))
 extern void __wasm_import_oos_platform_power_set_interactive(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("acquire-wake-lock")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("acquire-wake-lock")))
 extern void __wasm_import_oos_platform_power_acquire_wake_lock(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("release-wake-lock")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("release-wake-lock")))
 extern void __wasm_import_oos_platform_power_release_wake_lock(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("enable-auto-suspend")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("enable-auto-suspend")))
 extern void __wasm_import_oos_platform_power_enable_auto_suspend(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("disable-auto-suspend")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("disable-auto-suspend")))
 extern void __wasm_import_oos_platform_power_disable_auto_suspend(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("schedule-rtc-wake")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("schedule-rtc-wake")))
 extern void __wasm_import_oos_platform_power_schedule_rtc_wake(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("clear-rtc-wake")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("clear-rtc-wake")))
 extern void __wasm_import_oos_platform_power_clear_rtc_wake(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("suspend")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("suspend")))
 extern void __wasm_import_oos_platform_power_suspend(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("query-flip-state")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("query-flip-state")))
 extern void __wasm_import_oos_platform_power_query_flip_state(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/power@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/power@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_power_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/vibrator@0.2.0`
+// Imported Functions from `oos:platform/vibrator@0.3.0`
 
-__attribute__((__import_module__("oos:platform/vibrator@0.2.0"), __import_name__("vibrate")))
+__attribute__((__import_module__("oos:platform/vibrator@0.3.0"), __import_name__("vibrate")))
 extern void __wasm_import_oos_platform_vibrator_vibrate(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/vibrator@0.2.0"), __import_name__("stop")))
+__attribute__((__import_module__("oos:platform/vibrator@0.3.0"), __import_name__("stop")))
 extern void __wasm_import_oos_platform_vibrator_stop(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/vibrator@0.2.0"), __import_name__("supports-amplitude-control")))
+__attribute__((__import_module__("oos:platform/vibrator@0.3.0"), __import_name__("supports-amplitude-control")))
 extern int32_t __wasm_import_oos_platform_vibrator_supports_amplitude_control(void);
 
-__attribute__((__import_module__("oos:platform/vibrator@0.2.0"), __import_name__("set-amplitude")))
+__attribute__((__import_module__("oos:platform/vibrator@0.3.0"), __import_name__("set-amplitude")))
 extern void __wasm_import_oos_platform_vibrator_set_amplitude(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/vibrator@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/vibrator@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_vibrator_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/wifi@0.2.0`
+// Imported Functions from `oos:platform/wifi@0.3.0`
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("get-status")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("get-status")))
 extern void __wasm_import_oos_platform_wifi_get_status(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("scan")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("scan")))
 extern void __wasm_import_oos_platform_wifi_scan(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("list-networks")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("list-networks")))
 extern void __wasm_import_oos_platform_wifi_list_networks(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("connect")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("connect")))
 extern void __wasm_import_oos_platform_wifi_connect(uint8_t *, size_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("disconnect")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("disconnect")))
 extern void __wasm_import_oos_platform_wifi_disconnect(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("reconnect")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("reconnect")))
 extern void __wasm_import_oos_platform_wifi_reconnect(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("forget")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("forget")))
 extern void __wasm_import_oos_platform_wifi_forget(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("save-configuration")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("save-configuration")))
 extern void __wasm_import_oos_platform_wifi_save_configuration(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/wifi@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/wifi@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_wifi_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/ip@0.2.0`
+// Imported Functions from `oos:platform/ip@0.3.0`
 
-__attribute__((__import_module__("oos:platform/ip@0.2.0"), __import_name__("get-status")))
+__attribute__((__import_module__("oos:platform/ip@0.3.0"), __import_name__("get-status")))
 extern void __wasm_import_oos_platform_ip_get_status(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/ip@0.2.0"), __import_name__("use-dhcp")))
+__attribute__((__import_module__("oos:platform/ip@0.3.0"), __import_name__("use-dhcp")))
 extern void __wasm_import_oos_platform_ip_use_dhcp(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/ip@0.2.0"), __import_name__("use-static")))
+__attribute__((__import_module__("oos:platform/ip@0.3.0"), __import_name__("use-static")))
 extern void __wasm_import_oos_platform_ip_use_static(uint8_t *, size_t, uint8_t *, size_t, int32_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/ip@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/ip@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_ip_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/bluetooth@0.2.0`
+// Imported Functions from `oos:platform/bluetooth@0.3.0`
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("enable")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("enable")))
 extern void __wasm_import_oos_platform_bluetooth_enable(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("disable")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("disable")))
 extern void __wasm_import_oos_platform_bluetooth_disable(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("classic-scan")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("classic-scan")))
 extern void __wasm_import_oos_platform_bluetooth_classic_scan(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("le-scan")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("le-scan")))
 extern void __wasm_import_oos_platform_bluetooth_le_scan(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("pair")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("pair")))
 extern void __wasm_import_oos_platform_bluetooth_pair(uint8_t *, size_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("unpair")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("unpair")))
 extern void __wasm_import_oos_platform_bluetooth_unpair(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("cancel-pairing")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("cancel-pairing")))
 extern void __wasm_import_oos_platform_bluetooth_cancel_pairing(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("profile-connect")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("profile-connect")))
 extern void __wasm_import_oos_platform_bluetooth_profile_connect(uint8_t *, size_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("profile-disconnect")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("profile-disconnect")))
 extern void __wasm_import_oos_platform_bluetooth_profile_disconnect(uint8_t *, size_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("profile-connection-cycle")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("profile-connection-cycle")))
 extern void __wasm_import_oos_platform_bluetooth_profile_connection_cycle(uint8_t *, size_t, int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("le-connection-cycle")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("le-connection-cycle")))
 extern void __wasm_import_oos_platform_bluetooth_le_connection_cycle(uint8_t *, size_t, int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/bluetooth@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/bluetooth@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_bluetooth_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/modem@0.2.0`
+// Imported Functions from `oos:platform/modem@0.3.0`
 
-__attribute__((__import_module__("oos:platform/modem@0.2.0"), __import_name__("query-snapshot")))
+__attribute__((__import_module__("oos:platform/modem@0.3.0"), __import_name__("query-snapshot")))
 extern void __wasm_import_oos_platform_modem_query_snapshot(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/modem@0.2.0"), __import_name__("set-radio-power")))
+__attribute__((__import_module__("oos:platform/modem@0.3.0"), __import_name__("set-radio-power")))
 extern void __wasm_import_oos_platform_modem_set_radio_power(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/modem@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/modem@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_modem_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/codec@0.2.0`
+// Imported Functions from `oos:platform/codec@0.3.0`
 
-__attribute__((__import_module__("oos:platform/codec@0.2.0"), __import_name__("test-h264-round-trip")))
+__attribute__((__import_module__("oos:platform/codec@0.3.0"), __import_name__("test-h264-round-trip")))
 extern void __wasm_import_oos_platform_codec_test_h264_round_trip(int32_t, int32_t, int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/codec@0.2.0"), __import_name__("last-error")))
+__attribute__((__import_module__("oos:platform/codec@0.3.0"), __import_name__("last-error")))
 extern void __wasm_import_oos_platform_codec_last_error(uint8_t *);
 
-// Imported Functions from `oos:platform/storage@0.2.0`
+// Imported Functions from `oos:platform/storage@0.3.0`
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("kv-get")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("kv-get")))
 extern void __wasm_import_oos_platform_storage_kv_get(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("kv-set")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("kv-set")))
 extern void __wasm_import_oos_platform_storage_kv_set(uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("kv-delete")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("kv-delete")))
 extern void __wasm_import_oos_platform_storage_kv_delete(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("kv-clear")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("kv-clear")))
 extern void __wasm_import_oos_platform_storage_kv_clear(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("database-execute")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("database-execute")))
 extern void __wasm_import_oos_platform_storage_database_execute(uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("database-prepare")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("database-prepare")))
 extern void __wasm_import_oos_platform_storage_database_prepare(uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-bind-null")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-bind-null")))
 extern void __wasm_import_oos_platform_storage_statement_bind_null(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-bind-integer")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-bind-integer")))
 extern void __wasm_import_oos_platform_storage_statement_bind_integer(int32_t, int32_t, int64_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-bind-float")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-bind-float")))
 extern void __wasm_import_oos_platform_storage_statement_bind_float(int32_t, int32_t, double, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-bind-text")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-bind-text")))
 extern void __wasm_import_oos_platform_storage_statement_bind_text(int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-bind-blob")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-bind-blob")))
 extern void __wasm_import_oos_platform_storage_statement_bind_blob(int32_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-step")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-step")))
 extern void __wasm_import_oos_platform_storage_statement_step(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-column-count")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-column-count")))
 extern void __wasm_import_oos_platform_storage_statement_column_count(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-column-kind")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-column-kind")))
 extern void __wasm_import_oos_platform_storage_statement_column_kind(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-column-integer")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-column-integer")))
 extern void __wasm_import_oos_platform_storage_statement_column_integer(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-column-float")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-column-float")))
 extern void __wasm_import_oos_platform_storage_statement_column_float(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-column-text")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-column-text")))
 extern void __wasm_import_oos_platform_storage_statement_column_text(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-column-blob")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-column-blob")))
 extern void __wasm_import_oos_platform_storage_statement_column_blob(int32_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/storage@0.2.0"), __import_name__("statement-finish")))
+__attribute__((__import_module__("oos:platform/storage@0.3.0"), __import_name__("statement-finish")))
 extern void __wasm_import_oos_platform_storage_statement_finish(int32_t, uint8_t *);
 
-// Imported Functions from `oos:platform/device-storage@0.2.0`
+// Imported Functions from `oos:platform/device-storage@0.3.0`
 
-__attribute__((__import_module__("oos:platform/device-storage@0.2.0"), __import_name__("enumerate-files")))
+__attribute__((__import_module__("oos:platform/device-storage@0.3.0"), __import_name__("enumerate-files")))
 extern void __wasm_import_oos_platform_device_storage_enumerate_files(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/device-storage@0.2.0"), __import_name__("read-file")))
+__attribute__((__import_module__("oos:platform/device-storage@0.3.0"), __import_name__("read-file")))
 extern void __wasm_import_oos_platform_device_storage_read_file(int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/device-storage@0.2.0"), __import_name__("write-file")))
+__attribute__((__import_module__("oos:platform/device-storage@0.3.0"), __import_name__("write-file")))
 extern void __wasm_import_oos_platform_device_storage_write_file(int32_t, uint8_t *, size_t, int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/device-storage@0.2.0"), __import_name__("delete-file")))
+__attribute__((__import_module__("oos:platform/device-storage@0.3.0"), __import_name__("delete-file")))
 extern void __wasm_import_oos_platform_device_storage_delete_file(int32_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/device-storage@0.2.0"), __import_name__("free-space")))
+__attribute__((__import_module__("oos:platform/device-storage@0.3.0"), __import_name__("free-space")))
 extern void __wasm_import_oos_platform_device_storage_free_space(int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/device-storage@0.2.0"), __import_name__("used-space")))
+__attribute__((__import_module__("oos:platform/device-storage@0.3.0"), __import_name__("used-space")))
 extern void __wasm_import_oos_platform_device_storage_used_space(int32_t, uint8_t *);
 
-// Imported Functions from `oos:platform/font-assets@0.2.0`
+// Imported Functions from `oos:platform/font-assets@0.3.0`
 
-__attribute__((__import_module__("oos:platform/font-assets@0.2.0"), __import_name__("load")))
+__attribute__((__import_module__("oos:platform/font-assets@0.3.0"), __import_name__("load")))
 extern void __wasm_import_oos_platform_font_assets_load(int32_t, uint8_t *);
 
-// Imported Functions from `oos:platform/assets@0.2.0`
+// Imported Functions from `oos:platform/assets@0.3.0`
 
-__attribute__((__import_module__("oos:platform/assets@0.2.0"), __import_name__("open")))
+__attribute__((__import_module__("oos:platform/assets@0.3.0"), __import_name__("open")))
 extern void __wasm_import_oos_platform_assets_open(uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/assets@0.2.0"), __import_name__("read")))
+__attribute__((__import_module__("oos:platform/assets@0.3.0"), __import_name__("read")))
 extern void __wasm_import_oos_platform_assets_read(int32_t, int64_t, int32_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/assets@0.2.0"), __import_name__("close")))
+__attribute__((__import_module__("oos:platform/assets@0.3.0"), __import_name__("close")))
 extern void __wasm_import_oos_platform_assets_close(int32_t, uint8_t *);
 
-// Imported Functions from `oos:platform/system-services@0.2.0`
+// Imported Functions from `oos:platform/system-services@0.3.0`
 
-__attribute__((__import_module__("oos:platform/system-services@0.2.0"), __import_name__("request")))
+__attribute__((__import_module__("oos:platform/system-services@0.3.0"), __import_name__("request")))
 extern void __wasm_import_oos_platform_system_services_request(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-// Imported Functions from `oos:platform/subruntime@0.2.0`
+// Imported Functions from `oos:platform/modules@0.3.0`
 
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("get-limits")))
-extern void __wasm_import_oos_platform_subruntime_get_limits(uint8_t *);
+__attribute__((__import_module__("oos:platform/modules@0.3.0"), __import_name__("enumerate")))
+extern void __wasm_import_oos_platform_modules_enumerate(uint8_t *);
 
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("create")))
-extern void __wasm_import_oos_platform_subruntime_create(uint8_t *, size_t, int32_t, uint8_t *);
+__attribute__((__import_module__("oos:platform/modules@0.3.0"), __import_name__("invoke")))
+extern void __wasm_import_oos_platform_modules_invoke(uint8_t *, size_t, uint8_t *, size_t, uint8_t *, size_t, uint8_t *);
 
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("initialize")))
-extern void __wasm_import_oos_platform_subruntime_initialize(int32_t, uint8_t *);
-
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("event")))
-extern void __wasm_import_oos_platform_subruntime_event(int32_t, int32_t, int32_t, int64_t, uint8_t *);
-
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("frame")))
-extern void __wasm_import_oos_platform_subruntime_frame(int32_t, int64_t, uint8_t *);
-
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("status")))
-extern void __wasm_import_oos_platform_subruntime_status(int32_t, uint8_t *);
-
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("complete")))
-extern void __wasm_import_oos_platform_subruntime_complete(int32_t, uint8_t *);
-
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("destroy")))
-extern void __wasm_import_oos_platform_subruntime_destroy(int32_t, uint8_t *);
-
-__attribute__((__import_module__("oos:platform/subruntime@0.2.0"), __import_name__("last-error")))
-extern void __wasm_import_oos_platform_subruntime_last_error(uint8_t *);
-
-// Exported Functions from `oos:platform/lifecycle@0.2.0`
+// Exported Functions from `oos:platform/lifecycle@0.3.0`
 
 
 
@@ -576,6 +592,64 @@ void app_list_u32_free(app_list_u32_t *ptr) {
     for (size_t i = 0; i < list_len; i++) {
     }
     free(list_ptr);
+  }
+}
+
+void oos_platform_canvas_result_u32_error_code_free(oos_platform_canvas_result_u32_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_canvas_result_void_error_code_free(oos_platform_canvas_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+  }
+}
+
+void oos_platform_canvas_list_canvas2d_command_free(oos_platform_canvas_list_canvas2d_command_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    oos_platform_canvas_canvas2d_command_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+    }
+    free(list_ptr);
+  }
+}
+
+void oos_platform_canvas_list_vertex_free(oos_platform_canvas_list_vertex_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    oos_platform_canvas_vertex_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+    }
+    free(list_ptr);
+  }
+}
+
+void oos_platform_canvas_list_draw_command_free(oos_platform_canvas_list_draw_command_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    oos_platform_canvas_draw_command_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+    }
+    free(list_ptr);
+  }
+}
+
+void oos_platform_ui_list_node_free(oos_platform_ui_list_node_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    oos_platform_ui_node_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+    }
+    free(list_ptr);
+  }
+}
+
+void oos_platform_ui_result_void_error_code_free(oos_platform_ui_result_void_error_code_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
   }
 }
 
@@ -1069,20 +1143,24 @@ void oos_platform_system_services_result_string_error_code_free(oos_platform_sys
   }
 }
 
-void oos_platform_subruntime_result_u32_error_code_free(oos_platform_subruntime_result_u32_error_code_t *ptr) {
-  if (!ptr->is_err) {
-  } else {
+void oos_platform_modules_module_info_free(oos_platform_modules_module_info_t *ptr) {
+  app_string_free(&ptr->name);
+}
+
+void oos_platform_modules_list_module_info_free(oos_platform_modules_list_module_info_t *ptr) {
+  size_t list_len = ptr->len;
+  if (list_len > 0) {
+    oos_platform_modules_module_info_t *list_ptr = ptr->ptr;
+    for (size_t i = 0; i < list_len; i++) {
+      oos_platform_modules_module_info_free(&list_ptr[i]);
+    }
+    free(list_ptr);
   }
 }
 
-void oos_platform_subruntime_result_void_error_code_free(oos_platform_subruntime_result_void_error_code_t *ptr) {
+void oos_platform_modules_result_list_u8_error_code_free(oos_platform_modules_result_list_u8_error_code_t *ptr) {
   if (!ptr->is_err) {
-  } else {
-  }
-}
-
-void oos_platform_subruntime_result_child_status_error_code_free(oos_platform_subruntime_result_child_status_error_code_t *ptr) {
-  if (!ptr->is_err) {
+    app_list_u8_free(&ptr->val.ok);
   } else {
   }
 }
@@ -1344,11 +1422,11 @@ bool oos_platform_graphics_submit(oos_platform_graphics_list_vertex_t *vertices,
   }
 }
 
-void oos_platform_gles_get_capabilities(oos_platform_gles_capabilities_t *ret) {
+void oos_platform_gles_get_capabilities(uint32_t canvas, oos_platform_gles_capabilities_t *ret) {
   __attribute__((__aligned__(4)))
   uint8_t ret_area[52];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_get_capabilities(ptr);
+  __wasm_import_oos_platform_gles_get_capabilities((int32_t) (canvas), ptr);
   *ret = (oos_platform_gles_capabilities_t) {
     (uint32_t) (uint32_t) (*((int32_t*) (ptr + 0))),
     (uint32_t) (uint32_t) (*((int32_t*) (ptr + 4))),
@@ -1366,11 +1444,11 @@ void oos_platform_gles_get_capabilities(oos_platform_gles_capabilities_t *ret) {
   };
 }
 
-bool oos_platform_gles_buffer_set(uint32_t buffer, uint32_t size, oos_platform_gles_buffer_usage_t usage, app_list_u8_t *initial_data, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_texture_set(uint32_t canvas, uint32_t texture, oos_platform_gles_texture_format_t format, oos_platform_gles_point_t *position, oos_platform_gles_size_t *dimensions, uint32_t row_stride, oos_platform_gles_texture_flags_t options, app_list_u8_t *pixels, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_buffer_set((int32_t) (buffer), (int32_t) (size), (int32_t) usage, (uint8_t *) (*initial_data).ptr, (*initial_data).len, ptr);
+  __wasm_import_oos_platform_gles_texture_set((int32_t) (canvas), (int32_t) (texture), (int32_t) format, (int32_t) ((*position).x), (int32_t) ((*position).y), (int32_t) ((*dimensions).width), (int32_t) ((*dimensions).height), (int32_t) (row_stride), options, (uint8_t *) (*pixels).ptr, (*pixels).len, ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1391,11 +1469,11 @@ bool oos_platform_gles_buffer_set(uint32_t buffer, uint32_t size, oos_platform_g
   }
 }
 
-bool oos_platform_gles_buffer_write(uint32_t buffer, uint32_t offset, app_list_u8_t *data, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_texture_free(uint32_t canvas, uint32_t texture, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_buffer_write((int32_t) (buffer), (int32_t) (offset), (uint8_t *) (*data).ptr, (*data).len, ptr);
+  __wasm_import_oos_platform_gles_texture_free((int32_t) (canvas), (int32_t) (texture), ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1416,11 +1494,11 @@ bool oos_platform_gles_buffer_write(uint32_t buffer, uint32_t offset, app_list_u
   }
 }
 
-bool oos_platform_gles_buffer_free(uint32_t buffer, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_buffer_set(uint32_t canvas, uint32_t buffer, uint32_t size, oos_platform_gles_buffer_usage_t usage, app_list_u8_t *initial_data, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_buffer_free((int32_t) (buffer), ptr);
+  __wasm_import_oos_platform_gles_buffer_set((int32_t) (canvas), (int32_t) (buffer), (int32_t) (size), (int32_t) usage, (uint8_t *) (*initial_data).ptr, (*initial_data).len, ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1441,11 +1519,11 @@ bool oos_platform_gles_buffer_free(uint32_t buffer, oos_platform_gles_error_code
   }
 }
 
-bool oos_platform_gles_shader_set(uint32_t shader, oos_platform_gles_shader_stage_t stage, app_string_t *source, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_buffer_write(uint32_t canvas, uint32_t buffer, uint32_t offset, app_list_u8_t *data, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_shader_set((int32_t) (shader), (int32_t) stage, (uint8_t *) (*source).ptr, (*source).len, ptr);
+  __wasm_import_oos_platform_gles_buffer_write((int32_t) (canvas), (int32_t) (buffer), (int32_t) (offset), (uint8_t *) (*data).ptr, (*data).len, ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1466,11 +1544,11 @@ bool oos_platform_gles_shader_set(uint32_t shader, oos_platform_gles_shader_stag
   }
 }
 
-bool oos_platform_gles_shader_free(uint32_t shader, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_buffer_free(uint32_t canvas, uint32_t buffer, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_shader_free((int32_t) (shader), ptr);
+  __wasm_import_oos_platform_gles_buffer_free((int32_t) (canvas), (int32_t) (buffer), ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1491,11 +1569,11 @@ bool oos_platform_gles_shader_free(uint32_t shader, oos_platform_gles_error_code
   }
 }
 
-bool oos_platform_gles_program_set(uint32_t program, uint32_t vertex_shader, uint32_t fragment_shader, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_shader_set(uint32_t canvas, uint32_t shader, oos_platform_gles_shader_stage_t stage, app_string_t *source, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_program_set((int32_t) (program), (int32_t) (vertex_shader), (int32_t) (fragment_shader), ptr);
+  __wasm_import_oos_platform_gles_shader_set((int32_t) (canvas), (int32_t) (shader), (int32_t) stage, (uint8_t *) (*source).ptr, (*source).len, ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1516,11 +1594,11 @@ bool oos_platform_gles_program_set(uint32_t program, uint32_t vertex_shader, uin
   }
 }
 
-bool oos_platform_gles_program_free(uint32_t program, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_shader_free(uint32_t canvas, uint32_t shader, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_program_free((int32_t) (program), ptr);
+  __wasm_import_oos_platform_gles_shader_free((int32_t) (canvas), (int32_t) (shader), ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1541,21 +1619,71 @@ bool oos_platform_gles_program_free(uint32_t program, oos_platform_gles_error_co
   }
 }
 
-int32_t oos_platform_gles_attribute_location(uint32_t program, app_string_t *name) {
-  int32_t ret = __wasm_import_oos_platform_gles_attribute_location((int32_t) (program), (uint8_t *) (*name).ptr, (*name).len);
+bool oos_platform_gles_program_set(uint32_t canvas, uint32_t program, uint32_t vertex_shader, uint32_t fragment_shader, oos_platform_gles_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_gles_program_set((int32_t) (canvas), (int32_t) (program), (int32_t) (vertex_shader), (int32_t) (fragment_shader), ptr);
+  oos_platform_gles_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_gles_program_free(uint32_t canvas, uint32_t program, oos_platform_gles_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_gles_program_free((int32_t) (canvas), (int32_t) (program), ptr);
+  oos_platform_gles_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+int32_t oos_platform_gles_attribute_location(uint32_t canvas, uint32_t program, app_string_t *name) {
+  int32_t ret = __wasm_import_oos_platform_gles_attribute_location((int32_t) (canvas), (int32_t) (program), (uint8_t *) (*name).ptr, (*name).len);
   return ret;
 }
 
-int32_t oos_platform_gles_uniform_location(uint32_t program, app_string_t *name) {
-  int32_t ret = __wasm_import_oos_platform_gles_uniform_location((int32_t) (program), (uint8_t *) (*name).ptr, (*name).len);
+int32_t oos_platform_gles_uniform_location(uint32_t canvas, uint32_t program, app_string_t *name) {
+  int32_t ret = __wasm_import_oos_platform_gles_uniform_location((int32_t) (canvas), (int32_t) (program), (uint8_t *) (*name).ptr, (*name).len);
   return ret;
 }
 
-bool oos_platform_gles_submit(oos_platform_gles_list_command_t *commands, app_list_u32_t *data, oos_platform_gles_error_code_t *err) {
+bool oos_platform_gles_submit(uint32_t canvas, oos_platform_gles_list_command_t *commands, app_list_u32_t *data, oos_platform_gles_error_code_t *err) {
   __attribute__((__aligned__(1)))
   uint8_t ret_area[2];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_gles_submit((uint8_t *) (*commands).ptr, (*commands).len, (uint8_t *) (*data).ptr, (*data).len, ptr);
+  __wasm_import_oos_platform_gles_submit((int32_t) (canvas), (uint8_t *) (*commands).ptr, (*commands).len, (uint8_t *) (*data).ptr, (*data).len, ptr);
   oos_platform_gles_result_void_error_code_t result;
   switch ((int32_t) *((uint8_t*) (ptr + 0))) {
     case 0: {
@@ -1574,6 +1702,212 @@ bool oos_platform_gles_submit(oos_platform_gles_list_command_t *commands, app_li
     *err = result.val.err;
     return 0;
   }
+}
+
+bool oos_platform_canvas_create(oos_platform_canvas_context_kind_t context, oos_platform_canvas_geometry_t *geometry, uint32_t *ret, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(4)))
+  uint8_t ret_area[8];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_create((int32_t) context, (*geometry).x, (*geometry).y, (int32_t) ((*geometry).width), (int32_t) ((*geometry).height), (*geometry).z_order, (*geometry).visible, ptr);
+  oos_platform_canvas_result_u32_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_canvas_configure(uint32_t canvas, oos_platform_canvas_geometry_t *geometry, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_configure((int32_t) (canvas), (*geometry).x, (*geometry).y, (int32_t) ((*geometry).width), (int32_t) ((*geometry).height), (*geometry).z_order, (*geometry).visible, ptr);
+  oos_platform_canvas_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_canvas_destroy(uint32_t canvas, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_destroy((int32_t) (canvas), ptr);
+  oos_platform_canvas_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_canvas_submit_2d(uint32_t canvas, oos_platform_canvas_list_canvas2d_command_t *commands, app_list_u8_t *text, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_submit_2d((int32_t) (canvas), (uint8_t *) (*commands).ptr, (*commands).len, (uint8_t *) (*text).ptr, (*text).len, ptr);
+  oos_platform_canvas_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_canvas_texture_set(uint32_t canvas, uint32_t texture, oos_platform_canvas_texture_format_t format, oos_platform_canvas_point_t *position, oos_platform_canvas_size_t *dimensions, uint32_t row_stride, oos_platform_canvas_texture_flags_t options, app_list_u8_t *pixels, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_texture_set((int32_t) (canvas), (int32_t) (texture), (int32_t) format, (int32_t) ((*position).x), (int32_t) ((*position).y), (int32_t) ((*dimensions).width), (int32_t) ((*dimensions).height), (int32_t) (row_stride), options, (uint8_t *) (*pixels).ptr, (*pixels).len, ptr);
+  oos_platform_canvas_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_canvas_texture_free(uint32_t canvas, uint32_t texture, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_texture_free((int32_t) (canvas), (int32_t) (texture), ptr);
+  oos_platform_canvas_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_canvas_submit_mesh(uint32_t canvas, oos_platform_canvas_list_vertex_t *vertices, app_list_u16_t *indices, oos_platform_canvas_list_draw_command_t *commands, uint32_t clear_rgba, oos_platform_canvas_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_canvas_submit_mesh((int32_t) (canvas), (uint8_t *) (*vertices).ptr, (*vertices).len, (uint8_t *) (*indices).ptr, (*indices).len, (uint8_t *) (*commands).ptr, (*commands).len, (int32_t) (clear_rgba), ptr);
+  oos_platform_canvas_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+bool oos_platform_ui_submit(oos_platform_ui_list_node_t *nodes, app_list_u8_t *strings, oos_platform_ui_error_code_t *err) {
+  __attribute__((__aligned__(1)))
+  uint8_t ret_area[2];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_ui_submit((uint8_t *) (*nodes).ptr, (*nodes).len, (uint8_t *) (*strings).ptr, (*strings).len, ptr);
+  oos_platform_ui_result_void_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+void oos_platform_ui_clear(void) {
+  __wasm_import_oos_platform_ui_clear();
 }
 
 void oos_platform_device_get_descriptor(oos_platform_device_descriptor_t *ret) {
@@ -4298,214 +4632,42 @@ bool oos_platform_system_services_request(app_string_t *service, app_string_t *o
   }
 }
 
-void oos_platform_subruntime_get_limits(oos_platform_subruntime_limits_t *ret) {
-  __attribute__((__aligned__(8)))
-  uint8_t ret_area[24];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_get_limits(ptr);
-  *ret = (oos_platform_subruntime_limits_t) {
-    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 0))),
-    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 4))),
-    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 8))),
-    (uint32_t) (uint32_t) (*((int32_t*) (ptr + 12))),
-    (uint64_t) (uint64_t) (*((int64_t*) (ptr + 16))),
-  };
-}
-
-bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(4)))
-  uint8_t ret_area[8];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_create((uint8_t *) (*module).ptr, (*module).len, (int32_t) (main_stack_bytes), ptr);
-  oos_platform_subruntime_result_u32_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    *ret = result.val.ok;
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-bool oos_platform_subruntime_initialize(uint32_t handle, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(1)))
-  uint8_t ret_area[2];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_initialize((int32_t) (handle), ptr);
-  oos_platform_subruntime_result_void_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-bool oos_platform_subruntime_event(uint32_t handle, uint32_t code, uint32_t action, uint64_t monotonic_time_us, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(1)))
-  uint8_t ret_area[2];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_event((int32_t) (handle), (int32_t) (code), (int32_t) (action), (int64_t) (monotonic_time_us), ptr);
-  oos_platform_subruntime_result_void_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-bool oos_platform_subruntime_frame(uint32_t handle, uint64_t monotonic_time_us, uint32_t *ret, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(4)))
-  uint8_t ret_area[8];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_frame((int32_t) (handle), (int64_t) (monotonic_time_us), ptr);
-  oos_platform_subruntime_result_u32_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      result.val.ok = (uint32_t) (*((int32_t*) (ptr + 4)));
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    *ret = result.val.ok;
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-bool oos_platform_subruntime_status(uint32_t handle, oos_platform_subruntime_child_status_t *ret, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(4)))
-  uint8_t ret_area[16];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_status((int32_t) (handle), ptr);
-  oos_platform_subruntime_result_child_status_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      result.val.ok = (oos_platform_subruntime_child_status_t) {
-        (oos_platform_subruntime_child_state_t) (int32_t) *((uint8_t*) (ptr + 4)),
-        (uint32_t) (uint32_t) (*((int32_t*) (ptr + 8))),
-        (uint32_t) (uint32_t) (*((int32_t*) (ptr + 12))),
-      };
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 4));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    *ret = result.val.ok;
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-bool oos_platform_subruntime_complete(uint32_t result_code, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(1)))
-  uint8_t ret_area[2];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_complete((int32_t) (result_code), ptr);
-  oos_platform_subruntime_result_void_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-bool oos_platform_subruntime_destroy(uint32_t handle, oos_platform_subruntime_error_code_t *err) {
-  __attribute__((__aligned__(1)))
-  uint8_t ret_area[2];
-  uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_destroy((int32_t) (handle), ptr);
-  oos_platform_subruntime_result_void_error_code_t result;
-  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
-    case 0: {
-      result.is_err = false;
-      break;
-    }
-    case 1: {
-      result.is_err = true;
-      result.val.err = (int32_t) *((uint8_t*) (ptr + 1));
-      break;
-    }
-  }
-  if (!result.is_err) {
-    return 1;
-  } else {
-    *err = result.val.err;
-    return 0;
-  }
-}
-
-void oos_platform_subruntime_last_error(app_string_t *ret) {
+void oos_platform_modules_enumerate(oos_platform_modules_list_module_info_t *ret) {
   __attribute__((__aligned__(sizeof(void*))))
   uint8_t ret_area[(2*sizeof(void*))];
   uint8_t *ptr = (uint8_t *) &ret_area;
-  __wasm_import_oos_platform_subruntime_last_error(ptr);
-  *ret = (app_string_t) { (uint8_t*)(*((uint8_t **) (ptr + 0))), (*((size_t*) (ptr + sizeof(void*)))) };
+  __wasm_import_oos_platform_modules_enumerate(ptr);
+  *ret = (oos_platform_modules_list_module_info_t) { (oos_platform_modules_module_info_t*)(*((uint8_t **) (ptr + 0))), (*((size_t*) (ptr + sizeof(void*)))) };
 }
 
-__attribute__((__export_name__("oos:platform/lifecycle@0.2.0#init")))
+bool oos_platform_modules_invoke(app_string_t *module, app_string_t *operation, app_list_u8_t *request, app_list_u8_t *ret, oos_platform_modules_error_code_t *err) {
+  __attribute__((__aligned__(sizeof(void*))))
+  uint8_t ret_area[(3*sizeof(void*))];
+  uint8_t *ptr = (uint8_t *) &ret_area;
+  __wasm_import_oos_platform_modules_invoke((uint8_t *) (*module).ptr, (*module).len, (uint8_t *) (*operation).ptr, (*operation).len, (uint8_t *) (*request).ptr, (*request).len, ptr);
+  oos_platform_modules_result_list_u8_error_code_t result;
+  switch ((int32_t) *((uint8_t*) (ptr + 0))) {
+    case 0: {
+      result.is_err = false;
+      result.val.ok = (app_list_u8_t) { (uint8_t*)(*((uint8_t **) (ptr + sizeof(void*)))), (*((size_t*) (ptr + (2*sizeof(void*))))) };
+      break;
+    }
+    case 1: {
+      result.is_err = true;
+      result.val.err = (int32_t) *((uint8_t*) (ptr + sizeof(void*)));
+      break;
+    }
+  }
+  if (!result.is_err) {
+    *ret = result.val.ok;
+    return 1;
+  } else {
+    *err = result.val.err;
+    return 0;
+  }
+}
+
+__attribute__((__export_name__("oos:platform/lifecycle@0.3.0#init")))
 uint8_t * __wasm_export_exports_oos_platform_lifecycle_init(void) {
   exports_oos_platform_lifecycle_result_void_error_code_t ret;
   exports_oos_platform_lifecycle_error_code_t err;
@@ -4523,7 +4685,7 @@ uint8_t * __wasm_export_exports_oos_platform_lifecycle_init(void) {
   return ptr;
 }
 
-__attribute__((__export_name__("oos:platform/lifecycle@0.2.0#event")))
+__attribute__((__export_name__("oos:platform/lifecycle@0.3.0#event")))
 void __wasm_export_exports_oos_platform_lifecycle_event(int32_t arg, int32_t arg0, int64_t arg1) {
   exports_oos_platform_lifecycle_key_event_t arg2 = (exports_oos_platform_lifecycle_key_event_t) {
     (uint32_t) (uint32_t) (arg),
@@ -4533,7 +4695,7 @@ void __wasm_export_exports_oos_platform_lifecycle_event(int32_t arg, int32_t arg
   exports_oos_platform_lifecycle_event(&arg2);
 }
 
-__attribute__((__export_name__("oos:platform/lifecycle@0.2.0#frame")))
+__attribute__((__export_name__("oos:platform/lifecycle@0.3.0#frame")))
 uint8_t * __wasm_export_exports_oos_platform_lifecycle_frame(int64_t arg) {
   exports_oos_platform_lifecycle_result_u32_error_code_t ret;
   uint32_t ok;
@@ -4556,7 +4718,7 @@ uint8_t * __wasm_export_exports_oos_platform_lifecycle_frame(int64_t arg) {
   return ptr;
 }
 
-__attribute__((__export_name__("oos:platform/lifecycle@0.2.0#shutdown")))
+__attribute__((__export_name__("oos:platform/lifecycle@0.3.0#shutdown")))
 void __wasm_export_exports_oos_platform_lifecycle_shutdown(void) {
   exports_oos_platform_lifecycle_shutdown();
 }

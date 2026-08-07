@@ -1,13 +1,15 @@
 # WIT Graphics Contract
 
-OOS exposes graphics at two levels. Both render into an application surface
+OOS exposes host-owned canvases inside one application scene. Canvas2D,
+indexed meshes, Solid/Clay nodes, and GLES can be combined by the same app;
+there is no manifest-level raw/UI mode. Every path renders into a host surface
 owned by the host; neither gives an application an EGL display, GLES context,
 native framebuffer, HWC layer, gralloc handle, or physical scanout buffer.
 
 ```text
-egui / imgui / LVGL / software canvas        2D / 3D engine backend
+Solid / Clay / Canvas2D / mesh                 WebGL / GLES engine
                  |                                      |
-     graphics textures + indexed meshes       validated GLES2 resources
+       retained nodes or draw batches        validated GLES2 resources
                  |                              + one command batch/frame
                  +------------------+-------------------+
                                     |
@@ -18,13 +20,37 @@ egui / imgui / LVGL / software canvas        2D / 3D engine backend
                     RGB565 HWC buffer or local SDL window
 ```
 
-## Portable 2D Path
+## Scene And 2D Paths
 
-The `graphics` WIT interface is the preferred path for GUI frameworks. A frame
-contains premultiplied vertices, `u16` indices, texture handles, and clip
-rectangles. This matches the output model used by egui and imgui. An LVGL
+Applications create a `canvas` with a `canvas2d`, `mesh2d`, or `gles2` context
+and place it using scene geometry and z order. Solid creates retained text,
+container, and canvas nodes through its platform renderer. Clay submits the
+same native layout/drawing model from Wasm. Both update a complete tree in one
+FFI call and use the intentionally restricted Tailwind utility parser rather
+than a general CSS cascade or DOM.
+
+The indexed-mesh contract contains premultiplied vertices, `u16` indices,
+texture handles, and clip rectangles. This matches the output model used by
+egui. An LVGL
 display port, J2ME emulator, video decoder, or software game can instead keep
 a host texture and update only dirty rectangles before drawing one quad.
+
+The native Tailwind parser intentionally supports only utilities that map to
+the fixed layout model:
+
+| Group | Utilities |
+| --- | --- |
+| layout | `flex`, `flex-row`, `flex-col`, `hidden`, `relative` |
+| flex | `grow`, `grow-0`, `shrink`, `shrink-0`, `items-start/center/end/stretch`, `justify-start/center/end/between` |
+| size | `w-*`, `h-*`, `size-*`, `min-w-*`, `min-h-*`, `max-w-*`, `max-h-*`; values are `full`, `auto`, spacing units, or `[Npx]` |
+| spacing | `p/px/py/pt/pr/pb/pl-*`, `m/mx/my/mt/mr/mb/ml-*`, `gap-*`; values are spacing units or `[Npx]` |
+| shape | `rounded-none/sm/md/lg/xl/2xl/full` and `rounded` |
+| text | `text-xs/sm/base/lg/xl/2xl/3xl`, `font-normal` |
+| color | `bg-*` and `text-*` for `transparent`, black/white, gray 50-900, red/green/blue 500-600, yellow 400-500, or `[#RRGGBB]` |
+
+Unknown utilities reject the complete tree submission. There is no CSS file,
+cascade, selector, media query, inherited browser style, or runtime Tailwind
+compiler.
 
 `oos-egui::Renderer` implements egui texture deltas and mesh submission. It
 retains its frame vectors across frames, maps egui sampler options without
@@ -40,10 +66,9 @@ interface and scheduled by an adapter rather than silently discarded.
 Trusted native UI uses the same contract without a Wasm boundary.
 `LvglBackend` keeps two 32-row RGB565 draw buffers, uploads LVGL invalidated
 regions into one retained host texture, then submits one full-screen quad.
-`ImguiBackend` processes the Dear ImGui 1.92 texture lifecycle and converts
-`ImDrawData` directly into OOS vertices, indices, texture handles, and clip
-commands. LVGL is the default SystemUI framework; Dear ImGui is intended for
-diagnostics and engineering tools rather than the phone shell.
+The SystemUI status, notification, and lock-screen surfaces all use LVGL. Its
+overlay mode converts ARGB8888 dirty regions to premultiplied RGBA8888 before
+submission so application content remains visible outside opaque UI elements.
 
 The SystemUI rendering loop is event-driven. A worker queries battery, Wi-Fi,
 and the platform modem away from the UI thread and publishes a revisioned
@@ -61,12 +86,12 @@ viewport and scissor state, blending, depth, stencil, color masks, culling,
 line and polygon-offset raster state, texture and buffer binding, vertex
 attributes, uniforms, and indexed or non-indexed drawing.
 
-The host validates enum values, resource ownership, buffer ranges, command
-limits, and frame boundaries before dispatching GLES. `begin-frame` always
-binds the host application target and `end-frame` presents that target. Depth
-and stencil storage on the phones is allocated lazily only when a submitted
-batch uses it, so a normal GUI does not pay their memory or initialization
-cost.
+The host validates enum values, canvas/resource ownership, buffer ranges,
+command limits, and frame boundaries before dispatching GLES. `begin-frame`
+binds that canvas's offscreen texture and `end-frame` completes the batch; the
+application scene later composes every visible canvas in z order. Depth and
+stencil storage is allocated only while an offscreen GLES submission needs it,
+so a normal GUI does not retain that cost.
 
 This is deliberately a WIT rendering protocol, not passthrough OpenGL. Engine
 ports should put resource creation outside the frame loop and translate their

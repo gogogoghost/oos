@@ -4,7 +4,9 @@
 #include <memory>
 #include <string>
 
+#include "oos/apps/app_manifest.h"
 #include "oos/input/key_input.h"
+#include "oos/runtime/application_context.h"
 
 namespace oos::device {
 class Device;
@@ -22,22 +24,11 @@ namespace oos::runtime {
 
 class GraphicsHost;
 
-struct WasmAppOptions {
+struct WasmAppOptions : ApplicationContextOptions {
   uint32_t stack_size = 512 * 1024;
   uint32_t heap_size = 0;
-  std::string app_id;
-  std::string data_directory;
-  std::string system_data_root;
-  apps::AppRepository *app_repository = nullptr;
-  ui::StatusBarAppearanceController *status_bar = nullptr;
-  std::string internal_media_directory = "/data/media/internal";
-  std::string removable_media_directory = "/data/media/removable";
-  std::string font_directory = "/opt/oos/share/fonts";
-  std::string asset_directory;
   std::string module_directory;
-  int wake_fd = -1;
-  uint32_t service_permission_mask = 0;
-  bool enforce_service_permissions = false;
+  std::vector<apps::AppModule> modules;
 };
 
 class WasmApp {
@@ -50,7 +41,7 @@ public:
   WasmApp(const WasmApp &) = delete;
   WasmApp &operator=(const WasmApp &) = delete;
 
-  bool load(const char *path);
+  bool load(const char *base_path);
   bool initialize();
   bool dispatchKey(const input::KeyEvent &event, int64_t monotonic_us);
   bool render(int64_t monotonic_us, uint32_t &next_delay_ms);
@@ -64,6 +55,7 @@ public:
 
   const char *lastError() const;
   bool loaded() const;
+  const std::string &loadedArtifactPath() const;
 
 private:
   class Impl;

@@ -11,9 +11,11 @@ required=(
   "$ROOT_DIR/build/local/bin/oos"
   "$ROOT_DIR/system/devices/local/config/keymap.conf"
   "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE"
+  "$ROOT_DIR/third_party/quickjs/LICENSE"
+  "$ROOT_DIR/third_party/stb/LICENSE"
+  "$ROOT_DIR/third_party/clay/LICENSE.md"
   "$ROOT_DIR/third_party/lvgl/LICENCE.txt"
   "$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt"
-  "$ROOT_DIR/third_party/imgui/LICENSE.txt"
   "$ROOT_DIR/third_party/miniaudio/LICENSE"
   "$ROOT_DIR/third_party/ffmpeg/COPYING.LGPLv2.1"
   "$ROOT_DIR/third_party/sonivox/NOTICE"
@@ -52,13 +54,17 @@ install -m 0644 "$ROOT_DIR/system/devices/local/config/keymap.conf" \
   "$OOS_PREFIX/etc/local-keymap.conf"
 install -m 0644 "$ROOT_DIR/third_party/wasm-micro-runtime/LICENSE" \
   "$OOS_PREFIX/share/licenses/oos/WAMR.txt"
+install -m 0644 "$ROOT_DIR/third_party/quickjs/LICENSE" \
+  "$OOS_PREFIX/share/licenses/oos/QuickJS.txt"
+install -m 0644 "$ROOT_DIR/third_party/stb/LICENSE" \
+  "$OOS_PREFIX/share/licenses/oos/stb.txt"
+install -m 0644 "$ROOT_DIR/third_party/clay/LICENSE.md" \
+  "$OOS_PREFIX/share/licenses/oos/clay.txt"
 install -m 0644 "$ROOT_DIR/third_party/lvgl/LICENCE.txt" \
   "$OOS_PREFIX/share/licenses/oos/LVGL.txt"
 install -m 0644 \
   "$ROOT_DIR/third_party/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt" \
   "$OOS_PREFIX/share/licenses/oos/FontAwesome5.txt"
-install -m 0644 "$ROOT_DIR/third_party/imgui/LICENSE.txt" \
-  "$OOS_PREFIX/share/licenses/oos/DearImGui.txt"
 install -m 0644 "$ROOT_DIR/third_party/miniaudio/LICENSE" \
   "$OOS_PREFIX/share/licenses/oos/miniaudio.txt"
 install -m 0644 "$ROOT_DIR/third_party/ffmpeg/COPYING.LGPLv2.1" \
@@ -85,7 +91,7 @@ printf '%s\n' \
   "format=2" \
   "device=local" \
   "prefix=/opt/oos" \
-  "native_app_runtime=wamr" \
+  "app_runtimes=quickjs-${QUICKJS_VERSION},wamr-${WAMR_VERSION}" \
   "media_miniaudio=${MINIAUDIO_VERSION}" \
   "media_ffmpeg=${FFMPEG_VERSION}" \
   "media_sonivox=${SONIVOX_VERSION}" \
@@ -93,7 +99,6 @@ printf '%s\n' \
   "media_generaluser_gs=${GENERALUSER_GS_VERSION}" \
   "system_ui=lvgl" \
   "system_icons=font-awesome-5-free" \
-  "debug_ui_backend=dear-imgui" \
   "system_font=host-system-font" \
   "git_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" \
   >"$OOS_PREFIX/rootfs-manifest.env"

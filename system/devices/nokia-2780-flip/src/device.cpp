@@ -11,7 +11,8 @@ namespace oos::device {
 namespace {
 
 constexpr DeviceDescriptor kDescriptor = {
-    "nokia-2780-flip", "Nokia", "2780 Flip", 29, 240, 320, 128, 160};
+    "nokia-2780-flip", "Nokia", "2780 Flip", 29, 240, 320, 128, 160,
+    "cortex-a53",      "armv7a"};
 
 constexpr ServiceConfiguration kServices = {
     "/dev/input",

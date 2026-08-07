@@ -527,7 +527,9 @@ public:
   }
 
   bool submit(const OosGlesCommand *commands, size_t command_count,
-              const uint32_t *data, size_t data_words) {
+              const uint32_t *data, size_t data_words,
+              uint32_t output_texture = 0, uint32_t output_width = 0,
+              uint32_t output_height = 0) {
     if (!current() || !commands || command_count < 2 ||
         command_count > OOS_GLES_MAX_COMMANDS ||
         data_words > OOS_GLES_MAX_COMMAND_DATA_WORDS || (data_words && !data) ||
@@ -548,10 +550,85 @@ public:
         require_stencil = true;
       }
     }
-    if (!target.bindGlesSurface(require_depth, require_stencil))
+    struct OffscreenTarget {
+      GLuint framebuffer = 0;
+      GLuint depth = 0;
+      GLuint stencil = 0;
+      ~OffscreenTarget() {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        if (stencil)
+          glDeleteRenderbuffers(1, &stencil);
+        if (depth)
+          glDeleteRenderbuffers(1, &depth);
+        if (framebuffer)
+          glDeleteFramebuffers(1, &framebuffer);
+      }
+    } offscreen;
+    const bool render_to_texture = output_texture != 0;
+    if (render_to_texture) {
+      if (output_width == 0 || output_height == 0 ||
+          output_width > OOS_GFX_MAX_TEXTURE_SIZE ||
+          output_height > OOS_GFX_MAX_TEXTURE_SIZE)
+        return false;
+      auto found = textures.find(output_texture);
+      bool allocate_texture = false;
+      if (found == textures.end()) {
+        Texture texture;
+        glGenTextures(1, &texture.name);
+        texture.format = OOS_TEXTURE_RGBA8888;
+        texture.width = output_width;
+        texture.height = output_height;
+        found = textures.emplace(output_texture, texture).first;
+        allocate_texture = true;
+      }
+      glBindTexture(GL_TEXTURE_2D, found->second.name);
+      if (found->second.width != output_width ||
+          found->second.height != output_height ||
+          found->second.format != OOS_TEXTURE_RGBA8888) {
+        found->second.width = output_width;
+        found->second.height = output_height;
+        found->second.format = OOS_TEXTURE_RGBA8888;
+        allocate_texture = true;
+      }
+      if (allocate_texture) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, output_width, output_height, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      }
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glGenFramebuffers(1, &offscreen.framebuffer);
+      glBindFramebuffer(GL_FRAMEBUFFER, offscreen.framebuffer);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                             GL_TEXTURE_2D, found->second.name, 0);
+      if (require_depth) {
+        glGenRenderbuffers(1, &offscreen.depth);
+        glBindRenderbuffer(GL_RENDERBUFFER, offscreen.depth);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
+                              output_width, output_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER, offscreen.depth);
+      }
+      if (require_stencil) {
+        glGenRenderbuffers(1, &offscreen.stencil);
+        glBindRenderbuffer(GL_RENDERBUFFER, offscreen.stencil);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8,
+                              output_width, output_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                                  GL_RENDERBUFFER, offscreen.stencil);
+      }
+      glBindRenderbuffer(GL_RENDERBUFFER, 0);
+      if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
+          glGetError() != GL_NO_ERROR)
+        return false;
+    } else if (!target.bindGlesSurface(require_depth, require_stencil)) {
       return false;
+    }
     clearGlErrors();
-    glViewport(0, 0, target.glesSurfaceWidth(), target.glesSurfaceHeight());
+    glViewport(0, 0,
+               render_to_texture ? output_width : target.glesSurfaceWidth(),
+               render_to_texture ? output_height : target.glesSurfaceHeight());
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
@@ -906,6 +983,10 @@ public:
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     glUseProgram(0);
     glActiveTexture(GL_TEXTURE0);
+    if (render_to_texture) {
+      glFlush();
+      return glGetError() == GL_NO_ERROR;
+    }
     return target.presentGlesSurface();
   }
 
@@ -1010,6 +1091,15 @@ int32_t GlesExecutor::uniformLocation(uint32_t program, const char *name,
 bool GlesExecutor::submit(const OosGlesCommand *commands, size_t command_count,
                           const uint32_t *data, size_t data_words) {
   return impl_->submit(commands, command_count, data, data_words);
+}
+
+bool GlesExecutor::submitToTexture(uint32_t texture, uint32_t width,
+                                   uint32_t height,
+                                   const OosGlesCommand *commands,
+                                   size_t command_count, const uint32_t *data,
+                                   size_t data_words) {
+  return impl_->submit(commands, command_count, data, data_words, texture,
+                       width, height);
 }
 
 void GlesExecutor::reset() { impl_->reset(); }

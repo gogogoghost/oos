@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "cc.jaxy.oos.lvgl-demo",
+  "name": "OOS LVGL Demo",
+  "version": "0.1.0",
+  "entry": {
+    "runtime": "wasm",
+    "path": "app/main"
+  }
+}

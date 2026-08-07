@@ -240,6 +240,14 @@ bool Compositor::submitGles(const OosGlesCommand *commands,
   return display_.submitGles(commands, command_count, data, data_words);
 }
 
+bool Compositor::submitGlesToTexture(
+    uint32_t texture, uint32_t width, uint32_t height,
+    const OosGlesCommand *commands, size_t command_count, const uint32_t *data,
+    size_t data_words) {
+  return display_.submitGlesToTexture(texture, width, height, commands,
+                                      command_count, data, data_words);
+}
+
 LayerSurface::LayerSurface(Compositor &compositor,
                            const LayerSurfaceConfig &config, uint64_t id)
     : compositor_(compositor), impl_(std::make_unique<Impl>(config, id)) {}
@@ -373,33 +381,53 @@ bool LayerSurface::submit(const OosGfxVertex *vertices, size_t vertex_count,
   return true;
 }
 
-bool LayerSurface::glesCapabilities(OosGlesCapabilities &) { return false; }
-bool LayerSurface::setGlesBuffer(uint32_t, uint32_t, uint32_t, const uint8_t *,
-                                 size_t) {
-  return false;
+bool LayerSurface::glesCapabilities(OosGlesCapabilities &result) {
+  return compositor_.glesCapabilities(result);
 }
-bool LayerSurface::writeGlesBuffer(uint32_t, uint32_t, const uint8_t *,
-                                   size_t) {
-  return false;
+bool LayerSurface::setGlesBuffer(uint32_t buffer, uint32_t size,
+                                 uint32_t usage, const uint8_t *data,
+                                 size_t data_size) {
+  return compositor_.setGlesBuffer(buffer, size, usage, data, data_size);
 }
-bool LayerSurface::freeGlesBuffer(uint32_t) { return false; }
-bool LayerSurface::setGlesShader(uint32_t, uint32_t, const char *, size_t) {
-  return false;
+bool LayerSurface::writeGlesBuffer(uint32_t buffer, uint32_t offset,
+                                   const uint8_t *data, size_t data_size) {
+  return compositor_.writeGlesBuffer(buffer, offset, data, data_size);
 }
-bool LayerSurface::freeGlesShader(uint32_t) { return false; }
-bool LayerSurface::setGlesProgram(uint32_t, uint32_t, uint32_t) {
-  return false;
+bool LayerSurface::freeGlesBuffer(uint32_t buffer) {
+  return compositor_.freeGlesBuffer(buffer);
 }
-bool LayerSurface::freeGlesProgram(uint32_t) { return false; }
-int32_t LayerSurface::glesAttributeLocation(uint32_t, const char *, size_t) {
-  return -1;
+bool LayerSurface::setGlesShader(uint32_t shader, uint32_t stage,
+                                 const char *source, size_t source_size) {
+  return compositor_.setGlesShader(shader, stage, source, source_size);
 }
-int32_t LayerSurface::glesUniformLocation(uint32_t, const char *, size_t) {
-  return -1;
+bool LayerSurface::freeGlesShader(uint32_t shader) {
+  return compositor_.freeGlesShader(shader);
 }
-bool LayerSurface::submitGles(const OosGlesCommand *, size_t, const uint32_t *,
-                              size_t) {
-  return false;
+bool LayerSurface::setGlesProgram(uint32_t program, uint32_t vertex_shader,
+                                  uint32_t fragment_shader) {
+  return compositor_.setGlesProgram(program, vertex_shader, fragment_shader);
+}
+bool LayerSurface::freeGlesProgram(uint32_t program) {
+  return compositor_.freeGlesProgram(program);
+}
+int32_t LayerSurface::glesAttributeLocation(uint32_t program, const char *name,
+                                            size_t size) {
+  return compositor_.glesAttributeLocation(program, name, size);
+}
+int32_t LayerSurface::glesUniformLocation(uint32_t program, const char *name,
+                                          size_t size) {
+  return compositor_.glesUniformLocation(program, name, size);
+}
+bool LayerSurface::submitGles(const OosGlesCommand *commands, size_t count,
+                              const uint32_t *data, size_t words) {
+  return compositor_.submitGles(commands, count, data, words);
+}
+bool LayerSurface::submitGlesToTexture(
+    uint32_t texture, uint32_t width, uint32_t height,
+    const OosGlesCommand *commands, size_t count, const uint32_t *data,
+    size_t words) {
+  return compositor_.submitGlesToTexture(texture, width, height, commands,
+                                         count, data, words);
 }
 
 } // namespace oos::compositor

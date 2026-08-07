@@ -3,16 +3,25 @@
 Large source checkouts in this directory are intentionally ignored by the main
 repository. Their reproducible revisions are recorded in `versions.env`.
 
-The executable application runtime is:
+The executable application runtimes are:
 
 - `wasm-micro-runtime`: pinned WAMR 2.4.4, fetched and revision-checked by
   `scripts/fetch-wamr.sh`.
+- `quickjs`: pinned QuickJS 2026-06-04, compiled directly into OOS without
+  `quickjs-libc`, and fetched and revision-checked by
+  `scripts/fetch-quickjs.sh`.
 
-The native system UI and development-tool UI backends are:
+The native system UI backend is:
 
 - `lvgl`: pinned LVGL 9.5.0, used by the trusted process-local SystemUI.
-- `imgui`: pinned Dear ImGui 1.92.9b, exposed through the same OOS graphics
-  host for diagnostics and native tools.
+
+The shared Solid/Clay/Canvas drawing backend uses:
+
+- `stb`: pinned `stb_truetype` 1.26 for system-font rasterization. It is
+  fetched with LVGL by `scripts/fetch-ui-frameworks.sh`.
+- `clay`: pinned Clay 0.14. Wasm applications compile the single-header layout
+  engine into the guest and submit its output through the batched OOS Canvas2D
+  adapter.
 
 The system media service uses:
 
@@ -35,8 +44,8 @@ checkout. Packaging copies its complete upstream license alongside the LVGL
 license. Do not introduce icons from another library into SystemUI; see
 `docs/ui-icons.md`.
 
-Fetch and revision-check both UI frameworks with
-`scripts/fetch-ui-frameworks.sh`. Neither checkout is copied into the main
+Fetch and revision-check LVGL with `scripts/fetch-ui-frameworks.sh`. Its checkout
+is not copied into the main
 repository.
 
 Fetch the media dependencies with `scripts/fetch-media-dependencies.sh`.
@@ -69,6 +78,6 @@ Bluetooth daemon protocol. It is not linked into OOS. Likewise, the Android 10
 Gecko checkout supplies reproducible HWC/HIDL reference definitions and a
 small compatibility header patch; it is not a browser shipped by OOS.
 
-OOS has no WPE WebKit, libwpe, WPE backend, Cerbero, or JavaScript-engine build
-dependency. Stale local checkouts of those projects are ignored and can be
-removed without changing an OOS build.
+OOS has no WPE WebKit, libwpe, WPE backend, or Cerbero build dependency.
+QuickJS is the only JavaScript engine linked into OOS; its checkout is required
+under this directory but remains ignored by the main repository.

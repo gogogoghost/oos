@@ -3,7 +3,6 @@
 #include "oos/compositor/compositor.h"
 #include "oos/sdk/ui/fonts.h"
 #include "oos/sdk/ui/icons.h"
-#include "oos/sdk/ui/imgui_backend.h"
 #include "oos/sdk/ui/lvgl_backend.h"
 #include "oos/sdk/ui/theme.h"
 #include "oos/ui/system_status.h"
@@ -65,7 +64,8 @@ public:
   Impl(compositor::LayerSurface &status_surface,
        compositor::LayerSurface &overlay_surface,
        ui::SystemStatusSource *status_source, ui::SystemUiSettings *settings)
-      : status_backend(status_surface), overlay_backend(overlay_surface),
+      : status_backend(status_surface),
+        overlay_backend(overlay_surface, sdk_ui::LvglBackendOptions{true}),
         status_surface(status_surface), overlay_surface(overlay_surface),
         status_source(status_source), settings(settings) {}
 
@@ -128,6 +128,26 @@ public:
     lv_obj_add_flag(wifi, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(charge, LV_OBJ_FLAG_HIDDEN);
 
+    overlay_root = overlay_backend.root();
+    if (!overlay_root) {
+      error = "SystemUI overlay surface has no LVGL root";
+      shutdown();
+      return false;
+    }
+    stripObject(overlay_root);
+    lv_obj_set_style_bg_opa(overlay_root, LV_OPA_TRANSP, 0);
+    overlay_panel = lv_obj_create(overlay_root);
+    stripObject(overlay_panel);
+    overlay_title = makeLabel(overlay_panel, "Notification",
+                              sdk_ui::fonts::get(12), kOrange);
+    overlay_message =
+        makeLabel(overlay_panel, "", sdk_ui::fonts::get(12), kText);
+    overlay_time = makeLabel(overlay_panel, "", sdk_ui::fonts::get(36), kText);
+    overlay_hint = makeLabel(overlay_panel, "Press OK to unlock",
+                             sdk_ui::fonts::get(14), kOrange);
+    lv_label_set_long_mode(overlay_message, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(overlay_hint, LV_LABEL_LONG_DOT);
+
     overlay_surface.setVisible(false);
     applyAppearance();
     updatePreferences();
@@ -153,6 +173,12 @@ public:
     wifi = nullptr;
     charge = nullptr;
     battery = nullptr;
+    overlay_root = nullptr;
+    overlay_panel = nullptr;
+    overlay_title = nullptr;
+    overlay_message = nullptr;
+    overlay_time = nullptr;
+    overlay_hint = nullptr;
     mode = OverlayMode::Hidden;
     initialized = false;
     status_needs_refresh = false;
@@ -166,6 +192,8 @@ public:
     if (status_time)
       lv_label_set_text(status_time, currentTime().c_str());
     status_needs_refresh = true;
+    if (mode == OverlayMode::Locked)
+      overlay_needs_refresh = true;
   }
 
   void applyStatus() {
@@ -283,51 +311,45 @@ public:
   bool renderOverlay(int64_t monotonic_us) {
     if (mode == OverlayMode::Hidden)
       return true;
-    if (!overlay_backend.beginFrame(monotonic_us)) {
-      error = overlay_backend.lastError();
+    if (!overlay_root || !overlay_panel)
       return false;
-    }
-    ImGui::SetCurrentContext(overlay_backend.context());
-    ImGuiStyle &style = ImGui::GetStyle();
-    style.WindowRounding = 0.0f;
-    style.WindowBorderSize = 0.0f;
-    style.WindowPadding = ImVec2(10, 8);
+    lv_obj_add_flag(overlay_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(overlay_message, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(overlay_time, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(overlay_hint, LV_OBJ_FLAG_HIDDEN);
     if (mode == OverlayMode::Locked) {
-      ImGui::SetNextWindowPos(ImVec2(0, 0));
-      ImGui::SetNextWindowSize(
-          ImVec2(static_cast<float>(overlay_surface.width()),
-                 static_cast<float>(overlay_surface.height())));
-      ImGui::SetNextWindowBgAlpha(1.0f);
-      ImGui::Begin("Lock screen", nullptr,
-                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                       ImGuiWindowFlags_NoSavedSettings |
-                       ImGuiWindowFlags_NoInputs);
-      ImGui::SetCursorPosY(72.0f);
       const std::string time = currentTime();
-      const float time_width = ImGui::CalcTextSize(time.c_str()).x;
-      ImGui::SetCursorPosX((overlay_surface.width() - time_width) * 0.5f);
-      ImGui::TextUnformatted(time.c_str());
-      ImGui::SetCursorPosY(145.0f);
-      constexpr const char *hint = "Press OK to unlock";
-      const float hint_width = ImGui::CalcTextSize(hint).x;
-      ImGui::SetCursorPosX((overlay_surface.width() - hint_width) * 0.5f);
-      ImGui::TextColored(ImVec4(0.90f, 0.32f, 0.0f, 1.0f), "%s", hint);
-      ImGui::End();
+      lv_obj_set_size(overlay_panel, overlay_surface.width(),
+                      overlay_surface.height());
+      lv_obj_align(overlay_panel, LV_ALIGN_CENTER, 0, 0);
+      lv_obj_set_style_radius(overlay_panel, 0, 0);
+      lv_obj_set_style_bg_color(overlay_panel, color(0x101214), 0);
+      lv_obj_set_style_bg_opa(overlay_panel, LV_OPA_COVER, 0);
+      lv_label_set_text(overlay_time, time.c_str());
+      lv_obj_set_width(overlay_time, overlay_surface.width());
+      lv_obj_set_style_text_align(overlay_time, LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_align(overlay_time, LV_ALIGN_TOP_MID, 0, 64);
+      lv_obj_set_width(overlay_hint, overlay_surface.width() - 20);
+      lv_obj_set_style_text_align(overlay_hint, LV_TEXT_ALIGN_CENTER, 0);
+      lv_obj_align(overlay_hint, LV_ALIGN_TOP_MID, 0, 136);
+      lv_obj_remove_flag(overlay_time, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(overlay_hint, LV_OBJ_FLAG_HIDDEN);
     } else {
-      ImGui::SetNextWindowPos(ImVec2(8, 8));
-      ImGui::SetNextWindowSize(
-          ImVec2(static_cast<float>(overlay_surface.width() - 16), 42));
-      ImGui::SetNextWindowBgAlpha(0.96f);
-      ImGui::Begin("Notification", nullptr,
-                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                       ImGuiWindowFlags_NoSavedSettings |
-                       ImGuiWindowFlags_NoInputs);
-      ImGui::TextColored(ImVec4(0.90f, 0.32f, 0.0f, 1.0f), "Notification");
-      ImGui::SameLine();
-      ImGui::TextUnformatted(notification.c_str());
-      ImGui::End();
+      lv_obj_set_size(overlay_panel, overlay_surface.width() - 16, 42);
+      lv_obj_align(overlay_panel, LV_ALIGN_TOP_MID, 0, 8);
+      lv_obj_set_style_radius(overlay_panel, 4, 0);
+      lv_obj_set_style_bg_color(overlay_panel, color(0x202326), 0);
+      lv_obj_set_style_bg_opa(overlay_panel, LV_OPA_COVER, 0);
+      lv_obj_set_pos(overlay_title, 10, 12);
+      lv_obj_set_width(overlay_title, 76);
+      lv_label_set_text(overlay_message, notification.c_str());
+      lv_obj_set_pos(overlay_message, 90, 12);
+      lv_obj_set_width(overlay_message, overlay_surface.width() - 116);
+      lv_obj_remove_flag(overlay_title, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(overlay_message, LV_OBJ_FLAG_HIDDEN);
     }
-    if (!overlay_backend.submit(0x00000000u)) {
+    overlay_backend.frame(monotonic_us);
+    if (!overlay_backend.healthy() || !overlay_backend.refresh()) {
       error = overlay_backend.lastError();
       return false;
     }
@@ -382,7 +404,6 @@ public:
       return false;
     if (mode == OverlayMode::Locked) {
       consumed = true;
-      overlay_backend.dispatchKey(event);
       if (event.action != input::KeyAction::Released && event.code == kKeyOk)
         setLocked(false);
       return true;
@@ -416,7 +437,7 @@ public:
   }
 
   sdk_ui::LvglBackend status_backend;
-  sdk_ui::ImguiBackend overlay_backend;
+  sdk_ui::LvglBackend overlay_backend;
   compositor::LayerSurface &status_surface;
   compositor::LayerSurface &overlay_surface;
   ui::SystemStatusSource *status_source = nullptr;
@@ -430,6 +451,12 @@ public:
   lv_obj_t *wifi = nullptr;
   lv_obj_t *charge = nullptr;
   lv_obj_t *battery = nullptr;
+  lv_obj_t *overlay_root = nullptr;
+  lv_obj_t *overlay_panel = nullptr;
+  lv_obj_t *overlay_title = nullptr;
+  lv_obj_t *overlay_message = nullptr;
+  lv_obj_t *overlay_time = nullptr;
+  lv_obj_t *overlay_hint = nullptr;
   ui::SystemStatusSnapshot system_status;
   ui::StatusBarPreferences preferences;
   ui::StatusBarAppearance appearance{kStatusBackground, false};

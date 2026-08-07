@@ -2,17 +2,18 @@
 
 Orange OS (`oos`) is a native C++ system shell intended to replace B2G on
 supported KaiOS phones. OOS owns display composition, input, lifecycle, device
-services, and application storage. Applications are ZIP packages containing a
-WAMR WebAssembly module, normally an ARMv7 AOT image plus a portable Wasm
-fallback.
+services, and application storage. Applications are ZIP packages with either a
+QuickJS ES-module entry or a WAMR WebAssembly entry. Wasm manifests use a
+suffixless base; OOS selects CPU-core AOT, architecture AOT, then portable
+core-Wasm in that order.
 
-This branch is deliberately browser-free. It contains no WPE WebKit runtime,
-JavaScript engine, HTML launcher, or KaiOS Web application compatibility layer.
+This branch is deliberately browser-free. QuickJS provides restricted ES
+modules without a DOM, HTML engine, browser Web APIs, or KaiOS Web application
+compatibility layer.
 The production Launcher is a process-local C++/LVGL application. SystemUI is a
 separate process-local application that owns the status and overlay surfaces.
-Dear ImGui has a native GPU-mesh backend for diagnostics and system tools.
-Rust/egui remains the first WIT framework adapter and regression application
-for third-party Wasm apps.
+Solid uses the host layout/Tailwind renderer, Clay uses the same native drawing
+backend from Wasm, and Rust/egui remains a small WIT mesh example.
 The phone shell uses `#E65100` as its single interaction accent and obtains
 battery, charging, Wi-Fi, signal-strength, roaming, and radio-technology state
 from a non-blocking device status monitor.
@@ -23,7 +24,8 @@ from a non-blocking device status monitor.
 - `apps/settings`: the production LVGL device and application settings UI.
 - `apps/systemui`: status bar, notifications, lock screen, and global overlays.
 - `apps/tests`: framework integration and WIT regression applications.
-- `sdk`: versioned WIT interfaces and reusable egui/LVGL/ImGui backends.
+- `sdk`: versioned WIT interfaces plus Solid, Clay, egui, and LVGL adapters;
+  `sdk/js-vite-plugin` is the independently publishable OOS Vite integration.
 - `system/src/oos`: native runtime, compositor, application registry, storage,
   media, services, and device-independent hardware contracts.
 - `system/devices/nokia-2780-flip`: Android 10/HWC2 device implementation.
@@ -59,6 +61,7 @@ Build the native guest and both device targets:
 
 ```sh
 ./scripts/fetch-wamr.sh
+./scripts/fetch-quickjs.sh
 ./scripts/fetch-ui-frameworks.sh
 ./scripts/fetch-media-dependencies.sh
 make system DEVICE=nokia-2780-flip
@@ -68,7 +71,9 @@ make system DEVICE=nokia-8110-4g
 Useful outputs are:
 
 - `build/native-apps/egui-demo.wasm`: portable egui SDK test module.
-- `build/native-apps/egui-demo.aot`: optimized ARMv7 WAMR AOT test module.
+- `build/native-apps/egui-demo.armv7a.aot`: optimized ARMv7 WAMR AOT test module.
+- `build/native-apps/egui-demo.cortex-a7.aot` and
+  `egui-demo.cortex-a53.aot`: CPU-tuned WAMR AOT test modules.
 - `build/android-<device>/bin/oos`: device-specific system process.
 - `build/android-<device>/bin/tests/<device>/`: device tests, when enabled.
 
@@ -87,6 +92,13 @@ Run the native runtime and repository tests with:
 
 ```sh
 make test-wasm
+```
+
+JavaScript SDK and Vite-plugin checks run independently:
+
+```sh
+cd sdk/js && npm ci && npm run check && npm test && npm run pack:check
+cd ../js-vite-plugin && npm ci && npm run check && npm test && npm run pack:check
 ```
 
 Configure production builds without device diagnostics using:

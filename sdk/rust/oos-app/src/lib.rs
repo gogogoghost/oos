@@ -1,4 +1,4 @@
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 pub const MAX_TEXTURE_SIZE: usize = 2_048;
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_VERTICES: usize = 65_535;
@@ -17,11 +17,11 @@ pub mod bindings {
 }
 
 pub use bindings::exports::oos::platform::lifecycle::{Guest as App, KeyAction, KeyEvent};
+pub use bindings::oos::platform::device::{AccessState, CapabilityState, Feature};
 pub use bindings::oos::platform::device_storage::{
     Entry as DeviceStorageEntry, Volume as DeviceStorageVolume, WriteMode as DeviceStorageWriteMode,
 };
 pub use bindings::oos::platform::font_assets::FontRole;
-pub use bindings::oos::platform::device::{AccessState, CapabilityState, Feature};
 pub use bindings::oos::platform::gles::{
     BlendEquation, BlendFactor, BufferUsage, Capabilities as GlesCapabilities,
     Command as GlesCommand, CommandOpcode, CompareFunction, CullFace, FrontFace, Primitive,
@@ -580,98 +580,150 @@ pub mod gles2 {
         )
     }
 
-    pub fn get_capabilities() -> GlesCapabilities {
-        gles::get_capabilities()
+    pub fn get_capabilities(canvas: u32) -> GlesCapabilities {
+        gles::get_capabilities(canvas)
+    }
+
+    pub fn texture_set(
+        canvas: u32,
+        texture: u32,
+        format: TextureFormat,
+        position: [u32; 2],
+        size: [u32; 2],
+        row_stride: u32,
+        options: TextureFlags,
+        pixels: &[u8],
+    ) -> Result<(), ErrorCode> {
+        if canvas == 0 || texture == 0 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        gles::texture_set(
+            canvas,
+            texture,
+            format,
+            gles::Point {
+                x: position[0],
+                y: position[1],
+            },
+            gles::Size {
+                width: size[0],
+                height: size[1],
+            },
+            row_stride,
+            options,
+            pixels,
+        )
+    }
+
+    pub fn texture_free(canvas: u32, texture: u32) -> Result<(), ErrorCode> {
+        if canvas == 0 || texture == 0 {
+            return Err(ErrorCode::InvalidArgument);
+        }
+        gles::texture_free(canvas, texture)
     }
 
     pub fn buffer_set(
+        canvas: u32,
         buffer: u32,
         size: u32,
         usage: BufferUsage,
         initial_data: &[u8],
     ) -> Result<(), ErrorCode> {
-        if buffer == 0
+        if canvas == 0
+            || buffer == 0
             || size == 0
             || size as usize > MAX_GLES_BUFFER_BYTES
             || (!initial_data.is_empty() && initial_data.len() != size as usize)
         {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::buffer_set(buffer, size, usage, initial_data)
+        gles::buffer_set(canvas, buffer, size, usage, initial_data)
     }
 
-    pub fn buffer_write(buffer: u32, offset: u32, data: &[u8]) -> Result<(), ErrorCode> {
-        if buffer == 0
+    pub fn buffer_write(
+        canvas: u32,
+        buffer: u32,
+        offset: u32,
+        data: &[u8],
+    ) -> Result<(), ErrorCode> {
+        if canvas == 0
+            || buffer == 0
             || data.is_empty()
             || offset as usize > MAX_GLES_BUFFER_BYTES
             || data.len() > MAX_GLES_BUFFER_BYTES - offset as usize
         {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::buffer_write(buffer, offset, data)
+        gles::buffer_write(canvas, buffer, offset, data)
     }
 
-    pub fn buffer_free(buffer: u32) -> Result<(), ErrorCode> {
-        if buffer == 0 {
+    pub fn buffer_free(canvas: u32, buffer: u32) -> Result<(), ErrorCode> {
+        if canvas == 0 || buffer == 0 {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::buffer_free(buffer)
+        gles::buffer_free(canvas, buffer)
     }
 
-    pub fn shader_set(shader: u32, stage: ShaderStage, source: &str) -> Result<(), ErrorCode> {
-        if shader == 0 || source.is_empty() || source.len() > MAX_GLES_SHADER_BYTES {
+    pub fn shader_set(
+        canvas: u32,
+        shader: u32,
+        stage: ShaderStage,
+        source: &str,
+    ) -> Result<(), ErrorCode> {
+        if canvas == 0 || shader == 0 || source.is_empty() || source.len() > MAX_GLES_SHADER_BYTES {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::shader_set(shader, stage, source)
+        gles::shader_set(canvas, shader, stage, source)
     }
 
-    pub fn shader_free(shader: u32) -> Result<(), ErrorCode> {
-        if shader == 0 {
+    pub fn shader_free(canvas: u32, shader: u32) -> Result<(), ErrorCode> {
+        if canvas == 0 || shader == 0 {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::shader_free(shader)
+        gles::shader_free(canvas, shader)
     }
 
     pub fn program_set(
+        canvas: u32,
         program: u32,
         vertex_shader: u32,
         fragment_shader: u32,
     ) -> Result<(), ErrorCode> {
-        if program == 0 || vertex_shader == 0 || fragment_shader == 0 {
+        if canvas == 0 || program == 0 || vertex_shader == 0 || fragment_shader == 0 {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::program_set(program, vertex_shader, fragment_shader)
+        gles::program_set(canvas, program, vertex_shader, fragment_shader)
     }
 
-    pub fn program_free(program: u32) -> Result<(), ErrorCode> {
-        if program == 0 {
+    pub fn program_free(canvas: u32, program: u32) -> Result<(), ErrorCode> {
+        if canvas == 0 || program == 0 {
             return Err(ErrorCode::InvalidArgument);
         }
-        gles::program_free(program)
+        gles::program_free(canvas, program)
     }
 
-    pub fn attribute_location(program: u32, name: &str) -> i32 {
-        if program == 0 || name.is_empty() || name.len() > 255 {
+    pub fn attribute_location(canvas: u32, program: u32, name: &str) -> i32 {
+        if canvas == 0 || program == 0 || name.is_empty() || name.len() > 255 {
             return -1;
         }
-        gles::attribute_location(program, name)
+        gles::attribute_location(canvas, program, name)
     }
 
-    pub fn uniform_location(program: u32, name: &str) -> i32 {
-        if program == 0 || name.is_empty() || name.len() > 255 {
+    pub fn uniform_location(canvas: u32, program: u32, name: &str) -> i32 {
+        if canvas == 0 || program == 0 || name.is_empty() || name.len() > 255 {
             return -1;
         }
-        gles::uniform_location(program, name)
+        gles::uniform_location(canvas, program, name)
     }
 
-    pub fn submit(commands: &[GlesCommand], data: &[u32]) -> Result<(), ErrorCode> {
-        if commands.len() < 2 {
+    pub fn submit(canvas: u32, commands: &[GlesCommand], data: &[u32]) -> Result<(), ErrorCode> {
+        if canvas == 0 || commands.len() < 2 {
             return Err(ErrorCode::InvalidArgument);
         }
         if commands.len() > MAX_DRAW_COMMANDS || data.len() > MAX_GLES_COMMAND_DATA_WORDS {
             return Err(ErrorCode::LimitExceeded);
         }
-        gles::submit(commands, data)
+        gles::submit(canvas, commands, data)
     }
 
     pub fn push_f32(data: &mut Vec<u32>, values: &[f32]) -> u32 {

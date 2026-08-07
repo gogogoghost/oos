@@ -21,4 +21,14 @@ clang -std=c17 -O2 -Werror -Wno-unknown-attributes \
   -I"$ROOT_DIR/third_party/lvgl" -I"$ROOT_DIR/system/config/lvgl" \
   -c "$ROOT_DIR/sdk/c/lvgl/oos_lvgl_backend.c" \
   -o "$BUILD_DIR/oos_lvgl_backend.o"
-echo "C SDK generated bindings and media API compile test passed"
+clang -std=c17 -O2 -Werror -Wno-unknown-attributes \
+  -I"$ROOT_DIR/sdk/c/generated" -I"$ROOT_DIR/sdk/c/clay" \
+  -I"$ROOT_DIR/third_party/clay" \
+  -c "$ROOT_DIR/sdk/c/clay/oos_clay_backend.c" \
+  -o "$BUILD_DIR/oos_clay_backend.o"
+clang -std=c17 -O2 -Werror -Wno-unknown-attributes \
+  -I"$ROOT_DIR/sdk/c/generated" -I"$ROOT_DIR/sdk/c/clay" \
+  -I"$ROOT_DIR/third_party/clay" \
+  -c "$ROOT_DIR/sdk/c/tests/clay_backend_compile_test.c" \
+  -o "$BUILD_DIR/clay_backend_compile_test.o"
+echo "C SDK generated bindings, media, LVGL, and Clay compile tests passed"

@@ -6,8 +6,10 @@
 /build-*/
 /generated/
 /dist/
+/sdk/js-vite-plugin/dist/
 /apps/target/
 /target/
+node_modules/
 **/target/
 /system/build/
 /system/third_party/

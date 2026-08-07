@@ -1,5 +1,5 @@
 use oos_app::bindings::oos::platform::{
-    assets, audio, bluetooth, camera, codec, device, graphics, ip, modem, power, runtime,
+    assets, audio, bluetooth, camera, canvas, codec, device, graphics, ip, modem, power, runtime,
     system_services, vibrator, wifi,
 };
 use oos_app::{
@@ -8,6 +8,7 @@ use oos_app::{
 };
 
 struct App;
+static mut GLES_CANVAS: u32 = 0;
 
 fn unavailable<T>(result: Result<T, ErrorCode>) {
     assert!(matches!(result, Err(ErrorCode::Unavailable)));
@@ -38,7 +39,23 @@ fn graphics_smoke() {
     .unwrap();
     oos_app::texture_free(99).unwrap();
 
-    let capabilities = gles2::get_capabilities();
+    let size = graphics::surface_size();
+    let gles_canvas = canvas::create(
+        canvas::ContextKind::Gles2,
+        canvas::Geometry {
+            x: 0,
+            y: 0,
+            width: size.width,
+            height: size.height,
+            z_order: 0,
+            visible: true,
+        },
+    )
+    .unwrap();
+    unsafe {
+        GLES_CANVAS = gles_canvas;
+    }
+    let capabilities = gles2::get_capabilities(gles_canvas);
     assert!(capabilities.depth_bits >= 16);
     assert!(capabilities.stencil_bits >= 8);
 
@@ -46,10 +63,10 @@ fn graphics_smoke() {
         "attribute vec2 aPosition; void main() { gl_Position = vec4(aPosition, 0.0, 1.0); }";
     let fragment_shader =
         "precision mediump float; void main() { gl_FragColor = vec4(0.1, 0.8, 0.2, 1.0); }";
-    gles2::shader_set(1, ShaderStage::Vertex, vertex_shader).unwrap();
-    gles2::shader_set(2, ShaderStage::Fragment, fragment_shader).unwrap();
-    gles2::program_set(3, 1, 2).unwrap();
-    let position = gles2::attribute_location(3, "aPosition");
+    gles2::shader_set(gles_canvas, 1, ShaderStage::Vertex, vertex_shader).unwrap();
+    gles2::shader_set(gles_canvas, 2, ShaderStage::Fragment, fragment_shader).unwrap();
+    gles2::program_set(gles_canvas, 3, 1, 2).unwrap();
+    let position = gles2::attribute_location(gles_canvas, 3, "aPosition");
     assert!(position >= 0);
 
     let vertices = [-0.8f32, -0.8, 0.8, -0.8, 0.0, 0.8];
@@ -58,6 +75,7 @@ fn graphics_smoke() {
         vertex_bytes.extend_from_slice(&value.to_bits().to_le_bytes());
     }
     gles2::buffer_set(
+        gles_canvas,
         4,
         vertex_bytes.len() as u32,
         oos_app::BufferUsage::StaticDraw,
@@ -73,11 +91,11 @@ fn graphics_smoke() {
         gles2::draw_arrays(oos_app::Primitive::Triangles, 0, 3),
         gles2::end_frame(),
     ];
-    gles2::submit(&commands, &[]).unwrap();
-    gles2::buffer_free(4).unwrap();
-    gles2::program_free(3).unwrap();
-    gles2::shader_free(2).unwrap();
-    gles2::shader_free(1).unwrap();
+    gles2::submit(gles_canvas, &commands, &[]).unwrap();
+    gles2::buffer_free(gles_canvas, 4).unwrap();
+    gles2::program_free(gles_canvas, 3).unwrap();
+    gles2::shader_free(gles_canvas, 2).unwrap();
+    gles2::shader_free(gles_canvas, 1).unwrap();
 }
 
 fn mocked() {
@@ -504,7 +522,14 @@ impl AppLifecycle for App {
         Ok(1000)
     }
 
-    fn shutdown() {}
+    fn shutdown() {
+        unsafe {
+            if GLES_CANVAS != 0 {
+                let _ = canvas::destroy(GLES_CANVAS);
+                GLES_CANVAS = 0;
+            }
+        }
+    }
 }
 
 oos_app::bindings::export!(App with_types_in oos_app::bindings);

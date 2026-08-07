@@ -71,7 +71,8 @@ public:
     lv_indev_state_t state = LV_INDEV_STATE_RELEASED;
   };
 
-  explicit Impl(runtime::GraphicsHost &graphics) : graphics(graphics) {}
+  explicit Impl(runtime::GraphicsHost &graphics, LvglBackendOptions options)
+      : graphics(graphics), transparent(options.transparent) {}
 
   static void flush(lv_display_t *display, const lv_area_t *area,
                     uint8_t *pixels) {
@@ -80,12 +81,29 @@ public:
       return;
     const uint32_t width = static_cast<uint32_t>(lv_area_get_width(area));
     const uint32_t height = static_cast<uint32_t>(lv_area_get_height(area));
-    const uint32_t stride = width * sizeof(uint16_t);
+    const uint32_t bytes_per_pixel = self->transparent ? 4u : 2u;
+    const uint32_t stride = width * bytes_per_pixel;
     const size_t bytes = static_cast<size_t>(stride) * height;
-    if (!self->graphics.setTexture(kTextureHandle, OOS_TEXTURE_RGB565,
-                                   static_cast<uint32_t>(area->x1),
-                                   static_cast<uint32_t>(area->y1), width,
-                                   height, stride, 0, pixels, bytes)) {
+    if (self->transparent) {
+      const size_t pixel_count = static_cast<size_t>(width) * height;
+      for (size_t index = 0; index < pixel_count; ++index) {
+        const lv_color32_t source =
+            reinterpret_cast<const lv_color32_t *>(pixels)[index];
+        const uint32_t alpha = source.alpha;
+        pixels[index * 4] =
+            static_cast<uint8_t>((source.red * alpha + 127) / 255);
+        pixels[index * 4 + 1] =
+            static_cast<uint8_t>((source.green * alpha + 127) / 255);
+        pixels[index * 4 + 2] =
+            static_cast<uint8_t>((source.blue * alpha + 127) / 255);
+        pixels[index * 4 + 3] = source.alpha;
+      }
+    }
+    if (!self->graphics.setTexture(
+            kTextureHandle,
+            self->transparent ? OOS_TEXTURE_RGBA8888 : OOS_TEXTURE_RGB565,
+            static_cast<uint32_t>(area->x1), static_cast<uint32_t>(area->y1),
+            width, height, stride, 0, pixels, bytes)) {
       self->error = "LVGL dirty texture upload failed";
       self->healthy = false;
     }
@@ -130,9 +148,11 @@ public:
     ++g_lvgl_users;
     lv_started = true;
 
-    const size_t row_pixels = static_cast<size_t>(graphics.width()) * kDrawRows;
-    draw_buffer_a.resize(row_pixels);
-    draw_buffer_b.resize(row_pixels);
+    const uint32_t bytes_per_pixel = transparent ? 4u : 2u;
+    const size_t buffer_bytes =
+        static_cast<size_t>(graphics.width()) * kDrawRows * bytes_per_pixel;
+    draw_buffer_a.resize(buffer_bytes);
+    draw_buffer_b.resize(buffer_bytes);
     display = lv_display_create(static_cast<int32_t>(graphics.width()),
                                 static_cast<int32_t>(graphics.height()));
     if (!display) {
@@ -141,11 +161,15 @@ public:
       return false;
     }
     lv_display_set_user_data(display, this);
-    lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+    lv_display_set_color_format(display, transparent ? LV_COLOR_FORMAT_ARGB8888
+                                                     : LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(display, draw_buffer_a.data(), draw_buffer_b.data(),
-                           row_pixels * sizeof(uint16_t),
-                           LV_DISPLAY_RENDER_MODE_PARTIAL);
+                           buffer_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
+    if (transparent) {
+      lv_obj_set_style_bg_opa(lv_display_get_screen_active(display),
+                              LV_OPA_TRANSP, 0);
+    }
 
     group = lv_group_create();
     input = lv_indev_create();
@@ -160,15 +184,17 @@ public:
     lv_indev_set_user_data(input, this);
     lv_indev_set_read_cb(input, readKey);
 
-    std::vector<uint16_t> blank(
-        static_cast<size_t>(graphics.width()) * graphics.height(), 0);
+    std::vector<uint8_t> blank(static_cast<size_t>(graphics.width()) *
+                                   graphics.height() * bytes_per_pixel,
+                               0);
     if (!graphics.setTexture(
-            kTextureHandle, OOS_TEXTURE_RGB565, 0, 0, graphics.width(),
-            graphics.height(), graphics.width() * sizeof(uint16_t),
+            kTextureHandle,
+            transparent ? OOS_TEXTURE_RGBA8888 : OOS_TEXTURE_RGB565, 0, 0,
+            graphics.width(), graphics.height(),
+            graphics.width() * bytes_per_pixel,
             OOS_TEXTURE_REPLACE | OOS_TEXTURE_LINEAR_MINIFICATION |
                 OOS_TEXTURE_LINEAR_MAGNIFICATION,
-            reinterpret_cast<const uint8_t *>(blank.data()),
-            blank.size() * sizeof(uint16_t))) {
+            blank.data(), blank.size())) {
       error = "LVGL surface texture allocation failed";
       shutdown();
       return false;
@@ -225,25 +251,28 @@ public:
     const OosGfxDrawCommand command = {
         0, 6, kTextureHandle, {0, 0}, {width, height}};
     return graphics.submit(vertices.data(), vertices.size(), indices.data(),
-                           indices.size(), &command, 1, 0xff000000u);
+                           indices.size(), &command, 1,
+                           transparent ? 0x00000000u : 0xff000000u);
   }
 
   runtime::GraphicsHost &graphics;
   lv_display_t *display = nullptr;
   lv_indev_t *input = nullptr;
   lv_group_t *group = nullptr;
-  std::vector<uint16_t> draw_buffer_a;
-  std::vector<uint16_t> draw_buffer_b;
+  std::vector<uint8_t> draw_buffer_a;
+  std::vector<uint8_t> draw_buffer_b;
   std::deque<QueuedKey> keys;
   std::string error;
+  bool transparent = false;
   bool lv_started = false;
   bool texture_live = false;
   bool initialized = false;
   bool healthy = false;
 };
 
-LvglBackend::LvglBackend(runtime::GraphicsHost &graphics)
-    : impl_(std::make_unique<Impl>(graphics)) {}
+LvglBackend::LvglBackend(runtime::GraphicsHost &graphics,
+                         LvglBackendOptions options)
+    : impl_(std::make_unique<Impl>(graphics, options)) {}
 
 LvglBackend::~LvglBackend() { shutdown(); }
 

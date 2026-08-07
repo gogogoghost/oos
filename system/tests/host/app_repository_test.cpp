@@ -1,5 +1,6 @@
 #include "oos/apps/app_manifest.h"
 #include "oos/apps/app_repository.h"
+#include "oos/apps/wasm_artifact.h"
 #include "oos/resources/package_assets.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/sqlite.h"
@@ -8,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <unistd.h>
@@ -27,6 +29,46 @@ bool hasPermission(const oos::apps::AppRecord &record, const char *permission) {
       return true;
   }
   return false;
+}
+
+bool artifactPriorityIsCorrect(const std::string &root) {
+  const std::string directory = root + "/artifact-priority";
+  const std::string base = directory + "/main";
+  std::filesystem::create_directories(directory);
+  const std::string core = base + ".cortex-a53.aot";
+  const std::string arch = base + ".armv7a.aot";
+  const std::string wasm = base + ".wasm";
+  std::ofstream(core).put('c');
+  std::ofstream(arch).put('a');
+  std::ofstream(wasm).put('w');
+
+  std::string resolved;
+  std::string error;
+  const oos::apps::WasmTargetProfile target{"cortex-a53", "armv7a"};
+  bool success =
+      check(oos::apps::resolveWasmArtifact(base, target, resolved, error) &&
+                resolved == core,
+            "CPU core AOT must have highest priority");
+  std::filesystem::remove(core);
+  success &=
+      check(oos::apps::resolveWasmArtifact(base, target, resolved, error) &&
+                resolved == arch,
+            "CPU architecture AOT must be the second choice");
+  std::filesystem::remove(arch);
+  success &=
+      check(oos::apps::resolveWasmArtifact(base, target, resolved, error) &&
+                resolved == wasm,
+            "portable Wasm must be the final fallback");
+  success &= check(
+      oos::apps::isWasmArtifactForBase(core, base) &&
+          oos::apps::isWasmArtifactForBase(arch, base) &&
+          oos::apps::isWasmArtifactForBase(wasm, base) &&
+          !oos::apps::isWasmArtifactForBase(base + ".aot", base),
+      "only target-qualified AOT and portable Wasm artifacts are accepted");
+  success &= check(
+      !oos::apps::resolveWasmArtifact(base + ".wasm", target, resolved, error),
+      "runtime Wasm paths with a suffix must be rejected");
+  return success;
 }
 
 bool seedLegacyWebRecord(const std::string &root, std::string &error) {
@@ -166,7 +208,8 @@ bool registrySchemaIsSimplified(const std::string &root, std::string &error) {
 
 int main(int argc, char **argv) {
   if (argc != 3) {
-    std::fprintf(stderr, "usage: %s OOS.zip entry.aot|entry.wasm\n", argv[0]);
+    std::fprintf(stderr, "usage: %s OOS.zip app/main.ARCH.aot|app/main.wasm\n",
+                 argv[0]);
     return 2;
   }
   char root_template[] = "/tmp/oos-app-test.XXXXXX";
@@ -192,6 +235,43 @@ int main(int argc, char **argv) {
           R"({"id":"cc.jaxy.oos.old","name":"old","version":"1.0.0","runtime_kind":"wamr"})",
           invalid, error),
       "obsolete runtime fields must be rejected");
+  success &= artifactPriorityIsCorrect(root);
+  oos::apps::AppManifest js_manifest;
+  success &= check(
+      oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.js","name":"JS","version":"1.0.0","entry":{"runtime":"js","path":"app/main.mjs"},"modules":[{"name":"worker","runtime":"wasm","path":"modules/worker"}]})",
+          js_manifest, error),
+      error.c_str());
+  success &= check(js_manifest.entry.runtime ==
+                           oos::apps::AppRuntimeKind::JavaScript &&
+                       js_manifest.entry.path == "app/main.mjs" &&
+                       js_manifest.modules.size() == 1,
+                   "JavaScript entry and cross-runtime modules are parsed");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.escape","name":"bad","version":"1.0.0","entry":{"runtime":"js","path":"app/../main.js"}})",
+          invalid, error),
+      "entry path traversal must be rejected");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.unknown","name":"bad","version":"1.0.0","entry":{"runtime":"js","path":"app/main.js"},"ui":"raw"})",
+          invalid, error),
+      "unknown or obsolete application-level UI fields must be rejected");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.unknown","name":"bad","version":"1.0.0","entry":{"runtime":"js","path":"app/main.js","extra":true}})",
+          invalid, error),
+      "unknown entry fields must be rejected");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.permission","name":"bad","version":"1.0.0","entry":{"runtime":"js","path":"app/main.js"},"permissions":{"settings":{"access":"all"}}})",
+          invalid, error),
+      "unknown permission access modes must be rejected");
+  success &= check(
+      !oos::apps::parseAppManifest(
+          R"({"schema":1,"id":"cc.jaxy.oos.suffix","name":"bad","version":"1.0.0","entry":{"runtime":"wasm","path":"app/main.wasm"}})",
+          invalid, error),
+      "Wasm manifest paths with file suffixes must be rejected");
 
   success &= check(seedLegacyWebRecord(root, error), error.c_str());
   oos::apps::AppRepository repository(root);
@@ -212,6 +292,10 @@ int main(int argc, char **argv) {
   success &= check(hasPermission(installed, "camera") &&
                        hasPermission(installed, "wifi-manage"),
                    "OOS manifest permissions survive registry resolution");
+  success &= check(installed.manifest.entry.runtime ==
+                           oos::apps::AppRuntimeKind::WebAssembly &&
+                       installed.manifest.handlers.size() == 1,
+                   "entry and handlers survive registry resolution");
 
   std::vector<oos::apps::AppRecord> records;
   const bool listed = repository.list(records);
@@ -222,15 +306,19 @@ int main(int argc, char **argv) {
   const bool launch_prepared =
       repository.prepareLaunch("cc.jaxy.oos.test", launch);
   success &= check(launch_prepared, repository.lastError().c_str());
-  success &= check(access(launch.executable_path.c_str(), R_OK) == 0,
-                   "AOT cache file is materialized");
+  success &=
+      check(access((launch.cache_directory + "/" + argv[2]).c_str(), R_OK) == 0,
+            "selected package artifact is materialized");
   success &= check(!launch.entrypoint.empty(), "native entrypoint is resolved");
-  success &= check(launch.entrypoint == argv[2],
-                   "package entry is accepted and selected");
+  success &=
+      check(launch.entrypoint == "app/main" &&
+                launch.executable_path == launch.cache_directory + "/app/main",
+            "repository exposes a suffixless Wasm base path");
   success &= check(
       access((launch.module_directory + "/compiler.wasm").c_str(), R_OK) == 0 &&
-          access((launch.module_directory + "/runtime.aot").c_str(), R_OK) == 0,
-      "packaged child modules are validated and materialized");
+          access((launch.module_directory + "/runtime.cortex-a53.aot").c_str(),
+                 R_OK) == 0,
+      "packaged modules are validated and materialized");
   oos::resources::PackageAssetService assets(launch.asset_directory);
   uint32_t asset_handle = 0;
   uint64_t asset_size = 0;
@@ -246,7 +334,7 @@ int main(int argc, char **argv) {
   success &= check(!assets.open("../entry.aot", asset_handle, asset_size),
                    "asset traversal must be rejected");
   success &= check(launch.data_directory.find(
-                       "users/0/wasm/cc.jaxy.oos.test") != std::string::npos,
+                       "users/0/apps/cc.jaxy.oos.test") != std::string::npos,
                    "per-app data directory");
 
   oos::storage::AppStorage storage(launch.data_directory);

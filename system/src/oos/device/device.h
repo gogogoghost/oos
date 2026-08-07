@@ -63,6 +63,8 @@ struct DeviceDescriptor {
   uint32_t primary_height = 0;
   uint32_t secondary_width = 0;
   uint32_t secondary_height = 0;
+  const char *cpu_core = "";
+  const char *cpu_arch = "";
 };
 
 // Values that vary while the public Manager APIs remain identical.

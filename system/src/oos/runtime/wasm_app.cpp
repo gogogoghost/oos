@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -18,8 +19,10 @@
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -31,7 +34,10 @@
 #include "oos/media/media_service.h"
 #include "oos/resources/font_assets.h"
 #include "oos/resources/package_assets.h"
+#include "oos/runtime/application_scene.h"
 #include "oos/runtime/graphics_host.h"
+#include "oos/runtime/module_host.h"
+#include "oos/runtime/native_ui.h"
 #include "oos/services/system_service.h"
 #include "oos/storage/app_storage.h"
 #include "oos/storage/device_storage.h"
@@ -46,32 +52,34 @@ constexpr size_t kErrorBufferSize = 512;
 constexpr uint32_t kMaxLogBytes = 4096;
 constexpr size_t kMaxModuleBytes = 32 * 1024 * 1024;
 constexpr uint32_t kMaximumSynchronousWaitMs = 1'000;
-constexpr const char *kRuntimeInterface = "oos:platform/runtime@0.2.0";
-constexpr const char *kGraphicsInterface = "oos:platform/graphics@0.2.0";
-constexpr const char *kGlesInterface = "oos:platform/gles@0.2.0";
-constexpr const char *kDeviceInterface = "oos:platform/device@0.2.0";
-constexpr const char *kAudioInterface = "oos:platform/audio@0.2.0";
-constexpr const char *kCameraInterface = "oos:platform/camera@0.2.0";
-constexpr const char *kPowerInterface = "oos:platform/power@0.2.0";
-constexpr const char *kVibratorInterface = "oos:platform/vibrator@0.2.0";
-constexpr const char *kWifiInterface = "oos:platform/wifi@0.2.0";
-constexpr const char *kIpInterface = "oos:platform/ip@0.2.0";
-constexpr const char *kBluetoothInterface = "oos:platform/bluetooth@0.2.0";
-constexpr const char *kModemInterface = "oos:platform/modem@0.2.0";
-constexpr const char *kCodecInterface = "oos:platform/codec@0.2.0";
-constexpr const char *kStorageInterface = "oos:platform/storage@0.2.0";
+constexpr const char *kRuntimeInterface = "oos:platform/runtime@0.3.0";
+constexpr const char *kGraphicsInterface = "oos:platform/graphics@0.3.0";
+constexpr const char *kGlesInterface = "oos:platform/gles@0.3.0";
+constexpr const char *kCanvasInterface = "oos:platform/canvas@0.3.0";
+constexpr const char *kUiInterface = "oos:platform/ui@0.3.0";
+constexpr const char *kModulesInterface = "oos:platform/modules@0.3.0";
+constexpr const char *kDeviceInterface = "oos:platform/device@0.3.0";
+constexpr const char *kAudioInterface = "oos:platform/audio@0.3.0";
+constexpr const char *kCameraInterface = "oos:platform/camera@0.3.0";
+constexpr const char *kPowerInterface = "oos:platform/power@0.3.0";
+constexpr const char *kVibratorInterface = "oos:platform/vibrator@0.3.0";
+constexpr const char *kWifiInterface = "oos:platform/wifi@0.3.0";
+constexpr const char *kIpInterface = "oos:platform/ip@0.3.0";
+constexpr const char *kBluetoothInterface = "oos:platform/bluetooth@0.3.0";
+constexpr const char *kModemInterface = "oos:platform/modem@0.3.0";
+constexpr const char *kCodecInterface = "oos:platform/codec@0.3.0";
+constexpr const char *kStorageInterface = "oos:platform/storage@0.3.0";
 constexpr const char *kDeviceStorageInterface =
-    "oos:platform/device-storage@0.2.0";
-constexpr const char *kFontAssetsInterface = "oos:platform/font-assets@0.2.0";
-constexpr const char *kAssetsInterface = "oos:platform/assets@0.2.0";
+    "oos:platform/device-storage@0.3.0";
+constexpr const char *kFontAssetsInterface = "oos:platform/font-assets@0.3.0";
+constexpr const char *kAssetsInterface = "oos:platform/assets@0.3.0";
 constexpr const char *kSystemServicesInterface =
-    "oos:platform/system-services@0.2.0";
-constexpr const char *kSubruntimeInterface = "oos:platform/subruntime@0.2.0";
-constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.2.0#init";
-constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.2.0#event";
-constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.2.0#frame";
+    "oos:platform/system-services@0.3.0";
+constexpr const char *kLifecycleInit = "oos:platform/lifecycle@0.3.0#init";
+constexpr const char *kLifecycleEvent = "oos:platform/lifecycle@0.3.0#event";
+constexpr const char *kLifecycleFrame = "oos:platform/lifecycle@0.3.0#frame";
 constexpr const char *kLifecycleShutdown =
-    "oos:platform/lifecycle@0.2.0#shutdown";
+    "oos:platform/lifecycle@0.3.0#shutdown";
 
 enum class WitError : uint8_t {
   Unavailable = 0,
@@ -82,37 +90,6 @@ enum class WitError : uint8_t {
   Timeout = 5,
   Busy = 6,
   Failed = 7,
-};
-
-class SubruntimeHost {
-public:
-  enum class ChildState : uint8_t {
-    Loading = 0,
-    Running = 1,
-    Completed = 2,
-    ExitRequested = 3,
-    Failed = 4,
-    Cancelled = 5,
-  };
-
-  struct ChildStatus {
-    ChildState state = ChildState::Loading;
-    uint32_t next_frame_delay_ms = 0;
-    uint32_t result_code = 0;
-  };
-
-  virtual ~SubruntimeHost() = default;
-  virtual bool create(const std::string &module, uint32_t main_stack_bytes,
-                      uint32_t &handle) = 0;
-  virtual bool initialize(uint32_t handle) = 0;
-  virtual bool event(uint32_t handle, uint32_t code, uint32_t action,
-                     uint64_t monotonic_us) = 0;
-  virtual bool frame(uint32_t handle, uint64_t monotonic_us,
-                     uint32_t &delay_ms) = 0;
-  virtual bool status(uint32_t handle, ChildStatus &value) = 0;
-  virtual bool complete(uint32_t result_code) = 0;
-  virtual bool destroy(uint32_t handle) = 0;
-  virtual const std::string &lastError() const = 0;
 };
 
 const char *witErrorName(uint8_t error) {
@@ -154,25 +131,12 @@ T *appMutableArray(wasm_exec_env_t environment, uint32_t offset, uint32_t count,
 
 struct AppHostContext {
   GraphicsHost *graphics = nullptr;
-  device::Device *device = nullptr;
-  std::unique_ptr<device::ServiceProvider> *services = nullptr;
-  std::unique_ptr<media::MediaService> *media_service = nullptr;
-  storage::AppStorage *storage = nullptr;
-  storage::DeviceStorageService *device_storage = nullptr;
-  resources::FontAssetService *font_assets = nullptr;
-  resources::PackageAssetService *assets = nullptr;
-  services::SystemServiceHub *system_services = nullptr;
-  ui::StatusBarAppearanceController *status_bar = nullptr;
-  const std::string *app_id = nullptr;
-  const std::string *asset_directory = nullptr;
-  uint32_t service_permission_mask = 0;
-  bool enforce_service_permissions = false;
+  ApplicationScene *scene = nullptr;
+  NativeUiEngine *ui = nullptr;
+  ModuleHost *modules = nullptr;
+  ApplicationContext *application = nullptr;
   std::thread::id lifecycle_thread;
   bool *exit_requested = nullptr;
-  bool *audio_focused = nullptr;
-  int wake_fd = -1;
-  SubruntimeHost *subruntime = nullptr;
-  std::vector<std::string> wake_locks;
 };
 
 AppHostContext *hostFor(wasm_exec_env_t environment) {
@@ -197,9 +161,19 @@ GraphicsHost *graphicsFor(wasm_exec_env_t environment) {
   return host ? host->graphics : nullptr;
 }
 
+ApplicationScene *sceneFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->scene : nullptr;
+}
+
+NativeUiEngine *uiFor(wasm_exec_env_t environment) {
+  AppHostContext *host = hostFor(environment);
+  return host ? host->ui : nullptr;
+}
+
 storage::AppStorage *storageFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  return host ? host->storage : nullptr;
+  return host && host->application ? host->application->storage() : nullptr;
 }
 
 constexpr uintptr_t kServiceErrorOffsetMask = 0xff;
@@ -223,9 +197,8 @@ uint32_t attachedServicePermission(wasm_exec_env_t environment) {
 bool servicePermissionGranted(wasm_exec_env_t environment,
                               uint32_t required_permission) {
   const AppHostContext *host = hostFor(environment);
-  return host &&
-         (!host->enforce_service_permissions || required_permission == 0 ||
-          (host->service_permission_mask & required_permission) != 0);
+  return host && host->application &&
+         host->application->permissionGranted(required_permission);
 }
 
 bool servicePermissionGranted(
@@ -250,11 +223,11 @@ WitError deviceStorageAccessError(wasm_exec_env_t environment) {
              : WitError::PermissionDenied;
 }
 
-storage::DeviceStorageService *deviceStorageFor(
-    wasm_exec_env_t environment, uint32_t required_permission) {
+storage::DeviceStorageService *deviceStorageFor(wasm_exec_env_t environment,
+                                                uint32_t required_permission) {
   AppHostContext *host = hostFor(environment);
   return host && servicePermissionGranted(environment, required_permission)
-             ? host->device_storage
+             ? host->application->deviceStorage()
              : nullptr;
 }
 
@@ -265,47 +238,28 @@ bool boundedWait(uint32_t wait_ms) {
 
 resources::FontAssetService *fontAssetsFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  return host ? host->font_assets : nullptr;
+  return host && host->application ? host->application->fontAssets() : nullptr;
 }
 
 resources::PackageAssetService *assetsFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  return host ? host->assets : nullptr;
+  return host && host->application ? host->application->assets() : nullptr;
 }
 
 device::ServiceProvider *servicesFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  if (!host || !host->device || !host->services ||
+  if (!host || !host->application ||
       !servicePermissionGranted(environment,
                                 attachedServicePermission(environment)))
     return nullptr;
-  if (!*host->services) {
-    try {
-      *host->services =
-          std::make_unique<device::ServiceProvider>(*host->device);
-    } catch (...) {
-      return nullptr;
-    }
-  }
-  return host->services->get();
+  return host->application->services();
 }
 
 media::MediaService *mediaFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
-  device::ServiceProvider *services = servicesFor(environment);
-  if (!host || !services || !host->media_service || !host->asset_directory)
+  if (!host || !host->application || !servicesFor(environment))
     return nullptr;
-  if (!*host->media_service) {
-    try {
-      *host->media_service = std::make_unique<media::MediaService>(
-          *services, *host->asset_directory);
-    } catch (...) {
-      return nullptr;
-    }
-    (*host->media_service)
-        ->setFocused(!host->audio_focused || *host->audio_focused);
-  }
-  return host->media_service->get();
+  return host->application->media();
 }
 
 WitError mediaErrorToWit(media::MediaError error) {
@@ -332,7 +286,7 @@ services::SystemServiceHub *systemServicesFor(wasm_exec_env_t environment) {
   AppHostContext *host = hostFor(environment);
   return host && servicePermissionGranted(environment,
                                           apps::DeviceServicePermission::System)
-             ? host->system_services
+             ? host->application->systemServices()
              : nullptr;
 }
 
@@ -353,6 +307,9 @@ bool writeResult(wasm_exec_env_t environment, uint32_t result_offset,
   return true;
 }
 
+void writeU32Result(wasm_exec_env_t environment, uint32_t result_offset,
+                    bool success, uint32_t value, WitError error);
+
 uint32_t nativeAbiVersion(wasm_exec_env_t) { return OOS_WASM_ABI_VERSION; }
 
 void nativeRequestExit(wasm_exec_env_t environment, uint32_t result_offset) {
@@ -368,10 +325,12 @@ void nativeSetStatusBarStyle(wasm_exec_env_t environment,
                              uint32_t result_offset) {
   AppHostContext *host = hostFor(environment);
   const bool valid = icon_theme <= 1 && (background_rgb & 0xff000000u) == 0;
-  if (valid && host && host->status_bar) {
-    host->status_bar->setStatusBarAppearance({background_rgb, icon_theme == 1});
+  ui::StatusBarAppearanceController *status_bar =
+      host && host->application ? host->application->statusBar() : nullptr;
+  if (valid && status_bar) {
+    status_bar->setStatusBarAppearance({background_rgb, icon_theme == 1});
   }
-  writeResult(environment, result_offset, valid && host && host->status_bar,
+  writeResult(environment, result_offset, valid && status_bar,
               valid ? WitError::Unavailable : WitError::InvalidArgument);
 }
 
@@ -379,10 +338,12 @@ void nativeSetSurfaceMode(wasm_exec_env_t environment, uint32_t mode,
                           uint32_t result_offset) {
   AppHostContext *host = hostFor(environment);
   const bool valid = mode <= 1;
+  ui::StatusBarAppearanceController *status_bar =
+      host && host->application ? host->application->statusBar() : nullptr;
   const bool success =
-      valid && host && host->status_bar &&
-      host->status_bar->setSurfaceMode(mode == 0 ? ui::SurfaceMode::Normal
-                                                 : ui::SurfaceMode::Immersive);
+      valid && status_bar &&
+      status_bar->setSurfaceMode(mode == 0 ? ui::SurfaceMode::Normal
+                                           : ui::SurfaceMode::Immersive);
   writeResult(environment, result_offset, success,
               valid ? WitError::Unavailable : WitError::InvalidArgument);
 }
@@ -458,12 +419,14 @@ int64_t nativeWallClockTimeMs(wasm_exec_env_t) {
 
 void nativeWakeMainThread(wasm_exec_env_t environment) {
   AppHostContext *host = hostForAnyThread(environment);
-  if (!host || host->wake_fd < 0)
+  const int wake_fd =
+      host && host->application ? host->application->wakeFd() : -1;
+  if (wake_fd < 0)
     return;
   const uint64_t value = 1;
   ssize_t written;
   do {
-    written = ::write(host->wake_fd, &value, sizeof(value));
+    written = ::write(wake_fd, &value, sizeof(value));
   } while (written < 0 && errno == EINTR);
 }
 
@@ -545,126 +508,340 @@ void nativeSubmit(wasm_exec_env_t environment, uint32_t vertex_offset,
                        clear_rgba));
 }
 
-void nativeGlesCapabilities(wasm_exec_env_t environment,
+CanvasGeometry canvasGeometry(uint32_t x, uint32_t y, uint32_t width,
+                              uint32_t height, uint32_t z_order,
+                              uint32_t visible) {
+  return {static_cast<int32_t>(x),
+          static_cast<int32_t>(y),
+          width,
+          height,
+          static_cast<int32_t>(z_order),
+          visible != 0};
+}
+
+void nativeCanvasCreate(wasm_exec_env_t environment, uint32_t context,
+                        uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+                        uint32_t z_order, uint32_t visible,
+                        uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const bool valid = context <= 2 && visible <= 1;
+  const uint32_t handle =
+      valid && scene
+          ? scene->createCanvas(
+                canvasGeometry(x, y, width, height, z_order, visible),
+                static_cast<CanvasContextKind>(context + 1))
+          : 0;
+  writeU32Result(environment, result_offset, handle != 0, handle,
+                 valid ? WitError::Unavailable : WitError::InvalidArgument);
+}
+
+void nativeCanvasConfigure(wasm_exec_env_t environment, uint32_t canvas,
+                           uint32_t x, uint32_t y, uint32_t width,
+                           uint32_t height, uint32_t z_order, uint32_t visible,
+                           uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const bool valid = canvas != 0 && visible <= 1;
+  writeResult(
+      environment, result_offset,
+      valid && scene &&
+          scene->configureCanvas(
+              canvas, canvasGeometry(x, y, width, height, z_order, visible)),
+      valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeCanvasDestroy(wasm_exec_env_t environment, uint32_t canvas,
+                         uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  writeResult(environment, result_offset,
+              canvas != 0 && scene && scene->destroyCanvas(canvas),
+              canvas == 0 ? WitError::InvalidArgument : WitError::Failed);
+}
+
+void nativeCanvasSubmit2d(wasm_exec_env_t environment, uint32_t canvas,
+                          uint32_t command_offset, uint32_t command_count,
+                          uint32_t text_offset, uint32_t text_size,
+                          uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const Canvas2dCommand *commands = appArray<Canvas2dCommand>(
+      environment, command_offset, command_count, 8192);
+  const uint8_t *text =
+      appArray<uint8_t>(environment, text_offset, text_size, 1024 * 1024);
+  const bool valid = canvas != 0 && commands && text;
+  writeResult(environment, result_offset,
+              valid && scene &&
+                  scene->submitCanvas2d(
+                      canvas, command_count ? commands : nullptr, command_count,
+                      text_size ? text : nullptr, text_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeCanvasTextureSet(wasm_exec_env_t environment, uint32_t canvas,
+                            uint32_t texture, uint32_t format, uint32_t x,
+                            uint32_t y, uint32_t width, uint32_t height,
+                            uint32_t row_stride, uint32_t flags,
+                            uint32_t pixel_offset, uint32_t pixel_size,
+                            uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const uint32_t bytes_per_pixel = oosTextureBytesPerPixel(format);
+  const bool row_overflow =
+      bytes_per_pixel &&
+      width > std::numeric_limits<uint32_t>::max() / bytes_per_pixel;
+  const uint32_t row_bytes = row_overflow ? 0 : width * bytes_per_pixel;
+  const uint64_t required =
+      height == 0
+          ? 0
+          : static_cast<uint64_t>(row_stride) * (height - 1) + row_bytes;
+  const uint8_t *pixels = appArray<uint8_t>(
+      environment, pixel_offset, pixel_size, OOS_GFX_MAX_TEXTURE_BYTES);
+  const bool valid = canvas != 0 && texture != 0 && width != 0 && height != 0 &&
+                     bytes_per_pixel != 0 && !row_overflow &&
+                     row_stride >= row_bytes && required == pixel_size &&
+                     width <= OOS_GFX_MAX_TEXTURE_SIZE &&
+                     height <= OOS_GFX_MAX_TEXTURE_SIZE &&
+                     (flags & ~OOS_TEXTURE_FLAGS_MASK) == 0 && pixels;
+  writeResult(environment, result_offset,
+              valid && scene &&
+                  scene->setCanvasTexture(canvas, texture, format, x, y, width,
+                                          height, row_stride, flags, pixels,
+                                          pixel_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeCanvasTextureFree(wasm_exec_env_t environment, uint32_t canvas,
+                             uint32_t texture, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const bool valid = canvas != 0 && texture != 0;
+  writeResult(environment, result_offset,
+              valid && scene && scene->freeCanvasTexture(canvas, texture),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeCanvasSubmitMesh(wasm_exec_env_t environment, uint32_t canvas,
+                            uint32_t vertex_offset, uint32_t vertex_count,
+                            uint32_t index_offset, uint32_t index_count,
+                            uint32_t command_offset, uint32_t command_count,
+                            uint32_t clear_rgba, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const OosGfxVertex *vertices = appArray<OosGfxVertex>(
+      environment, vertex_offset, vertex_count, OOS_GFX_MAX_VERTICES);
+  const uint16_t *indices = appArray<uint16_t>(
+      environment, index_offset, index_count, OOS_GFX_MAX_INDICES);
+  const OosGfxDrawCommand *commands = appArray<OosGfxDrawCommand>(
+      environment, command_offset, command_count, OOS_GFX_MAX_DRAW_COMMANDS);
+  const bool valid = canvas != 0 && vertices && indices && commands;
+  writeResult(environment, result_offset,
+              valid && scene &&
+                  scene->submitCanvasMesh(
+                      canvas, vertex_count ? vertices : nullptr, vertex_count,
+                      index_count ? indices : nullptr, index_count,
+                      command_count ? commands : nullptr, command_count,
+                      clear_rgba),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeUiSubmit(wasm_exec_env_t environment, uint32_t node_offset,
+                    uint32_t node_count, uint32_t string_offset,
+                    uint32_t string_size, uint32_t result_offset) {
+  NativeUiEngine *ui = uiFor(environment);
+  const UiNodeRecord *nodes =
+      appArray<UiNodeRecord>(environment, node_offset, node_count, 4096);
+  const uint8_t *strings =
+      appArray<uint8_t>(environment, string_offset, string_size, 1024 * 1024);
+  const bool valid = node_count != 0 && nodes && strings;
+  writeResult(environment, result_offset,
+              valid && ui &&
+                  ui->submit(nodes, node_count, string_size ? strings : nullptr,
+                             string_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeUiClear(wasm_exec_env_t environment) {
+  NativeUiEngine *ui = uiFor(environment);
+  if (ui)
+    ui->clear();
+}
+
+void nativeGlesCapabilities(wasm_exec_env_t environment, uint32_t canvas,
                             uint32_t result_offset) {
   auto *result =
       appMutableArray<OosGlesCapabilities>(environment, result_offset, 1, 1);
-  GraphicsHost *graphics = graphicsFor(environment);
+  ApplicationScene *scene = sceneFor(environment);
   if (!result) {
     trapInvalidReturnArea(environment);
     return;
   }
   *result = {};
-  if (graphics)
-    graphics->glesCapabilities(*result);
+  if (canvas != 0 && scene)
+    scene->canvasGlesCapabilities(canvas, *result);
 }
 
-void nativeGlesBufferSet(wasm_exec_env_t environment, uint32_t buffer,
-                         uint32_t size, uint32_t usage, uint32_t data_offset,
-                         uint32_t data_size, uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesTextureSet(wasm_exec_env_t environment, uint32_t canvas,
+                          uint32_t texture, uint32_t format, uint32_t x,
+                          uint32_t y, uint32_t width, uint32_t height,
+                          uint32_t row_stride, uint32_t flags,
+                          uint32_t pixel_offset, uint32_t pixel_size,
+                          uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const uint32_t bytes_per_pixel = oosTextureBytesPerPixel(format);
+  const bool row_overflow =
+      bytes_per_pixel &&
+      width > std::numeric_limits<uint32_t>::max() / bytes_per_pixel;
+  const uint32_t row_bytes = row_overflow ? 0 : width * bytes_per_pixel;
+  const uint64_t required =
+      height == 0
+          ? 0
+          : static_cast<uint64_t>(row_stride) * (height - 1) + row_bytes;
+  const uint8_t *pixels = appArray<uint8_t>(
+      environment, pixel_offset, pixel_size, OOS_GFX_MAX_TEXTURE_BYTES);
+  const bool valid = canvas != 0 && texture != 0 && width != 0 && height != 0 &&
+                     bytes_per_pixel != 0 && !row_overflow &&
+                     row_stride >= row_bytes && required == pixel_size &&
+                     width <= OOS_GFX_MAX_TEXTURE_SIZE &&
+                     height <= OOS_GFX_MAX_TEXTURE_SIZE &&
+                     (flags & ~OOS_TEXTURE_FLAGS_MASK) == 0 && pixels;
+  writeResult(environment, result_offset,
+              valid && scene &&
+                  scene->setCanvasGlesTexture(canvas, texture, format, x, y,
+                                              width, height, row_stride, flags,
+                                              pixels, pixel_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeGlesTextureFree(wasm_exec_env_t environment, uint32_t canvas,
+                           uint32_t texture, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const bool valid = canvas != 0 && texture != 0;
+  writeResult(environment, result_offset,
+              valid && scene && scene->freeCanvasGlesTexture(canvas, texture),
+              valid ? WitError::Failed : WitError::InvalidArgument);
+}
+
+void nativeGlesBufferSet(wasm_exec_env_t environment, uint32_t canvas,
+                         uint32_t buffer, uint32_t size, uint32_t usage,
+                         uint32_t data_offset, uint32_t data_size,
+                         uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
   const uint8_t *data = appArray<uint8_t>(environment, data_offset, data_size,
                                           OOS_GLES_MAX_BUFFER_BYTES);
   const bool valid = buffer != 0 && size != 0 &&
                      size <= OOS_GLES_MAX_BUFFER_BYTES && data &&
                      (data_size == 0 || data_size == size);
   writeResult(environment, result_offset,
-              valid && graphics &&
-                  graphics->setGlesBuffer(buffer, size, usage,
-                                          data_size ? data : nullptr,
-                                          data_size),
+              valid && canvas != 0 && scene &&
+                  scene->setCanvasGlesBuffer(canvas, buffer, size, usage,
+                                             data_size ? data : nullptr,
+                                             data_size),
               valid ? WitError::Failed : WitError::InvalidArgument);
 }
 
-void nativeGlesBufferWrite(wasm_exec_env_t environment, uint32_t buffer,
-                           uint32_t write_offset, uint32_t data_offset,
-                           uint32_t data_size, uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesBufferWrite(wasm_exec_env_t environment, uint32_t canvas,
+                           uint32_t buffer, uint32_t write_offset,
+                           uint32_t data_offset, uint32_t data_size,
+                           uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
   const uint8_t *data = appArray<uint8_t>(environment, data_offset, data_size,
                                           OOS_GLES_MAX_BUFFER_BYTES);
   const bool valid = buffer != 0 && data_size != 0 && data;
-  writeResult(
-      environment, result_offset,
-      valid && graphics &&
-          graphics->writeGlesBuffer(buffer, write_offset, data, data_size),
-      valid ? WitError::Failed : WitError::InvalidArgument);
-}
-
-void nativeGlesBufferFree(wasm_exec_env_t environment, uint32_t buffer,
-                          uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
   writeResult(environment, result_offset,
-              graphics && graphics->freeGlesBuffer(buffer));
+              valid && canvas != 0 && scene &&
+                  scene->writeCanvasGlesBuffer(canvas, buffer, write_offset,
+                                               data, data_size),
+              valid ? WitError::Failed : WitError::InvalidArgument);
 }
 
-void nativeGlesShaderSet(wasm_exec_env_t environment, uint32_t shader,
-                         uint32_t stage, uint32_t source_offset,
-                         uint32_t source_size, uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesBufferFree(wasm_exec_env_t environment, uint32_t canvas,
+                          uint32_t buffer, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  writeResult(environment, result_offset,
+              canvas != 0 && buffer != 0 && scene &&
+                  scene->freeCanvasGlesBuffer(canvas, buffer),
+              canvas != 0 && buffer != 0 ? WitError::Failed
+                                         : WitError::InvalidArgument);
+}
+
+void nativeGlesShaderSet(wasm_exec_env_t environment, uint32_t canvas,
+                         uint32_t shader, uint32_t stage,
+                         uint32_t source_offset, uint32_t source_size,
+                         uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
   const char *source = appArray<char>(environment, source_offset, source_size,
                                       OOS_GLES_MAX_SHADER_BYTES);
   const bool valid = shader != 0 && source_size != 0 && source;
   writeResult(environment, result_offset,
-              valid && graphics &&
-                  graphics->setGlesShader(shader, stage, source, source_size),
+              valid && canvas != 0 && scene &&
+                  scene->setCanvasGlesShader(canvas, shader, stage, source,
+                                             source_size),
               valid ? WitError::Failed : WitError::InvalidArgument);
 }
 
-void nativeGlesShaderFree(wasm_exec_env_t environment, uint32_t shader,
-                          uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesShaderFree(wasm_exec_env_t environment, uint32_t canvas,
+                          uint32_t shader, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
   writeResult(environment, result_offset,
-              graphics && graphics->freeGlesShader(shader));
+              canvas != 0 && shader != 0 && scene &&
+                  scene->freeCanvasGlesShader(canvas, shader),
+              canvas != 0 && shader != 0 ? WitError::Failed
+                                         : WitError::InvalidArgument);
 }
 
-void nativeGlesProgramSet(wasm_exec_env_t environment, uint32_t program,
-                          uint32_t vertex_shader, uint32_t fragment_shader,
-                          uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesProgramSet(wasm_exec_env_t environment, uint32_t canvas,
+                          uint32_t program, uint32_t vertex_shader,
+                          uint32_t fragment_shader, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
+  const bool valid =
+      canvas != 0 && program != 0 && vertex_shader != 0 && fragment_shader != 0;
   writeResult(environment, result_offset,
-              graphics && graphics->setGlesProgram(program, vertex_shader,
-                                                   fragment_shader));
+              valid && scene &&
+                  scene->setCanvasGlesProgram(canvas, program, vertex_shader,
+                                              fragment_shader),
+              valid ? WitError::Failed : WitError::InvalidArgument);
 }
 
-void nativeGlesProgramFree(wasm_exec_env_t environment, uint32_t program,
-                           uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesProgramFree(wasm_exec_env_t environment, uint32_t canvas,
+                           uint32_t program, uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
   writeResult(environment, result_offset,
-              graphics && graphics->freeGlesProgram(program));
+              canvas != 0 && program != 0 && scene &&
+                  scene->freeCanvasGlesProgram(canvas, program),
+              canvas != 0 && program != 0 ? WitError::Failed
+                                          : WitError::InvalidArgument);
 }
 
 int32_t nativeGlesAttributeLocation(wasm_exec_env_t environment,
-                                    uint32_t program, uint32_t name_offset,
-                                    uint32_t name_size) {
-  GraphicsHost *graphics = graphicsFor(environment);
+                                    uint32_t canvas, uint32_t program,
+                                    uint32_t name_offset, uint32_t name_size) {
+  ApplicationScene *scene = sceneFor(environment);
   const char *name = appArray<char>(environment, name_offset, name_size, 255);
-  return graphics && name
-             ? graphics->glesAttributeLocation(program, name, name_size)
-             : -1;
+  return canvas != 0 && scene && name ? scene->canvasGlesAttributeLocation(
+                                            canvas, program, name, name_size)
+                                      : -1;
 }
 
-int32_t nativeGlesUniformLocation(wasm_exec_env_t environment, uint32_t program,
-                                  uint32_t name_offset, uint32_t name_size) {
-  GraphicsHost *graphics = graphicsFor(environment);
+int32_t nativeGlesUniformLocation(wasm_exec_env_t environment, uint32_t canvas,
+                                  uint32_t program, uint32_t name_offset,
+                                  uint32_t name_size) {
+  ApplicationScene *scene = sceneFor(environment);
   const char *name = appArray<char>(environment, name_offset, name_size, 255);
-  return graphics && name
-             ? graphics->glesUniformLocation(program, name, name_size)
-             : -1;
+  return canvas != 0 && scene && name ? scene->canvasGlesUniformLocation(
+                                            canvas, program, name, name_size)
+                                      : -1;
 }
 
-void nativeGlesSubmit(wasm_exec_env_t environment, uint32_t command_offset,
-                      uint32_t command_count, uint32_t data_offset,
-                      uint32_t data_words, uint32_t result_offset) {
-  GraphicsHost *graphics = graphicsFor(environment);
+void nativeGlesSubmit(wasm_exec_env_t environment, uint32_t canvas,
+                      uint32_t command_offset, uint32_t command_count,
+                      uint32_t data_offset, uint32_t data_words,
+                      uint32_t result_offset) {
+  ApplicationScene *scene = sceneFor(environment);
   const OosGlesCommand *commands = appArray<OosGlesCommand>(
       environment, command_offset, command_count, OOS_GLES_MAX_COMMANDS);
   const uint32_t *data = appArray<uint32_t>(
       environment, data_offset, data_words, OOS_GLES_MAX_COMMAND_DATA_WORDS);
   const bool valid = command_count >= 2 && commands && data;
   writeResult(environment, result_offset,
-              valid && graphics &&
-                  graphics->submitGles(commands, command_count,
-                                       data_words ? data : nullptr, data_words),
+              valid && canvas != 0 && scene &&
+                  scene->submitCanvasGles(canvas, commands, command_count,
+                                          data_words ? data : nullptr,
+                                          data_words),
               valid ? WitError::Failed : WitError::InvalidArgument);
 }
 
@@ -717,8 +894,10 @@ void nativeDeviceDescriptor(wasm_exec_env_t environment,
     return;
   }
   const device::DeviceDescriptor empty_descriptor = {};
+  device::Device *device =
+      host && host->application ? host->application->device() : nullptr;
   const device::DeviceDescriptor &descriptor =
-      host && host->device ? host->device->descriptor() : empty_descriptor;
+      device ? device->descriptor() : empty_descriptor;
   if (!lowerString(environment, descriptor.id, result[0], result[1]) ||
       !lowerString(environment, descriptor.manufacturer, result[2],
                    result[3]) ||
@@ -736,12 +915,13 @@ void nativeDeviceDescriptor(wasm_exec_env_t environment,
 
 uint32_t nativeDeviceCapability(wasm_exec_env_t environment, uint32_t feature) {
   AppHostContext *host = hostFor(environment);
-  if (!host || !host->device ||
-      feature >= static_cast<uint32_t>(device::Feature::Count)) {
+  device::Device *device =
+      host && host->application ? host->application->device() : nullptr;
+  if (!device || feature >= static_cast<uint32_t>(device::Feature::Count)) {
     return static_cast<uint32_t>(device::CapabilityState::Unsupported);
   }
   return static_cast<uint32_t>(
-      host->device->capability(static_cast<device::Feature>(feature)));
+      device->capability(static_cast<device::Feature>(feature)));
 }
 
 uint32_t requiredPermissionForFeature(uint32_t feature) {
@@ -770,11 +950,12 @@ uint32_t requiredPermissionForFeature(uint32_t feature) {
 
 uint32_t nativeDeviceAccess(wasm_exec_env_t environment, uint32_t feature) {
   AppHostContext *host = hostFor(environment);
-  if (!host || !host->device ||
-      feature >= static_cast<uint32_t>(device::Feature::Count))
+  device::Device *device =
+      host && host->application ? host->application->device() : nullptr;
+  if (!device || feature >= static_cast<uint32_t>(device::Feature::Count))
     return 0; // unavailable
   const device::CapabilityState capability =
-      host->device->capability(static_cast<device::Feature>(feature));
+      device->capability(static_cast<device::Feature>(feature));
   if (capability != device::CapabilityState::Implemented &&
       capability != device::CapabilityState::Validated)
     return 0; // unavailable
@@ -871,6 +1052,102 @@ bool guestString(wasm_exec_env_t environment, uint32_t offset, uint32_t length,
   return true;
 }
 
+void nativeModulesEnumerate(wasm_exec_env_t environment,
+                            uint32_t result_offset) {
+  AppHostContext *host = hostFor(environment);
+  uint32_t *result =
+      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  const std::vector<ModuleInfo> *modules =
+      host && host->modules ? &host->modules->enumerateModules() : nullptr;
+  const uint32_t count = modules ? static_cast<uint32_t>(modules->size()) : 0;
+  constexpr uint32_t kRecordSize = 12;
+  const uint32_t bytes = count * kRecordSize;
+  const uint32_t pointer =
+      count ? guestRealloc(environment, 0, 0, 4, bytes) : 4;
+  uint8_t *records = count ? appMutableArray<uint8_t>(environment, pointer,
+                                                      bytes, 128 * kRecordSize)
+                           : reinterpret_cast<uint8_t *>(1);
+  if (!pointer || !records) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower package module list");
+    return;
+  }
+  if (count)
+    std::memset(records, 0, bytes);
+  for (uint32_t index = 0; index < count; ++index) {
+    uint8_t *record = records + index * kRecordSize;
+    if (!lowerStringAt(environment, (*modules)[index].name.c_str(), record,
+                       0)) {
+      wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                                 "failed to lower package module name");
+      return;
+    }
+    record[8] =
+        (*modules)[index].runtime == apps::AppRuntimeKind::JavaScript ? 0 : 1;
+  }
+  result[0] = pointer;
+  result[1] = count;
+}
+
+void nativeModulesInvoke(wasm_exec_env_t environment, uint32_t module_offset,
+                         uint32_t module_size, uint32_t operation_offset,
+                         uint32_t operation_size, uint32_t request_offset,
+                         uint32_t request_size, uint32_t result_offset) {
+  uint8_t *result =
+      appMutableArray<uint8_t>(environment, result_offset, 12, 12);
+  if (!result) {
+    trapInvalidReturnArea(environment);
+    return;
+  }
+  std::memset(result, 0, 12);
+  std::string module;
+  std::string operation;
+  const uint8_t *request =
+      appArray<uint8_t>(environment, request_offset, request_size, 1024 * 1024);
+  AppHostContext *host = hostFor(environment);
+  if (!guestString(environment, module_offset, module_size, module, 128) ||
+      !guestString(environment, operation_offset, operation_size, operation,
+                   256) ||
+      !request || !host || !host->modules) {
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::InvalidArgument);
+    return;
+  }
+  std::vector<uint8_t> response;
+  if (!host->modules->invokeModule(module, operation,
+                                   request_size ? request : nullptr,
+                                   request_size, response)) {
+    std::fprintf(stderr, "Wasm package module '%s' operation '%s' failed: %s\n",
+                 module.c_str(), operation.c_str(),
+                 host->modules->moduleError().c_str());
+    result[0] = 1;
+    result[4] = static_cast<uint8_t>(WitError::Failed);
+    return;
+  }
+  const uint32_t pointer =
+      response.empty() ? 1
+                       : guestRealloc(environment, 0, 0, 1,
+                                      static_cast<uint32_t>(response.size()));
+  uint8_t *destination =
+      response.empty() ? reinterpret_cast<uint8_t *>(1)
+                       : appMutableArray<uint8_t>(environment, pointer,
+                                                  response.size(), 1024 * 1024);
+  if (!pointer || !destination) {
+    wasm_runtime_set_exception(wasm_runtime_get_module_inst(environment),
+                               "failed to lower package module response");
+    return;
+  }
+  if (!response.empty())
+    std::memcpy(destination, response.data(), response.size());
+  result[0] = 0;
+  storeCanonical(result, 4, pointer);
+  storeCanonical(result, 8, static_cast<uint32_t>(response.size()));
+}
+
 constexpr uint32_t kMaxDeviceStorageEntries = 8192;
 constexpr uint32_t kDeviceStorageEntrySize = 24;
 constexpr uint32_t kMaxDeviceStorageBytes = 64 * 1024 * 1024;
@@ -894,8 +1171,8 @@ void nativeDeviceStorageEnumerate(wasm_exec_env_t environment, uint32_t volume,
   }
   std::memset(result, 0, 12);
   storage::DeviceStorageService *service = deviceStorageFor(
-      environment, apps::permissionBit(
-                       apps::DeviceServicePermission::DeviceStorageRead));
+      environment,
+      apps::permissionBit(apps::DeviceServicePermission::DeviceStorageRead));
   if (!service) {
     result[0] = 1;
     result[4] = static_cast<uint8_t>(deviceStorageAccessError(environment));
@@ -961,8 +1238,8 @@ void nativeDeviceStorageRead(wasm_exec_env_t environment, uint32_t volume,
   }
   std::memset(result, 0, 12);
   storage::DeviceStorageService *service = deviceStorageFor(
-      environment, apps::permissionBit(
-                       apps::DeviceServicePermission::DeviceStorageRead));
+      environment,
+      apps::permissionBit(apps::DeviceServicePermission::DeviceStorageRead));
   std::string path;
   const bool arguments = deviceStorageArguments(environment, volume,
                                                 path_offset, path_length, path);
@@ -1088,8 +1365,8 @@ void nativeDeviceStorageWrite(wasm_exec_env_t environment, uint32_t volume,
                               uint32_t path_offset, uint32_t path_length,
                               uint32_t mode, uint32_t bytes_offset,
                               uint32_t bytes_length, uint32_t result_offset) {
-  const bool create = mode == static_cast<uint32_t>(
-                                  storage::DeviceStorageWriteMode::Create);
+  const bool create =
+      mode == static_cast<uint32_t>(storage::DeviceStorageWriteMode::Create);
   const uint32_t required_permission = apps::permissionBit(
       create ? apps::DeviceServicePermission::DeviceStorageCreate
              : apps::DeviceServicePermission::DeviceStorageWrite);
@@ -1103,17 +1380,17 @@ void nativeDeviceStorageWrite(wasm_exec_env_t environment, uint32_t volume,
   const bool arguments =
       path_valid && bytes &&
       mode <= static_cast<uint32_t>(storage::DeviceStorageWriteMode::Append);
-  writeResult(environment, result_offset,
-              service && arguments &&
-                  service->write(
-                      static_cast<storage::DeviceStorageVolume>(volume), path,
-                      static_cast<storage::DeviceStorageWriteMode>(mode),
-                      bytes_length ? bytes : nullptr, bytes_length),
-              service ? (arguments ? WitError::Io : WitError::InvalidArgument)
-                      : (servicePermissionGranted(environment,
-                                                  required_permission)
-                             ? WitError::Unavailable
-                             : WitError::PermissionDenied));
+  writeResult(
+      environment, result_offset,
+      service && arguments &&
+          service->write(static_cast<storage::DeviceStorageVolume>(volume),
+                         path,
+                         static_cast<storage::DeviceStorageWriteMode>(mode),
+                         bytes_length ? bytes : nullptr, bytes_length),
+      service ? (arguments ? WitError::Io : WitError::InvalidArgument)
+              : (servicePermissionGranted(environment, required_permission)
+                     ? WitError::Unavailable
+                     : WitError::PermissionDenied));
 }
 
 void nativeDeviceStorageDelete(wasm_exec_env_t environment, uint32_t volume,
@@ -1124,8 +1401,8 @@ void nativeDeviceStorageDelete(wasm_exec_env_t environment, uint32_t volume,
     trapInvalidReturnArea(environment);
     return;
   }
-  const uint32_t required_permission = apps::permissionBit(
-      apps::DeviceServicePermission::DeviceStorageWrite);
+  const uint32_t required_permission =
+      apps::permissionBit(apps::DeviceServicePermission::DeviceStorageWrite);
   storage::DeviceStorageService *service =
       deviceStorageFor(environment, required_permission);
   std::string path;
@@ -1160,8 +1437,8 @@ void nativeDeviceStorageSpace(wasm_exec_env_t environment, uint32_t volume,
   const bool free = reinterpret_cast<uintptr_t>(
                         wasm_runtime_get_function_attachment(environment)) == 0;
   storage::DeviceStorageService *service = deviceStorageFor(
-      environment, apps::permissionBit(
-                       apps::DeviceServicePermission::DeviceStorageRead));
+      environment,
+      apps::permissionBit(apps::DeviceServicePermission::DeviceStorageRead));
   uint64_t bytes = 0;
   const bool arguments =
       volume <= static_cast<uint32_t>(storage::DeviceStorageVolume::Removable);
@@ -2034,9 +2311,10 @@ void nativeAudioLastError(wasm_exec_env_t environment, uint32_t result_offset) {
   try {
     AppHostContext *host = hostFor(environment);
     const std::string *message = nullptr;
-    if (host && host->media_service && *host->media_service &&
-        !(*host->media_service)->lastError().empty()) {
-      message = &(*host->media_service)->lastError();
+    media::MediaService *media =
+        host && host->application ? host->application->activeMedia() : nullptr;
+    if (media && !media->lastError().empty()) {
+      message = &media->lastError();
     }
     device::ServiceProvider *services = servicesFor(environment);
     const std::string fallback = !services ? "service unavailable"
@@ -2218,10 +2496,9 @@ void nativePowerAcquireWakeLock(wasm_exec_env_t environment,
   std::string name;
   const bool arguments =
       guestString(environment, name_offset, name_length, name, 128);
-  const bool success = services && arguments && services->acquireWakeLock(name);
   AppHostContext *host = hostFor(environment);
-  if (success && host)
-    host->wake_locks.push_back(name);
+  const bool success = services && arguments && host && host->application &&
+                       host->application->acquireWakeLock(name);
   writeResult(environment, result_offset, success,
               !services   ? serviceAccessError(environment)
               : arguments ? WitError::Io
@@ -2235,14 +2512,9 @@ void nativePowerReleaseWakeLock(wasm_exec_env_t environment,
   std::string name;
   const bool arguments =
       guestString(environment, name_offset, name_length, name, 128);
-  const bool success = services && arguments && services->releaseWakeLock(name);
   AppHostContext *host = hostFor(environment);
-  if (success && host) {
-    const auto found =
-        std::find(host->wake_locks.begin(), host->wake_locks.end(), name);
-    if (found != host->wake_locks.end())
-      host->wake_locks.erase(found);
-  }
+  const bool success = services && arguments && host && host->application &&
+                       host->application->releaseWakeLock(name);
   writeResult(environment, result_offset, success,
               !services   ? serviceAccessError(environment)
               : arguments ? WitError::Io
@@ -2287,9 +2559,9 @@ void nativePowerSuspend(wasm_exec_env_t environment, uint32_t timeout_ms,
   writeResult(environment, result_offset,
               services && boundedWait(timeout_ms) &&
                   services->suspend(static_cast<int>(timeout_ms)),
-              !services ? serviceAccessError(environment)
-                        : boundedWait(timeout_ms) ? WitError::Io
-                                                   : WitError::InvalidArgument);
+              !services                 ? serviceAccessError(environment)
+              : boundedWait(timeout_ms) ? WitError::Io
+                                        : WitError::InvalidArgument);
 }
 
 void nativeFlipState(wasm_exec_env_t environment, uint32_t result_offset) {
@@ -2305,9 +2577,9 @@ void nativeVibrate(wasm_exec_env_t environment, uint32_t duration_ms,
   writeResult(environment, result_offset,
               services && boundedWait(duration_ms) &&
                   services->vibrate(duration_ms),
-              !services ? serviceAccessError(environment)
-                        : boundedWait(duration_ms) ? WitError::Io
-                                                    : WitError::InvalidArgument);
+              !services                  ? serviceAccessError(environment)
+              : boundedWait(duration_ms) ? WitError::Io
+                                         : WitError::InvalidArgument);
 }
 
 void nativeVibrationStop(wasm_exec_env_t environment, uint32_t result_offset) {
@@ -2510,9 +2782,9 @@ void nativeIpUseDhcp(wasm_exec_env_t environment, uint32_t timeout_ms,
   writeResult(environment, result_offset,
               services && boundedWait(timeout_ms) &&
                   services->ipUseDhcp(static_cast<int>(timeout_ms)),
-              !services ? serviceAccessError(environment)
-                        : boundedWait(timeout_ms) ? WitError::Io
-                                                   : WitError::InvalidArgument);
+              !services                 ? serviceAccessError(environment)
+              : boundedWait(timeout_ms) ? WitError::Io
+                                        : WitError::InvalidArgument);
 }
 
 void nativeIpUseStatic(wasm_exec_env_t environment, uint32_t interface_offset,
@@ -2622,9 +2894,9 @@ void nativeBluetoothEnable(wasm_exec_env_t environment, uint32_t timeout_ms,
   writeResult(environment, result_offset,
               services && boundedWait(timeout_ms) &&
                   services->bluetoothEnable(static_cast<int>(timeout_ms)),
-              !services ? serviceAccessError(environment)
-                        : boundedWait(timeout_ms) ? WitError::Io
-                                                   : WitError::InvalidArgument);
+              !services                 ? serviceAccessError(environment)
+              : boundedWait(timeout_ms) ? WitError::Io
+                                        : WitError::InvalidArgument);
 }
 
 void nativeBluetoothDisable(wasm_exec_env_t environment, uint32_t timeout_ms,
@@ -2633,9 +2905,9 @@ void nativeBluetoothDisable(wasm_exec_env_t environment, uint32_t timeout_ms,
   writeResult(environment, result_offset,
               services && boundedWait(timeout_ms) &&
                   services->bluetoothDisable(static_cast<int>(timeout_ms)),
-              !services ? serviceAccessError(environment)
-                        : boundedWait(timeout_ms) ? WitError::Io
-                                                   : WitError::InvalidArgument);
+              !services                 ? serviceAccessError(environment)
+              : boundedWait(timeout_ms) ? WitError::Io
+                                        : WitError::InvalidArgument);
 }
 
 void nativeBluetoothPair(wasm_exec_env_t environment, uint32_t address_offset,
@@ -2759,8 +3031,8 @@ void nativeBluetoothLeCycle(wasm_exec_env_t environment,
   writeResult(
       environment, result_offset,
       services && arguments &&
-          services->bluetoothLeConnectionCycle(address, static_cast<int>(hold_ms),
-                                                static_cast<int>(timeout_ms)),
+          services->bluetoothLeConnectionCycle(
+              address, static_cast<int>(hold_ms), static_cast<int>(timeout_ms)),
       !services   ? serviceAccessError(environment)
       : arguments ? WitError::Io
                   : WitError::InvalidArgument);
@@ -2775,13 +3047,14 @@ void nativeModemSnapshot(wasm_exec_env_t environment, uint32_t timeout_ms,
     failServiceResult(result, 4, WitError::InvalidArgument);
     return;
   }
-  if (!servicePermissionGranted(environment, WasmServicePermission::ModemIdentity)) {
+  if (!servicePermissionGranted(environment,
+                                WasmServicePermission::ModemIdentity)) {
     failServiceResult(result, 4, WitError::PermissionDenied);
     return;
   }
   modem::ModemSnapshot value;
-  if (!servicesFor(environment)->modemSnapshot(value,
-                                                static_cast<int>(timeout_ms)) ||
+  if (!servicesFor(environment)
+           ->modemSnapshot(value, static_cast<int>(timeout_ms)) ||
       value.requests.size() > 256) {
     failServiceResult(result, 4);
     return;
@@ -2870,14 +3143,15 @@ void nativeRadioPower(wasm_exec_env_t environment, uint32_t enabled,
   if (!boundedWait(timeout_ms) ||
       !servicePermissionGranted(environment,
                                 WasmServicePermission::ModemRadioControl)) {
-    failServiceResult(result, 4, !boundedWait(timeout_ms)
-                                    ? WitError::InvalidArgument
-                                    : WitError::PermissionDenied);
+    failServiceResult(result, 4,
+                      !boundedWait(timeout_ms) ? WitError::InvalidArgument
+                                               : WitError::PermissionDenied);
     return;
   }
   modem::ModemRequestStatus status;
   if (!servicesFor(environment)
-           ->setRadioPower(enabled != 0, status, static_cast<int>(timeout_ms))) {
+           ->setRadioPower(enabled != 0, status,
+                           static_cast<int>(timeout_ms))) {
     failServiceResult(result, 4);
     return;
   }
@@ -2941,7 +3215,7 @@ void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
                   256 * 1024);
   AppHostContext *host = hostFor(environment);
   services::SystemServiceHub *system_services = systemServicesFor(environment);
-  if (!arguments || !host || !host->app_id || !system_services) {
+  if (!arguments || !host || !host->application || !system_services) {
     writeBytesResult(environment, result_offset, nullptr, 0, false,
                      !arguments ? WitError::InvalidArgument
                      : servicePermissionGranted(
@@ -2951,8 +3225,9 @@ void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
     return;
   }
   std::string response;
-  const int result = system_services->request(
-      *host->app_id, {}, service, operation, payload, response, true);
+  const int result =
+      system_services->request(host->application->appId(), {}, service,
+                               operation, payload, response, true);
   WitError wit_error = WitError::Failed;
   if (result == -EINVAL)
     wit_error = WitError::InvalidArgument;
@@ -2972,116 +3247,6 @@ void nativeSystemRequest(wasm_exec_env_t environment, uint32_t service_offset,
                    reinterpret_cast<const uint8_t *>(response.data()),
                    static_cast<uint32_t>(response.size()), result == 0,
                    wit_error);
-}
-
-void nativeSubruntimeLimits(wasm_exec_env_t environment,
-                            uint32_t result_offset) {
-  uint8_t *result =
-      appMutableArray<uint8_t>(environment, result_offset, 24, 24);
-  if (!result) {
-    trapInvalidReturnArea(environment);
-    return;
-  }
-  storeCanonical<uint32_t>(result, 0, 1);
-  storeCanonical<uint32_t>(result, 4, 64 * 1024);
-  storeCanonical<uint32_t>(result, 8, 4 * 1024 * 1024);
-  storeCanonical<uint32_t>(result, 12, 2 * 1024 * 1024);
-  storeCanonical<uint64_t>(result, 16, 64ULL * 1024 * 1024);
-}
-
-void nativeSubruntimeCreate(wasm_exec_env_t environment, uint32_t module_offset,
-                            uint32_t module_length, uint32_t main_stack_bytes,
-                            uint32_t result_offset) {
-  std::string module;
-  AppHostContext *host = hostFor(environment);
-  const bool valid =
-      guestString(environment, module_offset, module_length, module, 128);
-  uint32_t handle = 0;
-  const bool success =
-      valid && host && host->subruntime &&
-      host->subruntime->create(module, main_stack_bytes, handle);
-  writeU32Result(environment, result_offset, success, handle,
-                 valid ? WitError::Failed : WitError::InvalidArgument);
-}
-
-void nativeSubruntimeInitialize(wasm_exec_env_t environment, uint32_t handle,
-                                uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  writeResult(environment, result_offset,
-              host && host->subruntime && host->subruntime->initialize(handle),
-              WitError::Failed);
-}
-
-void nativeSubruntimeEvent(wasm_exec_env_t environment, uint32_t handle,
-                           uint32_t code, uint32_t action,
-                           uint64_t monotonic_us, uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  writeResult(environment, result_offset,
-              host && host->subruntime &&
-                  host->subruntime->event(handle, code, action, monotonic_us),
-              WitError::Failed);
-}
-
-void nativeSubruntimeFrame(wasm_exec_env_t environment, uint32_t handle,
-                           uint64_t monotonic_us, uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  uint32_t delay_ms = 0;
-  const bool success = host && host->subruntime &&
-                       host->subruntime->frame(handle, monotonic_us, delay_ms);
-  writeU32Result(environment, result_offset, success, delay_ms,
-                 WitError::Failed);
-}
-
-void nativeSubruntimeStatus(wasm_exec_env_t environment, uint32_t handle,
-                            uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  SubruntimeHost::ChildStatus status;
-  const bool success =
-      host && host->subruntime && host->subruntime->status(handle, status);
-  uint8_t *result =
-      appMutableArray<uint8_t>(environment, result_offset, 16, 16);
-  if (!result) {
-    trapInvalidReturnArea(environment);
-    return;
-  }
-  std::memset(result, 0, 16);
-  result[0] = success ? 0 : 1;
-  if (!success) {
-    result[4] = static_cast<uint8_t>(WitError::InvalidArgument);
-    return;
-  }
-  result[4] = static_cast<uint8_t>(status.state);
-  storeCanonical(result, 8, status.next_frame_delay_ms);
-  storeCanonical(result, 12, status.result_code);
-}
-
-void nativeSubruntimeComplete(wasm_exec_env_t environment, uint32_t result_code,
-                              uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  writeResult(environment, result_offset,
-              host && host->subruntime &&
-                  host->subruntime->complete(result_code),
-              WitError::InvalidArgument);
-}
-
-void nativeSubruntimeDestroy(wasm_exec_env_t environment, uint32_t handle,
-                             uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  writeResult(environment, result_offset,
-              host && host->subruntime && host->subruntime->destroy(handle),
-              WitError::InvalidArgument);
-}
-
-void nativeSubruntimeLastError(wasm_exec_env_t environment,
-                               uint32_t result_offset) {
-  AppHostContext *host = hostFor(environment);
-  const std::string empty;
-  const std::string &value =
-      host && host->subruntime ? host->subruntime->lastError() : empty;
-  uint32_t *result =
-      appMutableArray<uint32_t>(environment, result_offset, 2, 2);
-  if (!result || !lowerString(environment, value.c_str(), result[0], result[1]))
-    trapInvalidReturnArea(environment);
 }
 
 NativeSymbol kRuntimeSymbols[] = {
@@ -3121,28 +3286,53 @@ NativeSymbol kGraphicsSymbols[] = {
     {"submit", reinterpret_cast<void *>(nativeSubmit), "(iiiiiiii)", nullptr},
 };
 
+NativeSymbol kCanvasSymbols[] = {
+    {"create", reinterpret_cast<void *>(nativeCanvasCreate), "(iiiiiiii)",
+     nullptr},
+    {"configure", reinterpret_cast<void *>(nativeCanvasConfigure), "(iiiiiiii)",
+     nullptr},
+    {"destroy", reinterpret_cast<void *>(nativeCanvasDestroy), "(ii)", nullptr},
+    {"submit-2d", reinterpret_cast<void *>(nativeCanvasSubmit2d), "(iiiiii)",
+     nullptr},
+    {"texture-set", reinterpret_cast<void *>(nativeCanvasTextureSet),
+     "(iiiiiiiiiiii)", nullptr},
+    {"texture-free", reinterpret_cast<void *>(nativeCanvasTextureFree), "(iii)",
+     nullptr},
+    {"submit-mesh", reinterpret_cast<void *>(nativeCanvasSubmitMesh),
+     "(iiiiiiiii)", nullptr},
+};
+
+NativeSymbol kUiSymbols[] = {
+    {"submit", reinterpret_cast<void *>(nativeUiSubmit), "(iiiii)", nullptr},
+    {"clear", reinterpret_cast<void *>(nativeUiClear), "()", nullptr},
+};
+
 NativeSymbol kGlesSymbols[] = {
     {"get-capabilities", reinterpret_cast<void *>(nativeGlesCapabilities),
-     "(i)", nullptr},
-    {"buffer-set", reinterpret_cast<void *>(nativeGlesBufferSet), "(iiiiii)",
+     "(ii)", nullptr},
+    {"texture-set", reinterpret_cast<void *>(nativeGlesTextureSet),
+     "(iiiiiiiiiiii)", nullptr},
+    {"texture-free", reinterpret_cast<void *>(nativeGlesTextureFree), "(iii)",
      nullptr},
-    {"buffer-write", reinterpret_cast<void *>(nativeGlesBufferWrite), "(iiiii)",
+    {"buffer-set", reinterpret_cast<void *>(nativeGlesBufferSet), "(iiiiiii)",
      nullptr},
-    {"buffer-free", reinterpret_cast<void *>(nativeGlesBufferFree), "(ii)",
+    {"buffer-write", reinterpret_cast<void *>(nativeGlesBufferWrite),
+     "(iiiiii)", nullptr},
+    {"buffer-free", reinterpret_cast<void *>(nativeGlesBufferFree), "(iii)",
      nullptr},
-    {"shader-set", reinterpret_cast<void *>(nativeGlesShaderSet), "(iiiii)",
+    {"shader-set", reinterpret_cast<void *>(nativeGlesShaderSet), "(iiiiii)",
      nullptr},
-    {"shader-free", reinterpret_cast<void *>(nativeGlesShaderFree), "(ii)",
+    {"shader-free", reinterpret_cast<void *>(nativeGlesShaderFree), "(iii)",
      nullptr},
-    {"program-set", reinterpret_cast<void *>(nativeGlesProgramSet), "(iiii)",
+    {"program-set", reinterpret_cast<void *>(nativeGlesProgramSet), "(iiiii)",
      nullptr},
-    {"program-free", reinterpret_cast<void *>(nativeGlesProgramFree), "(ii)",
+    {"program-free", reinterpret_cast<void *>(nativeGlesProgramFree), "(iii)",
      nullptr},
     {"attribute-location",
-     reinterpret_cast<void *>(nativeGlesAttributeLocation), "(iii)i", nullptr},
+     reinterpret_cast<void *>(nativeGlesAttributeLocation), "(iiii)i", nullptr},
     {"uniform-location", reinterpret_cast<void *>(nativeGlesUniformLocation),
-     "(iii)i", nullptr},
-    {"submit", reinterpret_cast<void *>(nativeGlesSubmit), "(iiiii)", nullptr},
+     "(iiii)i", nullptr},
+    {"submit", reinterpret_cast<void *>(nativeGlesSubmit), "(iiiiii)", nullptr},
 };
 
 NativeSymbol kDeviceSymbols[] = {
@@ -3405,24 +3595,10 @@ NativeSymbol kSystemServicesSymbols[] = {
      serviceAttachment(4, WasmServicePermission::System)},
 };
 
-NativeSymbol kSubruntimeSymbols[] = {
-    {"get-limits", reinterpret_cast<void *>(nativeSubruntimeLimits), "(i)",
+NativeSymbol kModulesSymbols[] = {
+    {"enumerate", reinterpret_cast<void *>(nativeModulesEnumerate), "(i)",
      nullptr},
-    {"create", reinterpret_cast<void *>(nativeSubruntimeCreate), "(iiii)",
-     nullptr},
-    {"initialize", reinterpret_cast<void *>(nativeSubruntimeInitialize), "(ii)",
-     nullptr},
-    {"event", reinterpret_cast<void *>(nativeSubruntimeEvent), "(iiiIi)",
-     nullptr},
-    {"frame", reinterpret_cast<void *>(nativeSubruntimeFrame), "(iIi)",
-     nullptr},
-    {"status", reinterpret_cast<void *>(nativeSubruntimeStatus), "(ii)",
-     nullptr},
-    {"complete", reinterpret_cast<void *>(nativeSubruntimeComplete), "(ii)",
-     nullptr},
-    {"destroy", reinterpret_cast<void *>(nativeSubruntimeDestroy), "(ii)",
-     nullptr},
-    {"last-error", reinterpret_cast<void *>(nativeSubruntimeLastError), "(i)",
+    {"invoke", reinterpret_cast<void *>(nativeModulesInvoke), "(iiiiiii)",
      nullptr},
 };
 
@@ -3460,8 +3636,6 @@ WitNativeInterface kOptionalInterfaces[] = {
      static_cast<uint32_t>(std::size(kAssetsSymbols))},
     {kSystemServicesInterface, kSystemServicesSymbols,
      static_cast<uint32_t>(std::size(kSystemServicesSymbols))},
-    {kSubruntimeInterface, kSubruntimeSymbols,
-     static_cast<uint32_t>(std::size(kSubruntimeSymbols))},
 };
 
 uint32_t gRuntimeReferences = 0;
@@ -3483,6 +3657,15 @@ bool acquireRuntime(std::string &error) {
     bool registered = wasm_runtime_register_natives(
                           kGraphicsInterface, kGraphicsSymbols,
                           static_cast<uint32_t>(std::size(kGraphicsSymbols))) &&
+                      wasm_runtime_register_natives(
+                          kCanvasInterface, kCanvasSymbols,
+                          static_cast<uint32_t>(std::size(kCanvasSymbols))) &&
+                      wasm_runtime_register_natives(
+                          kUiInterface, kUiSymbols,
+                          static_cast<uint32_t>(std::size(kUiSymbols))) &&
+                      wasm_runtime_register_natives(
+                          kModulesInterface, kModulesSymbols,
+                          static_cast<uint32_t>(std::size(kModulesSymbols))) &&
                       wasm_runtime_register_natives(
                           kGlesInterface, kGlesSymbols,
                           static_cast<uint32_t>(std::size(kGlesSymbols))) &&
@@ -3674,6 +3857,55 @@ public:
 
   bool submitGles(const OosGlesCommand *commands, size_t command_count,
                   const uint32_t *data, size_t data_words) override {
+    if (!translateGlesCommands(commands, command_count, data, data_words))
+      return false;
+    return host_.submitGles(translated_gles_commands_.data(),
+                            translated_gles_commands_.size(), data, data_words);
+  }
+
+  bool submitGlesToTexture(uint32_t texture, uint32_t width, uint32_t height,
+                           const OosGlesCommand *commands, size_t command_count,
+                           const uint32_t *data, size_t data_words) override {
+    auto *mapped_texture = findHandle(textures_, texture);
+    const bool inserted = mapped_texture == nullptr;
+    if (inserted) {
+      textures_.emplace_back(texture, nextHostHandle());
+      mapped_texture = &textures_.back();
+    }
+    const bool success =
+        translateGlesCommands(commands, command_count, data, data_words) &&
+        host_.submitGlesToTexture(mapped_texture->second, width, height,
+                                  translated_gles_commands_.data(),
+                                  translated_gles_commands_.size(), data,
+                                  data_words);
+    if (!success && inserted)
+      textures_.pop_back();
+    return success;
+  }
+
+  void reset() {
+    for (const auto &program : programs_)
+      host_.freeGlesProgram(program.second);
+    for (const auto &shader : shaders_)
+      host_.freeGlesShader(shader.second);
+    for (const auto &buffer : buffers_)
+      host_.freeGlesBuffer(buffer.second);
+    for (const auto &texture : textures_)
+      host_.freeTexture(texture.second);
+    programs_.clear();
+    shaders_.clear();
+    buffers_.clear();
+    textures_.clear();
+    translated_draw_commands_.clear();
+    translated_gles_commands_.clear();
+  }
+
+private:
+  using HandleMap = std::vector<std::pair<uint32_t, uint32_t>>;
+
+  bool translateGlesCommands(const OosGlesCommand *commands,
+                             size_t command_count, const uint32_t *data,
+                             size_t data_words) {
     if (!commands || command_count < 2 ||
         command_count > OOS_GLES_MAX_COMMANDS ||
         data_words > OOS_GLES_MAX_COMMAND_DATA_WORDS ||
@@ -3703,29 +3935,8 @@ public:
         return false;
       command.args[argument] = found->second;
     }
-    return host_.submitGles(translated_gles_commands_.data(),
-                            translated_gles_commands_.size(), data, data_words);
+    return true;
   }
-
-  void reset() {
-    for (const auto &program : programs_)
-      host_.freeGlesProgram(program.second);
-    for (const auto &shader : shaders_)
-      host_.freeGlesShader(shader.second);
-    for (const auto &buffer : buffers_)
-      host_.freeGlesBuffer(buffer.second);
-    for (const auto &texture : textures_)
-      host_.freeTexture(texture.second);
-    programs_.clear();
-    shaders_.clear();
-    buffers_.clear();
-    textures_.clear();
-    translated_draw_commands_.clear();
-    translated_gles_commands_.clear();
-  }
-
-private:
-  using HandleMap = std::vector<std::pair<uint32_t, uint32_t>>;
 
   static std::pair<uint32_t, uint32_t> *findHandle(HandleMap &handles,
                                                    uint32_t guest) {
@@ -3876,56 +4087,367 @@ bool validateCoreMemoryPolicy(const uint8_t *bytes, size_t size,
   return false;
 }
 
+class WasmPackageModuleEngine final : public ModuleEngine {
+public:
+  WasmPackageModuleEngine(ApplicationContext &application, ModuleHost &modules,
+                          std::string directory)
+      : application(application), modules(modules),
+        directory(std::move(directory)) {}
+
+  ~WasmPackageModuleEngine() override {
+    instances.clear();
+    if (runtime_acquired)
+      releaseRuntime();
+  }
+
+  bool invoke(const apps::AppModule &module, const std::string &operation,
+              const uint8_t *request, size_t request_size,
+              std::vector<uint8_t> &response) override {
+    error.clear();
+    Instance *instance = load(module);
+    if (!instance)
+      return false;
+    if (std::this_thread::get_id() != instance->worker.get_id()) {
+      const std::string operation_copy = operation;
+      std::vector<uint8_t> request_copy;
+      if (request_size)
+        request_copy.assign(request, request + request_size);
+      bool success = false;
+      if (!runTask(*instance, [&, operation_copy, request_copy] {
+            success =
+                invoke(module, operation_copy,
+                       request_copy.empty() ? nullptr : request_copy.data(),
+                       request_copy.size(), response);
+          }))
+        return false;
+      return success;
+    }
+    bool expected = false;
+    if (!instance->invoking.compare_exchange_strong(expected, true)) {
+      error = "recursive invocation of the same Wasm module is not allowed";
+      return false;
+    }
+    struct InvokeGuard {
+      std::atomic<bool> &active;
+      explicit InvokeGuard(std::atomic<bool> &value) : active(value) {}
+      ~InvokeGuard() { active.store(false); }
+    } guard(instance->invoking);
+
+    uint32_t operation_pointer = 1;
+    uint32_t request_pointer = 1;
+    if (!operation.empty()) {
+      operation_pointer = guestRealloc(instance->environment, 0, 0, 1,
+                                       static_cast<uint32_t>(operation.size()));
+    }
+    if (request_size) {
+      request_pointer = guestRealloc(instance->environment, 0, 0, 1,
+                                     static_cast<uint32_t>(request_size));
+    }
+    uint8_t *operation_native =
+        operation.empty()
+            ? reinterpret_cast<uint8_t *>(1)
+            : appMutableArray<uint8_t>(instance->environment, operation_pointer,
+                                       operation.size(), 256);
+    uint8_t *request_native =
+        request_size
+            ? appMutableArray<uint8_t>(instance->environment, request_pointer,
+                                       request_size, 1024 * 1024)
+            : reinterpret_cast<uint8_t *>(1);
+    if ((!operation.empty() && (!operation_pointer || !operation_native)) ||
+        (request_size && (!request_pointer || !request_native))) {
+      if (operation_pointer != 1)
+        guestRealloc(instance->environment, operation_pointer,
+                     static_cast<uint32_t>(operation.size()), 1, 0);
+      if (request_pointer != 1)
+        guestRealloc(instance->environment, request_pointer,
+                     static_cast<uint32_t>(request_size), 1, 0);
+      error = "allocate Wasm module invocation arguments failed";
+      return false;
+    }
+    if (!operation.empty())
+      std::memcpy(operation_native, operation.data(), operation.size());
+    if (request_size)
+      std::memcpy(request_native, request, request_size);
+    uint32_t arguments[4] = {
+        operation_pointer, static_cast<uint32_t>(operation.size()),
+        request_pointer, static_cast<uint32_t>(request_size)};
+    const bool called = wasm_runtime_call_wasm(instance->environment,
+                                               instance->invoke, 4, arguments);
+    if (operation_pointer != 1)
+      guestRealloc(instance->environment, operation_pointer,
+                   static_cast<uint32_t>(operation.size()), 1, 0);
+    if (request_pointer != 1)
+      guestRealloc(instance->environment, request_pointer,
+                   static_cast<uint32_t>(request_size), 1, 0);
+    if (!called) {
+      const char *exception = wasm_runtime_get_exception(instance->instance);
+      error = std::string("invoke Wasm package module: ") +
+              (exception ? exception : "unknown Wasm exception");
+      return false;
+    }
+
+    const uint32_t result_pointer = arguments[0];
+    const uint8_t *result =
+        appArray<uint8_t>(instance->environment, result_pointer, 12, 12);
+    if (!result || result[0] > 1) {
+      error = "Wasm package module returned an invalid canonical result";
+      return false;
+    }
+    bool success = result[0] == 0;
+    if (success) {
+      uint32_t response_pointer = 0;
+      uint32_t response_size = 0;
+      std::memcpy(&response_pointer, result + 4, sizeof(response_pointer));
+      std::memcpy(&response_size, result + 8, sizeof(response_size));
+      const uint8_t *response_bytes = appArray<uint8_t>(
+          instance->environment, response_pointer, response_size, 1024 * 1024);
+      if (!response_bytes) {
+        error = "Wasm package module response exceeds the platform limit";
+        success = false;
+      } else {
+        response.clear();
+        if (response_size)
+          response.assign(response_bytes, response_bytes + response_size);
+      }
+    } else {
+      error = std::string("Wasm package module returned ") +
+              witErrorName(result[4]);
+    }
+    uint32_t post_arguments[1] = {result_pointer};
+    if (!wasm_runtime_call_wasm(instance->environment, instance->post_return, 1,
+                                post_arguments) &&
+        success) {
+      const char *exception = wasm_runtime_get_exception(instance->instance);
+      error = std::string("release Wasm package module result: ") +
+              (exception ? exception : "unknown Wasm exception");
+      success = false;
+    }
+    return success;
+  }
+
+  const std::string &lastError() const override { return error; }
+
+private:
+  struct Instance {
+    ~Instance() {
+      if (worker.joinable()) {
+        {
+          std::lock_guard<std::mutex> lock(worker_mutex);
+          worker_stop = true;
+        }
+        worker_wake.notify_one();
+        worker.join();
+      }
+      if (environment)
+        wasm_runtime_destroy_exec_env(environment);
+      if (instance)
+        wasm_runtime_deinstantiate(instance);
+      if (module)
+        wasm_runtime_unload(module);
+    }
+
+    MappedModule bytes;
+    AppHostContext host;
+    wasm_module_t module = nullptr;
+    wasm_module_inst_t instance = nullptr;
+    wasm_exec_env_t environment = nullptr;
+    wasm_function_inst_t invoke = nullptr;
+    wasm_function_inst_t post_return = nullptr;
+    std::thread worker;
+    std::mutex worker_mutex;
+    std::condition_variable worker_wake;
+    std::condition_variable worker_done;
+    std::function<void()> task;
+    bool worker_ready = false;
+    bool worker_failed = false;
+    bool worker_stop = false;
+    bool task_pending = false;
+    bool task_success = false;
+    std::atomic<bool> invoking{false};
+  };
+
+  static void runWorker(Instance *instance) {
+    const bool already_initialized = wasm_runtime_thread_env_inited();
+    const bool initialized =
+        already_initialized || wasm_runtime_init_thread_env();
+    {
+      std::lock_guard<std::mutex> lock(instance->worker_mutex);
+      instance->worker_failed = !initialized;
+      instance->worker_ready = true;
+      instance->host.lifecycle_thread = std::this_thread::get_id();
+    }
+    instance->worker_done.notify_all();
+    if (!initialized)
+      return;
+
+    for (;;) {
+      std::unique_lock<std::mutex> lock(instance->worker_mutex);
+      instance->worker_wake.wait(lock, [&] {
+        return instance->worker_stop || instance->task_pending;
+      });
+      if (instance->worker_stop)
+        break;
+      std::function<void()> task = std::move(instance->task);
+      lock.unlock();
+      bool success = true;
+      try {
+        task();
+      } catch (...) {
+        success = false;
+      }
+      lock.lock();
+      instance->task_success = success;
+      instance->task_pending = false;
+      lock.unlock();
+      instance->worker_done.notify_all();
+    }
+    if (!already_initialized)
+      wasm_runtime_destroy_thread_env();
+  }
+
+  bool startWorker(Instance &instance) {
+    try {
+      instance.worker = std::thread(runWorker, &instance);
+    } catch (const std::system_error &) {
+      error = "create Wasm package module worker failed";
+      return false;
+    }
+    std::unique_lock<std::mutex> lock(instance.worker_mutex);
+    instance.worker_done.wait(lock, [&] { return instance.worker_ready; });
+    if (instance.worker_failed) {
+      error = "initialize Wasm package module worker failed";
+      return false;
+    }
+    return true;
+  }
+
+  bool runTask(Instance &instance, std::function<void()> task) {
+    std::unique_lock<std::mutex> lock(instance.worker_mutex);
+    if (instance.worker_failed || instance.worker_stop ||
+        instance.task_pending) {
+      error = "Wasm package module worker is unavailable or busy";
+      return false;
+    }
+    try {
+      instance.task = std::move(task);
+    } catch (const std::bad_alloc &) {
+      error = "allocate Wasm package module worker task failed";
+      return false;
+    }
+    instance.task_pending = true;
+    instance.worker_wake.notify_one();
+    instance.worker_done.wait(lock, [&] { return !instance.task_pending; });
+    if (!instance.task_success)
+      error = "Wasm package module worker task failed";
+    return instance.task_success;
+  }
+
+  Instance *load(const apps::AppModule &declaration) {
+    const auto found = instances.find(declaration.name);
+    if (found != instances.end())
+      return found->second.get();
+    if (!runtime_acquired) {
+      if (!acquireRuntime(error))
+        return nullptr;
+      runtime_acquired = true;
+    }
+    constexpr std::string_view prefix = apps::kModulePrefix;
+    const std::string &declared_path = declaration.path;
+    if (declared_path.rfind(prefix, 0) != 0) {
+      error = "Wasm package module path is invalid";
+      return nullptr;
+    }
+    auto value = std::make_unique<Instance>();
+    const std::string base_path =
+        directory + "/" + declared_path.substr(prefix.size());
+    std::string path;
+    if (!apps::resolveWasmArtifact(base_path, application.wasmTarget(), path,
+                                   error))
+      return nullptr;
+    if (!value->bytes.open(path.c_str(), error))
+      return nullptr;
+    uint32_t maximum_pages = 0;
+    if (!validateCoreMemoryPolicy(value->bytes.data(), value->bytes.size(),
+                                  16 * 1024 * 1024, maximum_pages, error))
+      return nullptr;
+    std::array<char, kErrorBufferSize> error_buffer{};
+    value->module = wasm_runtime_load(value->bytes.data(), value->bytes.size(),
+                                      error_buffer.data(), error_buffer.size());
+    if (!value->module) {
+      error = std::string("load Wasm package module: ") + error_buffer.data();
+      return nullptr;
+    }
+    const InstantiationArgs arguments = {256 * 1024, 512 * 1024,
+                                         maximum_pages ? maximum_pages : 256};
+    value->instance = wasm_runtime_instantiate_ex(
+        value->module, &arguments, error_buffer.data(), error_buffer.size());
+    if (!value->instance) {
+      error = std::string("instantiate Wasm package module: ") +
+              error_buffer.data();
+      return nullptr;
+    }
+    value->host.application = &application;
+    value->host.modules = &modules;
+    value->host.lifecycle_thread = std::this_thread::get_id();
+    wasm_runtime_set_custom_data(value->instance, &value->host);
+    value->environment =
+        wasm_runtime_create_exec_env(value->instance, 256 * 1024);
+    value->invoke = wasm_runtime_lookup_function(
+        value->instance, "oos:platform/module-api@0.3.0#invoke");
+    value->post_return = wasm_runtime_lookup_function(
+        value->instance, "cabi_post_oos:platform/module-api@0.3.0#invoke");
+    if (!value->environment || !value->invoke || !value->post_return) {
+      error = "Wasm package module does not export the module WIT contract";
+      return nullptr;
+    }
+    if (!startWorker(*value))
+      return nullptr;
+    Instance *result = value.get();
+    instances.emplace(declaration.name, std::move(value));
+    return result;
+  }
+
+  ApplicationContext &application;
+  ModuleHost &modules;
+  std::string directory;
+  std::unordered_map<std::string, std::unique_ptr<Instance>> instances;
+  std::string error;
+  bool runtime_acquired = false;
+};
+
 } // namespace
 
-class WasmApp::Impl : public SubruntimeHost {
+std::unique_ptr<ModuleEngine>
+createWasmModuleEngine(ApplicationContext &application, ModuleHost &modules,
+                       std::string module_directory) {
+  return std::make_unique<WasmPackageModuleEngine>(application, modules,
+                                                   std::move(module_directory));
+}
+
+class WasmApp::Impl {
 public:
-  Impl(GraphicsHost &graphics, device::Device *device, WasmAppOptions options)
-      : graphics(graphics), device_ptr(device), options(std::move(options)) {
-    if (!this->options.data_directory.empty()) {
-      app_storage =
-          std::make_unique<storage::AppStorage>(this->options.data_directory);
-    }
-    if (!this->options.internal_media_directory.empty() &&
-        !this->options.removable_media_directory.empty()) {
-      device_storage = std::make_unique<storage::DeviceStorageService>(
-          this->options.internal_media_directory,
-          this->options.removable_media_directory);
-    }
-    if (!this->options.font_directory.empty()) {
-      font_assets = std::make_unique<resources::FontAssetService>(
-          this->options.font_directory);
-    }
-    if (!this->options.asset_directory.empty()) {
-      assets = std::make_unique<resources::PackageAssetService>(
-          this->options.asset_directory);
-    }
-    if (!this->options.system_data_root.empty() &&
-        apps::hasDeviceServicePermission(
-            this->options.service_permission_mask,
-            apps::DeviceServicePermission::System)) {
-      system_services = std::make_unique<services::SystemServiceHub>(
-          this->options.system_data_root, this->options.app_repository);
-    }
-    host = {&this->graphics,
-            device,
-            &services,
-            &media_service,
-            app_storage.get(),
-            device_storage.get(),
-            font_assets.get(),
-            assets.get(),
-            system_services.get(),
-            this->options.status_bar,
-            &this->options.app_id,
-            &this->options.asset_directory,
-            this->options.service_permission_mask,
-            this->options.enforce_service_permissions,
-            std::this_thread::get_id(),
-            &exit_requested,
-            &audio_focused,
-            this->options.wake_fd};
-    host.subruntime = this;
+  Impl(GraphicsHost &target, device::Device *device, WasmAppOptions options)
+      : graphics(target),
+        owned_scene(dynamic_cast<ApplicationScene *>(&target)
+                        ? nullptr
+                        : std::make_unique<ApplicationScene>(
+                              graphics, options.font_directory)),
+        scene(dynamic_cast<ApplicationScene *>(&target)
+                  ? static_cast<ApplicationScene *>(&target)
+                  : owned_scene.get()),
+        device_ptr(device), options(std::move(options)) {
+    application = std::make_unique<ApplicationContext>(device, this->options);
+    if (scene)
+      native_ui = std::make_unique<NativeUiEngine>(*scene);
+    package_modules = std::make_unique<PackageModules>(
+        *application, this->options.module_directory, this->options.modules);
+    host.graphics = scene;
+    host.scene = scene;
+    host.ui = native_ui.get();
+    host.modules = package_modules.get();
+    host.application = application.get();
+    host.lifecycle_thread = std::this_thread::get_id();
+    host.exit_requested = &exit_requested;
   }
 
   ~Impl() { shutdown(); }
@@ -3988,198 +4510,7 @@ public:
     return true;
   }
 
-  bool create(const std::string &name, uint32_t main_stack_bytes,
-              uint32_t &handle) override {
-    handle = 0;
-    child_error.clear();
-    if (child_slot_active) {
-      child_error = "the application already owns a child runtime";
-      return false;
-    }
-    if (options.module_directory.empty() || name.empty() || name.size() > 96 ||
-        !std::all_of(name.begin(), name.end(), [](unsigned char value) {
-          return std::isalnum(value) || value == '-' || value == '_' ||
-                 value == '.';
-        })) {
-      child_error = "child module name or package module directory is invalid";
-      return false;
-    }
-    std::string path;
-    for (const char *extension : {".aot", ".wasm"}) {
-      const std::string candidate =
-          options.module_directory + "/" + name + extension;
-      struct stat status{};
-      if (::stat(candidate.c_str(), &status) == 0 && S_ISREG(status.st_mode)) {
-        path = candidate;
-        break;
-      }
-    }
-    if (path.empty()) {
-      child_error = "packaged child module was not found";
-      return false;
-    }
-    WasmAppOptions child_options = options;
-    child_options.stack_size = main_stack_bytes;
-    child_options.module_directory.clear();
-    child_options.status_bar = nullptr;
-    child_path = std::move(path);
-    pending_child_options = std::move(child_options);
-    child_slot_active = true;
-    child_activation_pending = false;
-    child_state = ChildState::Loading;
-    child_next_delay_ms = 0;
-    child_result_code = 0;
-    handle = child_handle;
-    return true;
-  }
-
-  bool initialize(uint32_t handle) override {
-    if (!validChild(handle))
-      return false;
-    if (child_state != ChildState::Loading || child_activation_pending) {
-      child_error = "child runtime is not waiting for initialization";
-      return false;
-    }
-    child_activation_pending = true;
-    return true;
-  }
-
-  bool event(uint32_t handle, uint32_t code, uint32_t action,
-             uint64_t monotonic_us) override {
-    if (!validChild(handle) || code > UINT16_MAX || action > 2) {
-      child_error = "child event is invalid";
-      return false;
-    }
-    child_error = "events are routed by OOS while the child runtime is active";
-    return false;
-  }
-
-  bool frame(uint32_t handle, uint64_t monotonic_us,
-             uint32_t &delay_ms) override {
-    (void)monotonic_us;
-    if (!validChild(handle))
-      return false;
-    delay_ms = child_next_delay_ms;
-    return true;
-  }
-
-  bool status(uint32_t handle, ChildStatus &value) override {
-    if (!validChild(handle))
-      return false;
-    value = {child_state, child_next_delay_ms, child_result_code};
-    return true;
-  }
-
-  bool complete(uint32_t result_code) override {
-    if (!managed_child || completion_requested) {
-      child_error = "only an active packaged child can report completion";
-      return false;
-    }
-    completion_requested = true;
-    completion_result_code = result_code;
-    return true;
-  }
-
-  bool destroy(uint32_t handle) override {
-    if (!validChild(handle))
-      return false;
-    if (child) {
-      child->shutdown();
-      child.reset();
-      child_state = ChildState::Cancelled;
-    }
-    child_slot_active = false;
-    child_activation_pending = false;
-    child_path.clear();
-    ++child_handle;
-    if (child_handle == 0)
-      child_handle = 1;
-    child_error.clear();
-    return true;
-  }
-
-  const std::string &lastError() const override { return child_error; }
-
-  bool validChild(uint32_t handle) {
-    if (child_slot_active && handle == child_handle)
-      return true;
-    child_error = "child runtime handle is invalid";
-    return false;
-  }
-
-  void finishChild(ChildState state, uint32_t result_code,
-                   std::string failure = {}) {
-    if (!failure.empty())
-      child_error = std::move(failure);
-    if (child) {
-      child->shutdown();
-      child.reset();
-    }
-    child_state = state;
-    child_result_code = result_code;
-    child_next_delay_ms = 0;
-    child_activation_pending = false;
-  }
-
-  bool activateChild() {
-    child_activation_pending = false;
-    try {
-      if (device_ptr)
-        child = std::make_unique<WasmApp>(graphics, *device_ptr,
-                                          pending_child_options);
-      else
-        child = std::make_unique<WasmApp>(graphics, pending_child_options);
-    } catch (const std::bad_alloc &) {
-      finishChild(ChildState::Failed, 0, "allocate child runtime failed");
-      return false;
-    }
-    child->impl_->managed_child = true;
-    child->setAudioFocused(audio_focused);
-    if (!child->load(child_path.c_str()) || !child->initialize()) {
-      const std::string failure = child->lastError();
-      finishChild(ChildState::Failed, 0, failure);
-      return false;
-    }
-    child_state = ChildState::Running;
-    return true;
-  }
-
-  bool driveChild(int64_t monotonic_us, uint32_t &next_delay_ms) {
-    if (child_activation_pending && !activateChild()) {
-      next_delay_ms = 0;
-      return true;
-    }
-    if (child_state != ChildState::Running || !child)
-      return false;
-    uint32_t delay_ms = 0;
-    if (!child->render(monotonic_us, delay_ms)) {
-      const std::string failure = child->lastError();
-      finishChild(ChildState::Failed, 0, failure);
-      next_delay_ms = 0;
-      return true;
-    }
-    child_next_delay_ms = delay_ms;
-    if (child->impl_->completion_requested) {
-      finishChild(ChildState::Completed, child->impl_->completion_result_code);
-      next_delay_ms = 0;
-      return true;
-    }
-    if (child->takeExitRequest()) {
-      finishChild(ChildState::ExitRequested, 0);
-      next_delay_ms = 0;
-      return true;
-    }
-    next_delay_ms = delay_ms;
-    return true;
-  }
-
   void shutdown() {
-    if (child) {
-      child->shutdown();
-      child.reset();
-    }
-    child_slot_active = false;
-    child_activation_pending = false;
     if (instance && environment) {
       wasm_function_inst_t function =
           wasm_runtime_lookup_function(instance, kLifecycleShutdown);
@@ -4198,20 +4529,15 @@ public:
       wasm_runtime_unload(module);
       module = nullptr;
     }
-    media_service.reset();
-    if (services) {
-      for (const auto &name : host.wake_locks)
-        services->releaseWakeLock(name);
-      host.wake_locks.clear();
-      services->closeAllPcm();
-    }
-    services.reset();
-    if (assets)
-      assets->closeAll();
-    if (app_storage)
-      app_storage->closeSessionStatements();
+    if (application)
+      application->closeSession();
+    if (native_ui)
+      native_ui->clear();
+    if (scene)
+      scene->reset();
     graphics.reset();
     module_bytes.reset();
+    loaded_artifact_path.clear();
     declared_maximum_pages = 0;
     initialized = false;
     exit_requested = false;
@@ -4222,39 +4548,25 @@ public:
   }
 
   NamespacedGraphicsHost graphics;
+  std::unique_ptr<ApplicationScene> owned_scene;
+  ApplicationScene *scene = nullptr;
+  std::unique_ptr<NativeUiEngine> native_ui;
+  std::unique_ptr<PackageModules> package_modules;
   device::Device *device_ptr = nullptr;
-  std::unique_ptr<device::ServiceProvider> services;
-  std::unique_ptr<media::MediaService> media_service;
-  std::unique_ptr<storage::AppStorage> app_storage;
-  std::unique_ptr<storage::DeviceStorageService> device_storage;
-  std::unique_ptr<resources::FontAssetService> font_assets;
-  std::unique_ptr<resources::PackageAssetService> assets;
-  std::unique_ptr<services::SystemServiceHub> system_services;
+  std::unique_ptr<ApplicationContext> application;
   AppHostContext host;
   WasmAppOptions options;
   MappedModule module_bytes;
+  std::string loaded_artifact_path;
   wasm_module_t module = nullptr;
   wasm_module_inst_t instance = nullptr;
   wasm_exec_env_t environment = nullptr;
   std::string error;
-  std::unique_ptr<WasmApp> child;
-  WasmAppOptions pending_child_options;
-  std::string child_path;
-  std::string child_error;
-  ChildState child_state = ChildState::Loading;
-  uint32_t child_next_delay_ms = 0;
-  uint32_t child_result_code = 0;
-  uint32_t child_handle = 1;
   uint32_t declared_maximum_pages = 0;
   bool runtime_initialized = false;
   bool initialized = false;
   bool exit_requested = false;
   bool audio_focused = true;
-  bool child_slot_active = false;
-  bool child_activation_pending = false;
-  bool managed_child = false;
-  bool completion_requested = false;
-  uint32_t completion_result_code = 0;
 };
 
 WasmApp::WasmApp(GraphicsHost &graphics, WasmAppOptions options)
@@ -4266,11 +4578,11 @@ WasmApp::WasmApp(GraphicsHost &graphics, device::Device &device,
 
 WasmApp::~WasmApp() = default;
 
-bool WasmApp::load(const char *path) {
+bool WasmApp::load(const char *base_path) {
   impl_->shutdown();
   impl_->error.clear();
-  if (!path || path[0] == '\0') {
-    impl_->error = "WASM app path is empty";
+  if (!base_path || base_path[0] == '\0') {
+    impl_->error = "Wasm app base path is empty";
     return false;
   }
   constexpr uint32_t kMinimumStackBytes = 64 * 1024;
@@ -4281,19 +4593,19 @@ bool WasmApp::load(const char *path) {
     impl_->error = "WASM lifecycle stack policy is invalid";
     return false;
   }
-  if (impl_->app_storage && !impl_->app_storage->initialize()) {
-    impl_->error = "initialize app storage: " + impl_->app_storage->lastError();
+  if (!impl_->application || !impl_->application->initialize()) {
+    impl_->error = impl_->application ? impl_->application->lastError()
+                                      : "application context is unavailable";
     return false;
   }
-  if (impl_->system_services && !impl_->system_services->initialize()) {
-    impl_->error =
-        "initialize system services: " + impl_->system_services->lastError();
+  std::string artifact_path;
+  if (!apps::resolveWasmArtifact(base_path, impl_->application->wasmTarget(),
+                                 artifact_path, impl_->error) ||
+      !impl_->initializeRuntime() ||
+      !impl_->module_bytes.open(artifact_path.c_str(), impl_->error)) {
     return false;
   }
-  if (!impl_->initializeRuntime() ||
-      !impl_->module_bytes.open(path, impl_->error)) {
-    return false;
-  }
+  impl_->loaded_artifact_path = std::move(artifact_path);
   if (!validateCoreMemoryPolicy(impl_->module_bytes.data(),
                                 impl_->module_bytes.size(), kMaximumMemoryBytes,
                                 impl_->declared_maximum_pages, impl_->error))
@@ -4357,16 +4669,6 @@ bool WasmApp::initialize() {
 bool WasmApp::dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) {
   if (!impl_->initialized)
     return false;
-  if (impl_->child_state == SubruntimeHost::ChildState::Running &&
-      impl_->child) {
-    if (impl_->child->dispatchKey(event, monotonic_us))
-      return true;
-    const std::string failure = impl_->child->lastError();
-    impl_->finishChild(SubruntimeHost::ChildState::Failed, 0, failure);
-    return true;
-  }
-  if (impl_->child_activation_pending)
-    return true;
   const uint64_t timestamp = static_cast<uint64_t>(monotonic_us);
   uint32_t arguments[4] = {
       event.code,
@@ -4380,16 +4682,19 @@ bool WasmApp::dispatchKey(const input::KeyEvent &event, int64_t monotonic_us) {
 bool WasmApp::render(int64_t monotonic_us, uint32_t &next_delay_ms) {
   if (!impl_->initialized)
     return false;
-  if (impl_->child_activation_pending ||
-      impl_->child_state == SubruntimeHost::ChildState::Running)
-    return impl_->driveChild(monotonic_us, next_delay_ms);
   const uint64_t timestamp = static_cast<uint64_t>(monotonic_us);
   uint32_t arguments[2] = {
       static_cast<uint32_t>(timestamp),
       static_cast<uint32_t>(timestamp >> 32),
   };
-  return impl_->callU32Result(kLifecycleFrame, std::size(arguments), arguments,
-                              next_delay_ms);
+  if (!impl_->callU32Result(kLifecycleFrame, std::size(arguments), arguments,
+                            next_delay_ms))
+    return false;
+  if (impl_->owned_scene && !impl_->owned_scene->present()) {
+    impl_->error = impl_->owned_scene->lastError();
+    return false;
+  }
+  return true;
 }
 
 void WasmApp::shutdown() { impl_->shutdown(); }
@@ -4402,18 +4707,18 @@ bool WasmApp::takeExitRequest() {
 
 void WasmApp::setAudioFocused(bool focused) {
   impl_->audio_focused = focused;
-  if (impl_->child)
-    impl_->child->setAudioFocused(focused);
-  if (impl_->media_service)
-    impl_->media_service->setFocused(focused);
-  if (impl_->services)
-    impl_->services->setAudioFocused(focused);
+  if (impl_->application)
+    impl_->application->setAudioFocused(focused);
 }
 
 const char *WasmApp::lastError() const { return impl_->error.c_str(); }
 
 bool WasmApp::loaded() const {
   return impl_->instance != nullptr && impl_->environment != nullptr;
+}
+
+const std::string &WasmApp::loadedArtifactPath() const {
+  return impl_->loaded_artifact_path;
 }
 
 } // namespace oos::runtime

@@ -3,7 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
+#include "oos/apps/app_manifest.h"
+#include "oos/apps/wasm_artifact.h"
 #include "oos/input/key_input.h"
 
 namespace oos::device {
@@ -23,7 +26,7 @@ namespace oos::runtime {
 class GraphicsHost;
 
 struct NativeAppLaunchOptions {
-  const char *module_path = nullptr;
+  const char *module_base_path = nullptr;
   const char *data_directory = nullptr;
   const char *system_data_root = nullptr;
   apps::AppRepository *app_repository = nullptr;
@@ -33,11 +36,13 @@ struct NativeAppLaunchOptions {
   const char *font_directory = "/opt/oos/share/fonts";
   const char *asset_directory = nullptr;
   const char *module_directory = nullptr;
+  std::vector<apps::AppModule> modules;
   uint32_t stack_size = 512 * 1024;
   uint32_t heap_size = 0;
   int wake_fd = -1;
   uint32_t service_permission_mask = 0;
   bool enforce_service_permissions = false;
+  apps::WasmTargetProfile wasm_target;
 };
 
 class NativeAppManager {
@@ -55,7 +60,7 @@ public:
   NativeAppManager(const NativeAppManager &) = delete;
   NativeAppManager &operator=(const NativeAppManager &) = delete;
 
-  bool load(const char *id, const char *module_path);
+  bool load(const char *id, const char *module_base_path);
   bool load(const char *id, const NativeAppLaunchOptions &options);
   bool activate(const char *id);
   bool remove(const char *id);

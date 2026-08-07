@@ -23,7 +23,9 @@
 #include "oos/device/display.h"
 #include "oos/input/key_input.h"
 #include "oos/resources/boot_splash.h"
+#include "oos/runtime/application_scene.h"
 #include "oos/runtime/application_session_manager.h"
+#include "oos/runtime/js_app.h"
 #include "oos/runtime/wasm_app.h"
 #include "oos/sdk/ui/theme.h"
 #include "oos/ui/system_status.h"
@@ -41,6 +43,8 @@ using oos::input::KeyInputSource;
 using oos::runtime::ApplicationSession;
 using oos::runtime::ApplicationSessionManager;
 using oos::runtime::GraphicsHost;
+using oos::runtime::JsApp;
+using oos::runtime::JsAppOptions;
 using oos::runtime::WasmApp;
 using oos::runtime::WasmAppOptions;
 
@@ -96,46 +100,84 @@ private:
   oos::apps::settings::Settings app_;
 };
 
-struct WasmSessionConfig {
-  std::string module_path;
-  WasmAppOptions options;
+struct PackagedSessionConfig {
+  oos::apps::AppRuntimeKind runtime = oos::apps::AppRuntimeKind::WebAssembly;
+  std::string executable_path;
+  oos::runtime::ApplicationContextOptions context;
+  std::string application_directory;
+  std::string module_directory;
+  std::vector<oos::apps::AppModule> modules;
 };
 
-class WasmSession final : public ApplicationSession {
+class PackagedSession final : public ApplicationSession {
 public:
-  WasmSession(GraphicsHost &graphics, oos::device::Device &device,
-              oos::ui::StatusBarAppearanceController &status_bar,
-              WasmSessionConfig config)
-      : module_path_(std::move(config.module_path)),
-        app_(graphics, device,
-             withStatusBar(std::move(config.options), status_bar)) {}
+  PackagedSession(GraphicsHost &graphics, oos::device::Device &device,
+                  oos::ui::StatusBarAppearanceController &status_bar,
+                  PackagedSessionConfig config)
+      : executable_path_(std::move(config.executable_path)),
+        scene_(graphics, config.context.font_directory),
+        runtime_(config.runtime) {
+    config.context.status_bar = &status_bar;
+    if (runtime_ == oos::apps::AppRuntimeKind::JavaScript) {
+      JsAppOptions options;
+      static_cast<oos::runtime::ApplicationContextOptions &>(options) =
+          std::move(config.context);
+      options.application_directory = std::move(config.application_directory);
+      options.module_directory = std::move(config.module_directory);
+      options.modules = std::move(config.modules);
+      js_ = std::make_unique<JsApp>(scene_, device, std::move(options));
+    } else {
+      WasmAppOptions options;
+      static_cast<oos::runtime::ApplicationContextOptions &>(options) =
+          std::move(config.context);
+      options.module_directory = std::move(config.module_directory);
+      options.modules = std::move(config.modules);
+      wasm_ = std::make_unique<WasmApp>(scene_, device, std::move(options));
+    }
+  }
 
   bool initialize() override {
-    return app_.load(module_path_.c_str()) && app_.initialize();
+    return js_ ? js_->load(executable_path_.c_str()) && js_->initialize()
+               : wasm_->load(executable_path_.c_str()) && wasm_->initialize();
   }
-  void shutdown() override { app_.shutdown(); }
-  void onActivated() override { app_.setAudioFocused(true); }
-  void onDeactivated() override { app_.setAudioFocused(false); }
+  void shutdown() override {
+    if (js_)
+      js_->shutdown();
+    else
+      wasm_->shutdown();
+  }
+  void onActivated() override { setAudioFocused(true); }
+  void onDeactivated() override { setAudioFocused(false); }
   bool dispatchKey(const KeyEvent &event, int64_t monotonic_us) override {
-    return app_.dispatchKey(event, monotonic_us);
+    return js_ ? js_->dispatchKey(event, monotonic_us)
+               : wasm_->dispatchKey(event, monotonic_us);
   }
   bool frame(int64_t monotonic_us, uint32_t &next_delay_ms) override {
-    return app_.render(monotonic_us, next_delay_ms);
+    const bool rendered = js_ ? js_->render(monotonic_us, next_delay_ms)
+                              : wasm_->render(monotonic_us, next_delay_ms);
+    return rendered && scene_.present();
   }
   std::string takeLaunchRequest() override { return {}; }
-  bool takeExitRequest() override { return app_.takeExitRequest(); }
-  const char *lastError() const override { return app_.lastError(); }
-
-private:
-  static WasmAppOptions
-  withStatusBar(WasmAppOptions options,
-                oos::ui::StatusBarAppearanceController &status_bar) {
-    options.status_bar = &status_bar;
-    return options;
+  bool takeExitRequest() override {
+    return js_ ? js_->takeExitRequest() : wasm_->takeExitRequest();
+  }
+  const char *lastError() const override {
+    return js_ ? js_->lastError() : wasm_->lastError();
   }
 
-  std::string module_path_;
-  WasmApp app_;
+private:
+  void setAudioFocused(bool focused) {
+    if (js_)
+      js_->setAudioFocused(focused);
+    else
+      wasm_->setAudioFocused(focused);
+  }
+
+  std::string executable_path_;
+  oos::runtime::ApplicationScene scene_;
+  oos::apps::AppRuntimeKind runtime_;
+  std::unique_ptr<JsApp> js_;
+  std::unique_ptr<WasmApp> wasm_;
 };
 
 volatile std::sig_atomic_t g_stop_requested = 0;
@@ -172,9 +214,9 @@ bool importBundledApp(oos::apps::AppRepository &repository,
   return repository.install(package_path.c_str(), options);
 }
 
-bool prepareWasmSession(oos::apps::AppRepository &repository,
-                        const std::string &app_id, const char *data_root,
-                        WasmSessionConfig &config) {
+bool preparePackagedSession(oos::apps::AppRepository &repository,
+                            const std::string &app_id, const char *data_root,
+                            PackagedSessionConfig &config) {
   oos::apps::AppRecord record;
   if (!repository.resolve(app_id.c_str(), record) &&
       !importBundledApp(repository, app_id.c_str()))
@@ -183,17 +225,20 @@ bool prepareWasmSession(oos::apps::AppRepository &repository,
   if (!repository.prepareLaunch(app_id.c_str(), launch))
     return false;
   config = {};
-  config.module_path = launch.executable_path;
-  config.options.app_id = app_id;
-  config.options.data_directory = launch.data_directory;
-  config.options.system_data_root = data_root;
-  config.options.app_repository = &repository;
-  config.options.asset_directory = launch.asset_directory;
-  config.options.module_directory = launch.module_directory;
-  config.options.service_permission_mask =
+  config.runtime = launch.app.manifest.entry.runtime;
+  config.executable_path = launch.executable_path;
+  config.application_directory = launch.application_directory;
+  config.module_directory = launch.module_directory;
+  config.modules = launch.app.manifest.modules;
+  config.context.app_id = app_id;
+  config.context.data_directory = launch.data_directory;
+  config.context.system_data_root = data_root;
+  config.context.app_repository = &repository;
+  config.context.asset_directory = launch.asset_directory;
+  config.context.service_permission_mask =
       oos::apps::deviceServicePermissionMask(
           launch.app.manifest.requested_permissions);
-  config.options.enforce_service_permissions = true;
+  config.context.enforce_service_permissions = true;
   return true;
 }
 
@@ -282,7 +327,7 @@ void dispatchShellKey(void *data, const KeyEvent &event) {
 void printUsage(const char *program) {
   std::fprintf(stderr,
                "usage: %s [--builtin launcher|settings | --app APP_ID | "
-               "--module APP.wasm|APP.aot]\n"
+               "--module WASM_BASE]\n"
                "       %s --install APPLICATION.zip\n"
                "       %s --list-apps\n",
                program, program, program);
@@ -341,7 +386,6 @@ int run(int argc, char **argv) {
   const char *raw_module = nullptr;
   const char *app_id = nullptr;
   if (argc == 2) {
-    // Keep the original positional module form for existing device diagnostics.
     raw_module = argv[1];
   } else if (argc == 3 && std::strcmp(argv[1], "--module") == 0) {
     raw_module = argv[2];
@@ -361,16 +405,17 @@ int run(int argc, char **argv) {
     return 2;
   }
 
-  WasmSessionConfig initial_wasm;
+  PackagedSessionConfig initial_app;
   if (builtin_id) {
     // Built-in shell applications are separate targets managed by the host.
   } else if (raw_module) {
-    initial_wasm.module_path = raw_module;
-    initial_wasm.options.app_id = "diagnostic";
-    initial_wasm.options.system_data_root = data_root;
-    initial_wasm.options.app_repository = &repository;
+    initial_app.runtime = oos::apps::AppRuntimeKind::WebAssembly;
+    initial_app.executable_path = raw_module;
+    initial_app.context.app_id = "diagnostic";
+    initial_app.context.system_data_root = data_root;
+    initial_app.context.app_repository = &repository;
   } else {
-    if (!prepareWasmSession(repository, app_id, data_root, initial_wasm)) {
+    if (!preparePackagedSession(repository, app_id, data_root, initial_app)) {
       std::fprintf(stderr, "prepare application %s failed: %s\n", app_id,
                    repository.lastError().c_str());
       return 1;
@@ -462,31 +507,31 @@ int run(int argc, char **argv) {
     return 1;
   }
 
-  auto register_wasm = [&](const std::string &id,
-                           const WasmSessionConfig &config) {
-    WasmSessionConfig launch_config = config;
-    launch_config.options.wake_fd = wake_fd;
+  auto register_app = [&](const std::string &id,
+                          const PackagedSessionConfig &config) {
+    PackagedSessionConfig launch_config = config;
+    launch_config.context.wake_fd = wake_fd;
     return sessions.registerFactory(
         id,
         [&, launch_config](GraphicsHost &graphics,
                            oos::ui::StatusBarAppearanceController &status_bar) {
-          return std::make_unique<WasmSession>(graphics, *platform_device,
-                                               status_bar, launch_config);
+          return std::make_unique<PackagedSession>(graphics, *platform_device,
+                                                   status_bar, launch_config);
         });
   };
   auto ensure_registered = [&](const std::string &id) {
     if (sessions.registered(id))
       return true;
-    WasmSessionConfig config;
-    if (!prepareWasmSession(repository, id, data_root, config))
+    PackagedSessionConfig config;
+    if (!preparePackagedSession(repository, id, data_root, config))
       return false;
-    return register_wasm(id, config);
+    return register_app(id, config);
   };
 
   std::string runtime_id = builtin_id   ? builtin_id
                            : raw_module ? "diagnostic"
                                         : app_id;
-  if (!builtin_id && !register_wasm(runtime_id, initial_wasm)) {
+  if (!builtin_id && !register_app(runtime_id, initial_app)) {
     std::fprintf(stderr, "register native application %s failed: %s\n",
                  runtime_id.c_str(), sessions.lastError());
     system_ui.shutdown();
