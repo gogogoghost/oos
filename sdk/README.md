@@ -4,7 +4,7 @@ OOS application interfaces are defined in `sdk/wit/oos.wit`. That versioned WIT
 package is the public contract; applications must not declare WAMR imports or
 export lifecycle symbols by hand.
 
-- `rust/oos-app` runs `wit-bindgen` for the `oos:platform/app@0.1.0` world and
+- `rust/oos-app` runs `wit-bindgen` for the `oos:platform/app@0.2.0` world and
   provides small Rust convenience wrappers.
 - `rust/oos-egui` converts egui textures and meshes into the generated WIT
   graphics records, provides keypad input/system-font integration, and exposes
@@ -14,7 +14,9 @@ export lifecycle symbols by hand.
 
 The world imports runtime, portable graphics, validated batched GLES2, system
 font assets, device discovery, services, and storage, and exports the
-application lifecycle interface. `wit-bindgen` dead-strips unused core-Wasm
+application lifecycle interface. Query `device.get-access` before presenting a
+privileged workflow: hardware capability and the application's permission grant
+are separate facts. `wit-bindgen` dead-strips unused core-Wasm
 imports, so an application pays only for the capabilities it calls.
 
 `oos_app::set_status_bar_style(rgb, dark_icons)` configures the calling

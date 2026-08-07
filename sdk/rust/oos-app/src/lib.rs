@@ -1,4 +1,4 @@
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 pub const MAX_TEXTURE_SIZE: usize = 2_048;
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_VERTICES: usize = 65_535;
@@ -21,6 +21,7 @@ pub use bindings::oos::platform::device_storage::{
     Entry as DeviceStorageEntry, Volume as DeviceStorageVolume, WriteMode as DeviceStorageWriteMode,
 };
 pub use bindings::oos::platform::font_assets::FontRole;
+pub use bindings::oos::platform::device::{AccessState, CapabilityState, Feature};
 pub use bindings::oos::platform::gles::{
     BlendEquation, BlendFactor, BufferUsage, Capabilities as GlesCapabilities,
     Command as GlesCommand, CommandOpcode, CompareFunction, CullFace, FrontFace, Primitive,
@@ -32,6 +33,12 @@ pub use bindings::oos::platform::graphics::{
 pub use bindings::oos::platform::types::ErrorCode;
 
 use bindings::oos::platform::{gles, graphics, runtime, storage};
+
+pub const MAX_SYNCHRONOUS_WAIT_MS: u32 = 1_000;
+
+pub fn feature_access(feature: Feature) -> AccessState {
+    bindings::oos::platform::device::get_access(feature)
+}
 
 pub fn abi_version() -> u32 {
     runtime::abi_version()

@@ -6,6 +6,7 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BUILD_DIR="$ROOT_DIR/build/c-sdk-test"
 mkdir -p "$BUILD_DIR"
 "$ROOT_DIR/scripts/generate-c-sdk.sh" --check
+"$ROOT_DIR/scripts/fetch-ui-frameworks.sh"
 "$ROOT_DIR/scripts/build-c-production-libc-smoke.sh"
 clang -std=c17 -O2 -Werror -Wno-unknown-attributes \
   -I"$ROOT_DIR/sdk/c/generated" \

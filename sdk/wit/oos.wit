@@ -1,4 +1,4 @@
-package oos:platform@0.1.0;
+package oos:platform@0.2.0;
 
 interface types {
   enum error-code {
@@ -378,6 +378,15 @@ interface device {
     validated,
   }
 
+  /// What the calling application may do with a device feature. This is
+  /// intentionally separate from hardware capability: an implemented device
+  /// feature can still be denied by the application's manifest grant.
+  enum access-state {
+    unavailable,
+    denied,
+    granted,
+  }
+
   record descriptor {
     id: string,
     manufacturer: string,
@@ -391,6 +400,7 @@ interface device {
 
   get-descriptor: func() -> descriptor;
   get-capability: func(feature: feature) -> capability-state;
+  get-access: func(feature: feature) -> access-state;
 }
 
 interface audio {
@@ -845,7 +855,10 @@ interface modem {
     requests: list<request-status>,
   }
 
+  /// Includes stable hardware identifiers and requires both
+  /// `mobileconnection` and `mobileconnection:identity`.
   query-snapshot: func(timeout-ms: u32) -> result<snapshot, error-code>;
+  /// Requires `mobileconnection:radio-control` in addition to the modem grant.
   set-radio-power: func(enabled: bool, timeout-ms: u32) -> result<request-status, error-code>;
   last-error: func() -> string;
 }
@@ -941,15 +954,18 @@ interface device-storage {
     last-modified-ms: s64,
   }
 
+  /// Enumeration and reads require the `device-storage:read` grant.
   enumerate-files: func(volume: volume) -> result<list<entry>, error-code>;
   read-file: func(volume: volume, path: string) -> result<list<u8>, error-code>;
+  /// `create` requires `device-storage:create`; `replace` and `append`
+  /// require `device-storage:write`.
   write-file: func(
     volume: volume,
     path: string,
     mode: write-mode,
     bytes: list<u8>,
   ) -> result<_, error-code>;
-  /// Returns true when a file was removed and false when it did not exist.
+  /// Requires `device-storage:write`. Returns true when a file was removed.
   delete-file: func(volume: volume, path: string) -> result<bool, error-code>;
   free-space: func(volume: volume) -> result<u64, error-code>;
   used-space: func(volume: volume) -> result<u64, error-code>;

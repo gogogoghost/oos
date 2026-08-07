@@ -167,7 +167,7 @@ printf '%s\n' \
   "android_api=$ANDROID_API" \
   "native_app_runtime=${WAMR_VERSION}" \
   "native_app_execution=interpreter,aot" \
-  "native_app_interface=oos-wit-0.1.0-core" \
+  "native_app_interface=oos-wit-0.2.0-core" \
   "media_miniaudio=${MINIAUDIO_VERSION}" \
   "media_ffmpeg=${FFMPEG_VERSION}" \
   "media_sonivox=${SONIVOX_VERSION}" \

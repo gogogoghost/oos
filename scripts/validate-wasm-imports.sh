@@ -7,10 +7,19 @@ set -euo pipefail
 }
 
 OBJDUMP=${WASM_OBJDUMP:-wasm-objdump}
-command -v "$OBJDUMP" >/dev/null || {
-  echo "wasm-objdump is required to validate guest imports" >&2
+if command -v "$OBJDUMP" >/dev/null; then
+  imports() {
+    "$OBJDUMP" -x "$1" | sed -n 's/^.* <- //p'
+  }
+elif command -v wasm-tools >/dev/null; then
+  imports() {
+    wasm-tools print "$1" |
+      sed -nE 's/^[[:space:]]*\(import "([^"]+)" "([^"]+)".*/\1.\2/p'
+  }
+else
+  echo "wasm-objdump or wasm-tools is required to validate guest imports" >&2
   exit 1
-}
+fi
 
 allowed_env='^(pthread_(create|join|detach|cancel|self|exit|mutex_init|mutex_lock|mutex_unlock|mutex_destroy|cond_init|cond_wait|cond_timedwait|cond_signal|cond_broadcast|cond_destroy|key_create|setspecific|getspecific|key_delete)|sem_(open|wait|trywait|post|getvalue|unlink|close))$'
 unexpected=0
@@ -25,5 +34,5 @@ while IFS= read -r import; do
   fi
   echo "unexpected Wasm import: $import" >&2
   unexpected=1
-done < <("$OBJDUMP" -x "$1" | sed -n 's/^.* <- //p')
+done < <(imports "$1")
 exit "$unexpected"

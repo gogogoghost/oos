@@ -347,6 +347,15 @@ typedef uint8_t oos_platform_device_capability_state_t;
 #define OOS_PLATFORM_DEVICE_CAPABILITY_STATE_IMPLEMENTED 2
 #define OOS_PLATFORM_DEVICE_CAPABILITY_STATE_VALIDATED 3
 
+// What the calling application may do with a device feature. This is
+// intentionally separate from hardware capability: an implemented device
+// feature can still be denied by the application's manifest grant.
+typedef uint8_t oos_platform_device_access_state_t;
+
+#define OOS_PLATFORM_DEVICE_ACCESS_STATE_UNAVAILABLE 0
+#define OOS_PLATFORM_DEVICE_ACCESS_STATE_DENIED 1
+#define OOS_PLATFORM_DEVICE_ACCESS_STATE_GRANTED 2
+
 typedef struct oos_platform_device_descriptor_t {
   app_string_t   id;
   app_string_t   manufacturer;
@@ -1202,7 +1211,7 @@ typedef struct {
   } val;
 } exports_oos_platform_lifecycle_result_u32_error_code_t;
 
-// Imported Functions from `oos:platform/runtime@0.1.0`
+// Imported Functions from `oos:platform/runtime@0.2.0`
 extern uint32_t oos_platform_runtime_abi_version(void);
 extern uint32_t oos_platform_runtime_wall_clock_minutes(void);
 // Monotonic boot-relative time. Legal from the guest worker.
@@ -1222,7 +1231,7 @@ extern bool oos_platform_runtime_set_surface_mode(oos_platform_runtime_surface_m
 // Requests destruction after the current host or lifecycle call returns.
 extern bool oos_platform_runtime_request_exit(oos_platform_runtime_error_code_t *err);
 
-// Imported Functions from `oos:platform/graphics@0.1.0`
+// Imported Functions from `oos:platform/graphics@0.2.0`
 extern void oos_platform_graphics_surface_size(oos_platform_graphics_size_t *ret);
 // Logical-to-physical scale for GUI coordinates. Draw vertices and clip
 // rectangles submitted to this interface use physical surface pixels.
@@ -1235,7 +1244,7 @@ extern bool oos_platform_graphics_texture_set(uint32_t texture, oos_platform_gra
 extern bool oos_platform_graphics_texture_free(uint32_t texture, oos_platform_graphics_error_code_t *err);
 extern bool oos_platform_graphics_submit(oos_platform_graphics_list_vertex_t *vertices, app_list_u16_t *indices, oos_platform_graphics_list_draw_command_t *commands, uint32_t clear_rgba, oos_platform_graphics_error_code_t *err);
 
-// Imported Functions from `oos:platform/gles@0.1.0`
+// Imported Functions from `oos:platform/gles@0.2.0`
 extern void oos_platform_gles_get_capabilities(oos_platform_gles_capabilities_t *ret);
 extern bool oos_platform_gles_buffer_set(uint32_t buffer, uint32_t size, oos_platform_gles_buffer_usage_t usage, app_list_u8_t *initial_data, oos_platform_gles_error_code_t *err);
 extern bool oos_platform_gles_buffer_write(uint32_t buffer, uint32_t offset, app_list_u8_t *data, oos_platform_gles_error_code_t *err);
@@ -1248,11 +1257,12 @@ extern int32_t oos_platform_gles_attribute_location(uint32_t program, app_string
 extern int32_t oos_platform_gles_uniform_location(uint32_t program, app_string_t *name);
 extern bool oos_platform_gles_submit(oos_platform_gles_list_command_t *commands, app_list_u32_t *data, oos_platform_gles_error_code_t *err);
 
-// Imported Functions from `oos:platform/device@0.1.0`
+// Imported Functions from `oos:platform/device@0.2.0`
 extern void oos_platform_device_get_descriptor(oos_platform_device_descriptor_t *ret);
 extern oos_platform_device_capability_state_t oos_platform_device_get_capability(oos_platform_device_feature_t feature);
+extern oos_platform_device_access_state_t oos_platform_device_get_access(oos_platform_device_feature_t feature);
 
-// Imported Functions from `oos:platform/audio@0.1.0`
+// Imported Functions from `oos:platform/audio@0.2.0`
 extern void oos_platform_audio_supported_formats(oos_platform_audio_list_format_support_t *ret);
 extern void oos_platform_audio_get_pcm_capabilities(oos_platform_audio_pcm_capabilities_t *ret);
 extern void oos_platform_audio_get_source_limits(oos_platform_audio_source_limits_t *ret);
@@ -1284,13 +1294,13 @@ extern bool oos_platform_audio_play_tone(double frequency_hz, uint32_t duration_
 extern bool oos_platform_audio_record_wav(app_string_t *path, uint32_t duration_ms, oos_platform_audio_recording_result_t *ret, oos_platform_audio_error_code_t *err);
 extern void oos_platform_audio_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/camera@0.1.0`
+// Imported Functions from `oos:platform/camera@0.2.0`
 extern bool oos_platform_camera_enumerate(oos_platform_camera_list_info_t *ret, oos_platform_camera_error_code_t *err);
 extern bool oos_platform_camera_set_torch(app_string_t *camera_id, bool enabled, oos_platform_camera_error_code_t *err);
 extern bool oos_platform_camera_capture_jpeg(app_string_t *camera_id, app_string_t *path, int32_t width, int32_t height, bool flash, uint32_t timeout_ms, oos_platform_camera_photo_result_t *ret, oos_platform_camera_error_code_t *err);
 extern void oos_platform_camera_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/power@0.1.0`
+// Imported Functions from `oos:platform/power@0.2.0`
 extern bool oos_platform_power_query_battery(oos_platform_power_battery_snapshot_t *ret, oos_platform_power_error_code_t *err);
 extern bool oos_platform_power_wait_for_battery_event(uint32_t timeout_ms, oos_platform_power_option_battery_snapshot_t *ret, oos_platform_power_error_code_t *err);
 extern bool oos_platform_power_set_interactive(bool interactive, oos_platform_power_error_code_t *err);
@@ -1304,14 +1314,14 @@ extern bool oos_platform_power_suspend(uint32_t graceful_timeout_ms, oos_platfor
 extern bool oos_platform_power_query_flip_state(oos_platform_power_flip_state_t *ret, oos_platform_power_error_code_t *err);
 extern void oos_platform_power_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/vibrator@0.1.0`
+// Imported Functions from `oos:platform/vibrator@0.2.0`
 extern bool oos_platform_vibrator_vibrate(uint32_t duration_ms, oos_platform_vibrator_error_code_t *err);
 extern bool oos_platform_vibrator_stop(oos_platform_vibrator_error_code_t *err);
 extern bool oos_platform_vibrator_supports_amplitude_control(void);
 extern bool oos_platform_vibrator_set_amplitude(uint8_t amplitude, oos_platform_vibrator_error_code_t *err);
 extern void oos_platform_vibrator_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/wifi@0.1.0`
+// Imported Functions from `oos:platform/wifi@0.2.0`
 extern bool oos_platform_wifi_get_status(oos_platform_wifi_status_t *ret, oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_scan(uint32_t wait_ms, oos_platform_wifi_list_access_point_t *ret, oos_platform_wifi_error_code_t *err);
 extern bool oos_platform_wifi_list_networks(oos_platform_wifi_list_network_t *ret, oos_platform_wifi_error_code_t *err);
@@ -1322,13 +1332,13 @@ extern bool oos_platform_wifi_forget(int32_t network_id, oos_platform_wifi_error
 extern bool oos_platform_wifi_save_configuration(oos_platform_wifi_error_code_t *err);
 extern void oos_platform_wifi_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/ip@0.1.0`
+// Imported Functions from `oos:platform/ip@0.2.0`
 extern bool oos_platform_ip_get_status(oos_platform_ip_configuration_t *ret, oos_platform_ip_error_code_t *err);
 extern bool oos_platform_ip_use_dhcp(uint32_t timeout_ms, oos_platform_ip_error_code_t *err);
 extern bool oos_platform_ip_use_static(oos_platform_ip_configuration_t *configuration, oos_platform_ip_error_code_t *err);
 extern void oos_platform_ip_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/bluetooth@0.1.0`
+// Imported Functions from `oos:platform/bluetooth@0.2.0`
 extern bool oos_platform_bluetooth_enable(uint32_t timeout_ms, oos_platform_bluetooth_error_code_t *err);
 extern bool oos_platform_bluetooth_disable(uint32_t timeout_ms, oos_platform_bluetooth_error_code_t *err);
 extern bool oos_platform_bluetooth_classic_scan(uint32_t duration_ms, oos_platform_bluetooth_list_discovered_device_t *ret, oos_platform_bluetooth_error_code_t *err);
@@ -1342,16 +1352,19 @@ extern bool oos_platform_bluetooth_profile_connection_cycle(app_string_t *addres
 extern bool oos_platform_bluetooth_le_connection_cycle(app_string_t *address, uint32_t hold_ms, uint32_t timeout_ms, oos_platform_bluetooth_error_code_t *err);
 extern void oos_platform_bluetooth_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/modem@0.1.0`
+// Imported Functions from `oos:platform/modem@0.2.0`
+// Includes stable hardware identifiers and requires both
+// `mobileconnection` and `mobileconnection:identity`.
 extern bool oos_platform_modem_query_snapshot(uint32_t timeout_ms, oos_platform_modem_snapshot_t *ret, oos_platform_modem_error_code_t *err);
+// Requires `mobileconnection:radio-control` in addition to the modem grant.
 extern bool oos_platform_modem_set_radio_power(bool enabled, uint32_t timeout_ms, oos_platform_modem_request_status_t *ret, oos_platform_modem_error_code_t *err);
 extern void oos_platform_modem_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/codec@0.1.0`
+// Imported Functions from `oos:platform/codec@0.2.0`
 extern bool oos_platform_codec_test_h264_round_trip(int32_t width, int32_t height, int32_t frame_count, uint32_t timeout_ms, oos_platform_codec_round_trip_result_t *ret, oos_platform_codec_error_code_t *err);
 extern void oos_platform_codec_last_error(app_string_t *ret);
 
-// Imported Functions from `oos:platform/storage@0.1.0`
+// Imported Functions from `oos:platform/storage@0.2.0`
 extern bool oos_platform_storage_kv_get(app_string_t *key, app_option_list_u8_t *ret, oos_platform_storage_error_code_t *err);
 extern bool oos_platform_storage_kv_set(app_string_t *key, app_list_u8_t *value, oos_platform_storage_error_code_t *err);
 extern bool oos_platform_storage_kv_delete(app_string_t *key, oos_platform_storage_error_code_t *err);
@@ -1372,27 +1385,30 @@ extern bool oos_platform_storage_statement_column_text(uint32_t statement, uint3
 extern bool oos_platform_storage_statement_column_blob(uint32_t statement, uint32_t column, app_list_u8_t *ret, oos_platform_storage_error_code_t *err);
 extern bool oos_platform_storage_statement_finish(uint32_t statement, oos_platform_storage_error_code_t *err);
 
-// Imported Functions from `oos:platform/device-storage@0.1.0`
+// Imported Functions from `oos:platform/device-storage@0.2.0`
+// Enumeration and reads require the `device-storage:read` grant.
 extern bool oos_platform_device_storage_enumerate_files(oos_platform_device_storage_volume_t volume, oos_platform_device_storage_list_entry_t *ret, oos_platform_device_storage_error_code_t *err);
 extern bool oos_platform_device_storage_read_file(oos_platform_device_storage_volume_t volume, app_string_t *path, app_list_u8_t *ret, oos_platform_device_storage_error_code_t *err);
+// `create` requires `device-storage:create`; `replace` and `append`
+// require `device-storage:write`.
 extern bool oos_platform_device_storage_write_file(oos_platform_device_storage_volume_t volume, app_string_t *path, oos_platform_device_storage_write_mode_t mode, app_list_u8_t *bytes, oos_platform_device_storage_error_code_t *err);
-// Returns true when a file was removed and false when it did not exist.
+// Requires `device-storage:write`. Returns true when a file was removed.
 extern bool oos_platform_device_storage_delete_file(oos_platform_device_storage_volume_t volume, app_string_t *path, bool *ret, oos_platform_device_storage_error_code_t *err);
 extern bool oos_platform_device_storage_free_space(oos_platform_device_storage_volume_t volume, uint64_t *ret, oos_platform_device_storage_error_code_t *err);
 extern bool oos_platform_device_storage_used_space(oos_platform_device_storage_volume_t volume, uint64_t *ret, oos_platform_device_storage_error_code_t *err);
 
-// Imported Functions from `oos:platform/font-assets@0.1.0`
+// Imported Functions from `oos:platform/font-assets@0.2.0`
 extern bool oos_platform_font_assets_load(oos_platform_font_assets_font_role_t role, app_list_u8_t *ret, oos_platform_font_assets_error_code_t *err);
 
-// Imported Functions from `oos:platform/assets@0.1.0`
+// Imported Functions from `oos:platform/assets@0.2.0`
 extern bool oos_platform_assets_open(app_string_t *path, oos_platform_assets_opened_asset_t *ret, oos_platform_assets_error_code_t *err);
 extern bool oos_platform_assets_read(uint32_t handle, uint64_t offset, uint32_t maximum_bytes, app_list_u8_t *ret, oos_platform_assets_error_code_t *err);
 extern bool oos_platform_assets_close(uint32_t handle, oos_platform_assets_error_code_t *err);
 
-// Imported Functions from `oos:platform/system-services@0.1.0`
+// Imported Functions from `oos:platform/system-services@0.2.0`
 extern bool oos_platform_system_services_request(app_string_t *service, app_string_t *operation, app_string_t *payload, app_string_t *ret, oos_platform_system_services_error_code_t *err);
 
-// Imported Functions from `oos:platform/subruntime@0.1.0`
+// Imported Functions from `oos:platform/subruntime@0.2.0`
 extern void oos_platform_subruntime_get_limits(oos_platform_subruntime_limits_t *ret);
 // `module` is a simple name resolved as modules/<name>.aot, then .wasm.
 extern bool oos_platform_subruntime_create(app_string_t *module, uint32_t main_stack_bytes, uint32_t *ret, oos_platform_subruntime_error_code_t *err);
@@ -1405,7 +1421,7 @@ extern bool oos_platform_subruntime_complete(uint32_t result_code, oos_platform_
 extern bool oos_platform_subruntime_destroy(uint32_t handle, oos_platform_subruntime_error_code_t *err);
 extern void oos_platform_subruntime_last_error(app_string_t *ret);
 
-// Exported Functions from `oos:platform/lifecycle@0.1.0`
+// Exported Functions from `oos:platform/lifecycle@0.2.0`
 bool exports_oos_platform_lifecycle_init(exports_oos_platform_lifecycle_error_code_t *err);
 void exports_oos_platform_lifecycle_event(exports_oos_platform_lifecycle_key_event_t *event);
 bool exports_oos_platform_lifecycle_frame(uint64_t monotonic_time_us, uint32_t *ret, exports_oos_platform_lifecycle_error_code_t *err);

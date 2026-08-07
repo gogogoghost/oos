@@ -6,7 +6,7 @@ part of unrelated device backends.
 
 ## Implemented Platform Decisions
 
-- ABI 6 provides worker-safe microsecond monotonic time, millisecond Unix epoch
+- ABI 7 provides worker-safe microsecond monotonic time, millisecond Unix epoch
   time, and a coalescing main-thread wake primitive.
 - Lifecycle `frame` returns the requested delay. The shell waits for the
   earliest application/SystemUI deadline and wakes on input or guest work.

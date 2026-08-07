@@ -31,6 +31,13 @@ fi
 
 build() {
   local compiler=${CC:-clang}
+  if [[ -n ${OOS_WASI_SDK:-} ]]; then
+    compiler="$OOS_WASI_SDK/bin/clang"
+  fi
+  [[ -x "$compiler" ]] || {
+    echo "C guest compiler is unavailable: $compiler" >&2
+    exit 1
+  }
   local object_directory="${OUTPUT}.objects"
   local tlsf_object="$object_directory/tlsf.o"
   mkdir -p "$object_directory"

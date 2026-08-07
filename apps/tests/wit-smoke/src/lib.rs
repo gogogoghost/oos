@@ -207,6 +207,10 @@ fn mocked() {
 }
 
 fn permission_filtered() {
+    assert_eq!(
+        device::get_access(device::Feature::Wifi),
+        device::AccessState::Denied
+    );
     audio::play_tone(440.0, 1, 0.1, audio::Usage::Media).unwrap();
     permission_denied(audio::record_wav("recording.wav", 1));
 
@@ -236,6 +240,36 @@ fn permission_filtered() {
     permission_denied(system_services::request("settings", "get", "{}"));
 }
 
+fn storage_read_only() {
+    let volume = oos_app::DeviceStorageVolume::Internal;
+    assert_eq!(
+        device::get_access(device::Feature::PrimaryDisplay),
+        device::AccessState::Granted
+    );
+    assert_eq!(
+        device::get_access(device::Feature::Wifi),
+        device::AccessState::Denied
+    );
+    oos_app::device_storage::enumerate(volume).unwrap();
+    assert!(oos_app::device_storage::free_space(volume).unwrap() > 0);
+    permission_denied(oos_app::device_storage::write(
+        volume,
+        "wit-smoke/read-only.bin",
+        oos_app::DeviceStorageWriteMode::Create,
+        b"blocked",
+    ));
+    permission_denied(oos_app::device_storage::write(
+        volume,
+        "wit-smoke/read-only.bin",
+        oos_app::DeviceStorageWriteMode::Replace,
+        b"blocked",
+    ));
+    permission_denied(oos_app::device_storage::delete(
+        volume,
+        "wit-smoke/read-only.bin",
+    ));
+}
+
 impl AppLifecycle for App {
     fn init() -> Result<(), ErrorCode> {
         assert_eq!(runtime::abi_version(), oos_app::ABI_VERSION);
@@ -252,6 +286,10 @@ impl AppLifecycle for App {
         let descriptor = device::get_descriptor();
         if descriptor.id == "local-denied" {
             permission_filtered();
+            return Ok(());
+        }
+        if descriptor.id == "local-storage-readonly" {
+            storage_read_only();
             return Ok(());
         }
         if descriptor.id == "local" {

@@ -160,7 +160,8 @@ The first user uses this layout:
 Guests access byte-valued KV and prepared SQLite operations through WIT. Native
 database handles never enter guest memory. User-visible internal storage and
 the first mounted TF card are exposed only through the `device-storage` WIT
-service; application-private storage never accepts arbitrary host paths.
+service. `device-storage:read`, `:create`, and `:write` are independently
+granted; application-private storage never accepts arbitrary host paths.
 
 Signing, process isolation, and SELinux policy remain deferred during hardware
 bring-up. Requested permissions are still stored and enforced at the WIT host

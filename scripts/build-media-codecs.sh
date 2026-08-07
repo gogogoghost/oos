@@ -48,6 +48,9 @@ COMMON=(
 TARGET_ARGS=()
 case "$TARGET" in
   local)
+    # The host test build does not require hand-written x86 assembly. Keep the
+    # codec build reproducible on development machines without nasm.
+    command -v nasm >/dev/null 2>&1 || TARGET_ARGS+=(--disable-x86asm)
     ;;
   nokia-2780-flip|nokia-8110-4g)
     source "$ROOT_DIR/.env"

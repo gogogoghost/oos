@@ -8,7 +8,7 @@ callbacks; background instances retain their isolated WASM/UI state and
 dedicated compositor layer without rendering.
 The host owns display lifecycle, EGL/GLES, HWC, key devices, clocks, and phone
 services. A guest can only reach interfaces in the versioned
-`oos:platform@0.1.0` WIT package.
+`oos:platform@0.2.0` WIT package.
 
 The production SystemUI is a trusted, process-local LVGL component and does
 not allocate a WAMR instance. The egui 0.35 Launcher remains the first SDK
@@ -35,7 +35,7 @@ Every app implements the WIT `lifecycle` interface:
 - `shutdown()`
 
 The generated core-Wasm export names are versioned, for example
-`oos:platform/lifecycle@0.1.0#frame`. Applications use generated bindings and
+`oos:platform/lifecycle@0.2.0#frame`. Applications use generated bindings and
 must not depend on those lowered names directly.
 
 `ApplicationSessionManager` applies the same lifecycle to built-in and WAMR
@@ -96,7 +96,8 @@ activation and cannot leak from a hidden application.
 between status-safe geometry and the complete physical display. The status bar
 is hidden in immersive mode, `graphics.surface-size` changes synchronously, and
 the mode is restored with the resident session. Lifecycle frame delays,
-worker-safe clocks, dynamic media sources, and child runtimes use ABI 6.
+worker-safe clocks, dynamic media sources, child runtimes, explicit access
+discovery, and least-privilege device-storage grants use ABI 7.
 
 The lifecycle result is the next requested frame delay in milliseconds. OOS
 schedules the earliest application/SystemUI deadline, clamps idle waits to one
@@ -140,8 +141,10 @@ instead of inferring support from the phone model or Android API level.
 The separate `device-storage` interface reads and writes user-visible internal
 or removable media. WAMR writes directly from validated guest linear memory;
 reads allocate the Canonical ABI result in guest memory and read file bytes into
-that allocation without an intermediate host byte vector. It is exposed only
-when a granted permission starts with `device-storage:`.
+that allocation without an intermediate host byte vector. Enumeration, reads,
+and space queries require `device-storage:read`; file creation requires
+`device-storage:create`; replacement, append, and deletion require
+`device-storage:write`.
 
 The separate unprivileged `font-assets` interface maps semantic roles to fixed
 platform fonts; it never accepts a path from the Guest.

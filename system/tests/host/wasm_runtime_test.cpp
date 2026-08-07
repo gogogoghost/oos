@@ -527,7 +527,9 @@ int main(int argc, char **argv) {
   const std::vector<std::string> mock_permissions = {
       "audio-capture",         "camera",    "power",
       "wifi-manage",           "bluetooth", "mobileconnection",
-      "device-storage:sdcard", "system"};
+      "mobileconnection:identity", "mobileconnection:radio-control",
+      "device-storage:read",  "device-storage:write",
+      "device-storage:create", "system"};
   mock_launch.service_permission_mask =
       oos::apps::deviceServicePermissionMask(mock_permissions);
   mock_launch.enforce_service_permissions = true;
@@ -550,14 +552,29 @@ int main(int argc, char **argv) {
     return 1;
   }
   denied_smoke.shutdown();
+  MockDevice read_only_device("local-storage-readonly");
+  oos::runtime::NativeAppManager read_only_smoke(graphics, read_only_device,
+                                                  1);
+  oos::runtime::NativeAppLaunchOptions read_only_launch = mock_launch;
+  read_only_launch.service_permission_mask =
+      oos::apps::permissionBit(
+          oos::apps::DeviceServicePermission::DeviceStorageRead);
+  if (!read_only_smoke.load("storage-readonly", read_only_launch) ||
+      !read_only_smoke.activate("storage-readonly") ||
+      !read_only_smoke.render(1'800'000)) {
+    std::fprintf(stderr, "WIT read-only device storage smoke failed: %s\n",
+                 read_only_smoke.lastError());
+    return 1;
+  }
+  read_only_smoke.shutdown();
   std::filesystem::remove_all(storage_root);
   std::printf("WAMR WIT local mock and permission filtering passed\n");
-  return status_bar.updates == 3 &&
+  return status_bar.updates == 4 &&
                  status_bar.appearance ==
                      (oos::ui::StatusBarAppearance{0x123456, true}) &&
                  graphics.frames == 5 && resident_textures == 3 &&
                  graphics.textures.empty() && graphics.texture_updates > 0 &&
-                 graphics.gles_frames == 3
+                 graphics.gles_frames == 4
              ? 0
              : 1;
 }

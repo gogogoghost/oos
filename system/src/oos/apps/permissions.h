@@ -13,8 +13,12 @@ enum class DeviceServicePermission : uint32_t {
   Wifi = 1U << 3,
   Bluetooth = 1U << 4,
   Modem = 1U << 5,
-  DeviceStorage = 1U << 6,
-  System = 1U << 7,
+  DeviceStorageRead = 1U << 6,
+  DeviceStorageWrite = 1U << 7,
+  DeviceStorageCreate = 1U << 8,
+  System = 1U << 9,
+  ModemIdentity = 1U << 10,
+  ModemRadioControl = 1U << 11,
 };
 
 constexpr uint32_t permissionBit(DeviceServicePermission permission) {
@@ -38,11 +42,19 @@ deviceServicePermissionMask(const std::vector<std::string> &permissions) {
     } else if (permission == "mobileconnection" ||
                permission == "mobilenetwork") {
       mask |= permissionBit(DeviceServicePermission::Modem);
-    } else if (permission.compare(0, sizeof("device-storage:") - 1,
-                                  "device-storage:") == 0) {
-      mask |= permissionBit(DeviceServicePermission::DeviceStorage);
+    } else if (permission == "device-storage" ||
+               permission == "device-storage:read") {
+      mask |= permissionBit(DeviceServicePermission::DeviceStorageRead);
+    } else if (permission == "device-storage:write") {
+      mask |= permissionBit(DeviceServicePermission::DeviceStorageWrite);
+    } else if (permission == "device-storage:create") {
+      mask |= permissionBit(DeviceServicePermission::DeviceStorageCreate);
     } else if (permission == "system") {
       mask |= permissionBit(DeviceServicePermission::System);
+    } else if (permission == "mobileconnection:identity") {
+      mask |= permissionBit(DeviceServicePermission::ModemIdentity);
+    } else if (permission == "mobileconnection:radio-control") {
+      mask |= permissionBit(DeviceServicePermission::ModemRadioControl);
     }
   }
   return mask;
